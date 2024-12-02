@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os/exec"
 	"strings"
 )
@@ -21,13 +22,14 @@ func (_ LocalExecutor) Execf(s string, args ...any) ([]string, error) {
 
 func Exec(args ...string) ([]string, error) {
 	name, args := args[0], args[1:]
+	log.Printf("run %s {%s}", name, strings.Join(args, ", "))
 	cmd := exec.Command(name, args...)
-	var out strings.Builder
-	cmd.Stdout = &out
-	if err := cmd.Run(); err != nil {
-		return nil, err
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		output := strings.Join(strings.Split(strings.TrimSpace(string(out)), "\n"), "; ")
+		return nil, fmt.Errorf("running '%s': %w: %s", name, err, output)
 	}
-	return strings.Split(out.String(), "\n"), nil
+	return strings.Split(strings.TrimSpace(string(out)), "\n"), nil
 }
 
 func Execf(s string, args ...any) ([]string, error) {

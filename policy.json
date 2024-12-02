@@ -1,0 +1,19 @@
+{
+  "local": {
+    "hourly": 72,
+    "daily": 90,
+    "weekly": 0,
+    "monthly": 12,
+    "yearly": 1000,
+    "manual": 1000
+  },
+  "remote": {
+    "hourly": 0,
+    "daily": 0,
+    "weekly": 0,
+    "monthly": 12,
+    "yearly": 1000,
+    "manual": 1000
+  }
+}
+

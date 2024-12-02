@@ -17,9 +17,9 @@ func NewRemote(sshKey, sshHost string) *Remote {
 }
 
 func (remote *Remote) Exec(cmd ...string) ([]string, error) {
-	return Exec("ssh", "-i", remote.sshKey, remote.sshHost, fmt.Sprintf("'%s'", strings.Join(cmd, " ")))
+	return Exec("ssh", "-i", remote.sshKey, remote.sshHost, strings.Join(cmd, " "))
 }
 
 func (remote *Remote) Execf(s string, args ...any) ([]string, error) {
-	return Exec("ssh", "-i", remote.sshKey, remote.sshHost, fmt.Sprintf("'%s'", fmt.Sprintf(s, args...)))
+	return Exec("ssh", "-i", remote.sshKey, remote.sshHost, fmt.Sprintf(s, args...))
 }
