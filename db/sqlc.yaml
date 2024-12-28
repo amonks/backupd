@@ -1,11 +1,11 @@
 version: "2"
 sql:
   - engine: "sqlite"
-    queries: "*_queries.sql"
-    schema: "schema.sql"
+    queries: "db_queries_*.sql"
+    schema: "db_schema.sql"
     gen:
       go:
-        package: "main"
+        package: "db"
         out: "."
         omit_unused_structs: true
         emit_result_struct_pointers: true

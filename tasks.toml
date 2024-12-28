@@ -1,10 +1,35 @@
 [[task]]
-  id = "sqlc"
-  type = "short"
-  watch = ["sqlc.yaml", "*.sql"]
-  cmd = "go run github.com/sqlc-dev/sqlc/cmd/sqlc@latest generate"
-
-[[task]]
   id = "dev"
   type = "long"
-  dependencies = ["sqlc"]
+  dependencies = ["db/sqlc", "go-generate"]
+
+[[task]]
+  id = "go-generate"
+  type = "short"
+  cmd = "go generate ./..."
+  watch = ["model/state.go"]
+
+[[task]]
+  id = "test"
+  type = "short"
+  dependencies = ["vulncheck", "staticcheck", "go-test", "vet"]
+
+[[task]]
+  id = "vulncheck"
+  type = "short"
+  cmd = "go run golang.org/x/vuln/cmd/govulncheck ./..."
+
+[[task]]
+  id = "staticcheck"
+  type = "short"
+  cmd = "go run honnef.co/go/tools/cmd/staticcheck ./..."
+
+[[task]]
+  id = "vet"
+  type = "short"
+  cmd = "go vet ./..."
+
+[[task]]
+  id = "go-test"
+  type = "short"
+  cmd = "go test ./..."

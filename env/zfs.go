@@ -1,9 +1,11 @@
-package main
+package env
 
 import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"monks.co/backupbot/model"
 )
 
 type Executor interface {
@@ -63,7 +65,14 @@ func (zfs *ZFS) GetDatasets() ([]string, error) {
 	return out, nil
 }
 
-func (zfs *ZFS) GetLatestSnapshot(dataset string) (*Snapshot, error) {
+func (zfs *ZFS) CreateDataset(dataset string) error {
+	if _, err := zfs.x.Execf("zfs create -p %s", zfs.WithPrefix(dataset)); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (zfs *ZFS) GetLatestSnapshot(dataset string) (*model.Snapshot, error) {
 	snaps, err := zfs.GetSnapshots(dataset)
 	if err != nil {
 		return nil, err
@@ -85,19 +94,19 @@ func (zfs *ZFS) DestroySnapshotRange(dataset, first, last string) error {
 	return nil
 }
 
-func (zfs *ZFS) GetSnapshots(dataset string) ([]*Snapshot, error) {
+func (zfs *ZFS) GetSnapshots(dataset string) ([]*model.Snapshot, error) {
 	rows, err := zfs.x.Execf("zfs list -H -p -t snapshot -o name,creation -s creation -d 1 %s", zfs.WithPrefix(dataset))
 	if err != nil {
 		return nil, fmt.Errorf("zfs list: %w", err)
 	}
-	snaps := make([]*Snapshot, len(rows))
+	snaps := make([]*model.Snapshot, len(rows))
 	for i, row := range rows {
 		cols := strings.Split(row, "\t")
 		seconds, err := strconv.ParseInt(cols[1], 10, 64)
 		if err != nil {
 			return nil, fmt.Errorf("parsing timestamp '%s' (from '%s')", cols[0], cols[1])
 		}
-		snaps[i] = &Snapshot{
+		snaps[i] = &model.Snapshot{
 			Dataset:   dataset,
 			Name:      strings.SplitN(cols[0], "@", 2)[1],
 			CreatedAt: seconds,
@@ -106,18 +115,3 @@ func (zfs *ZFS) GetSnapshots(dataset string) ([]*Snapshot, error) {
 	return snaps, nil
 }
 
-func (zfs *ZFS) SendRangeTo(dest *ZFS, dataset, firstsnap, lastsnap string) error {
-	return nil
-}
-
-func (zfs *ZFS) SendResumeTo(dest *ZFS, dataset, resumeToken string) error {
-	return nil
-}
-
-func (zfs *ZFS) SendSnapshotTo(dest *ZFS, dataset, snap string) error {
-	return nil
-}
-
-func (zfs *ZFS) SendNewSnapshotTo(dest *ZFS, dataset, snap string) error {
-	return nil
-}
