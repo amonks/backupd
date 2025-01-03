@@ -1,4 +1,4 @@
-module monks.co/backupbot
+module monks.co/backupd
 
 go 1.23.3
 

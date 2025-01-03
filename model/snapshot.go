@@ -6,7 +6,7 @@ import (
 )
 
 type Snapshot struct {
-	Dataset   string
+	Dataset   DatasetName
 	Name      string
 	CreatedAt int64
 }
@@ -20,7 +20,7 @@ func (snap *Snapshot) Eq(other *Snapshot) bool {
 }
 
 func (snap *Snapshot) String() string {
-	return snap.Dataset + "@" + snap.Name
+	return snap.Dataset.Path() + "@" + snap.Name
 }
 
 func (snap *Snapshot) Type() string {

@@ -15,6 +15,10 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+const (
+	throughputLogInterval = 60 * time.Second
+)
+
 var _ Executor = LocalExecutor{}
 var Local = LocalExecutor{}
 
@@ -93,7 +97,7 @@ func Pipe(ctx context.Context, from, to *exec.Cmd) error {
 	ctx, cancel := context.WithCancel(ctx)
 
 	g.Go(func() error {
-		ticker := time.NewTicker(30 * time.Second)
+		ticker := time.NewTicker(throughputLogInterval)
 		defer ticker.Stop()
 
 		for {

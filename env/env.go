@@ -6,6 +6,7 @@ import (
 	"os/exec"
 
 	"monks.co/backupbot/db"
+	"monks.co/backupbot/model"
 )
 
 type Env struct {
@@ -25,7 +26,7 @@ func New(db *db.DB) *Env {
 	}
 }
 
-func (env *Env) Resume(ctx context.Context, dataset, token string) error {
+func (env *Env) Resume(ctx context.Context, dataset model.DatasetName, token string) error {
 	remote := env.Remote.x.(*Remote)
 
 	send := exec.Command("zfs", "send", "--raw", "-t", token)
@@ -39,7 +40,7 @@ func (env *Env) Resume(ctx context.Context, dataset, token string) error {
 	return nil
 }
 
-func (env *Env) TransferInitialSnapshot(ctx context.Context, dataset, snapshot string) error {
+func (env *Env) TransferInitialSnapshot(ctx context.Context, dataset model.DatasetName, snapshot string) error {
 	remote := env.Remote.x.(*Remote)
 
 	send := exec.Command("zfs", "send", "--raw",
@@ -54,7 +55,7 @@ func (env *Env) TransferInitialSnapshot(ctx context.Context, dataset, snapshot s
 	return nil
 }
 
-func (env *Env) TransferSnapshot(ctx context.Context, dataset, snapshot string) error {
+func (env *Env) TransferSnapshot(ctx context.Context, dataset model.DatasetName, snapshot string) error {
 	remote := env.Remote.x.(*Remote)
 
 	send := exec.Command("zfs", "send", "--raw",
@@ -69,7 +70,7 @@ func (env *Env) TransferSnapshot(ctx context.Context, dataset, snapshot string) 
 	return nil
 }
 
-func (env *Env) TransferSnapshotIncrementally(ctx context.Context, dataset, from, to string) error {
+func (env *Env) TransferSnapshotIncrementally(ctx context.Context, dataset model.DatasetName, from, to string) error {
 	remote := env.Remote.x.(*Remote)
 
 	send := exec.Command("zfs", "send", "--raw", "-i",

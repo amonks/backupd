@@ -3,11 +3,11 @@ package model
 import "fmt"
 
 type Model struct {
-	Datasets map[string]*Dataset
+	Datasets map[DatasetName]*Dataset
 }
 
 func (model *Model) Clone() *Model {
-	datasets := make(map[string]*Dataset, len(model.Datasets))
+	datasets := make(map[DatasetName]*Dataset, len(model.Datasets))
 	for _, dataset := range model.Datasets {
 		datasets[dataset.Name] = dataset.Clone()
 	}

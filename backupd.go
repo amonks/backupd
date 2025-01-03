@@ -72,12 +72,12 @@ func (b *Backupd) RefreshState(ctx context.Context) error {
 }
 
 // Plan prints the plan for the given dataset
-func (b *Backupd) Plan(ctx context.Context, dataset string) error {
+func (b *Backupd) Plan(ctx context.Context, dataset model.DatasetName) error {
 	initial, has := b.state.Datasets[dataset]
 	if !has {
 		var datasets []string
 		for k := range b.state.Datasets {
-			datasets = append(datasets, k)
+			datasets = append(datasets, k.Path())
 		}
 		return fmt.Errorf("no such dataset '%s'; must be one of {%s}",
 			dataset, strings.Join(datasets, ", "))
@@ -107,9 +107,15 @@ func (b *Backupd) Plan(ctx context.Context, dataset string) error {
 	return nil
 }
 
-func (b *Backupd) handleIncompleteTransfer(ctx context.Context, dataset string) error {
+func (b *Backupd) handleIncompleteTransfer(ctx context.Context, dataset model.DatasetName) error {
+	if b.state.Datasets[dataset].Remote == nil {
+		return nil
+	}
+
 	token, err := b.env.Remote.GetResumeToken(dataset)
-	if err != nil {
+	if err != nil && strings.Contains(err.Error(), "dataset does not exist") {
+		return nil
+	} else if err != nil {
 		return err
 	}
 	if token == "" {
@@ -124,7 +130,7 @@ func (b *Backupd) handleIncompleteTransfer(ctx context.Context, dataset string) 
 }
 
 // Go executes the plan for the given dataset.
-func (b *Backupd) Go(ctx context.Context, dataset string) error {
+func (b *Backupd) Go(ctx context.Context, dataset model.DatasetName) error {
 	if err := b.handleIncompleteTransfer(ctx, dataset); err != nil {
 		return err
 	}

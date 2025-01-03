@@ -5,12 +5,11 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"log"
-	"os"
 	"os/user"
 	"sort"
 
 	"monks.co/backupbot/db"
+	"monks.co/backupbot/model"
 )
 
 func main() {
@@ -28,22 +27,8 @@ func run() error {
 
 	ctx := NewSigctx()
 
-	flag.CommandLine.Init("backup", flag.ContinueOnError)
-	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "\nmanage zfs backups\n\n")
-		fmt.Fprintf(os.Stderr, "  backup [flags] $cmd <defined by cmd...>\n\n")
-		fmt.Fprintf(os.Stderr, "flags:\n")
-		flag.PrintDefaults()
-		fmt.Fprintf(os.Stderr, "  $cmd {...}\n")
-		fmt.Fprintf(os.Stderr, "  \twhich command to run\n")
-		fmt.Fprintf(os.Stderr, "  \trun `flag $cmd -help` for more details about each command.\n")
-	}
-	datasetArg := flag.CommandLine.String("dataset", "", "specify dataset; all by default")
-	if err := flag.CommandLine.Parse(os.Args[1:]); err != nil && !errors.Is(err, flag.ErrHelp) {
-		return fmt.Errorf("flag parse error: %w", err)
-	} else if err != nil {
-		return nil
-	}
+	datasetArg := flag.String("dataset", "", "specify dataset; all by default")
+	flag.Parse()
 
 	db, err := db.Open("/data/tank/backup-info/backup-info.db")
 	if err != nil {
@@ -58,30 +43,34 @@ func run() error {
 
 	args := flag.Args()
 	if len(args) < 1 {
-		flag.CommandLine.Parse([]string{"-help"})
 		return nil
 	}
 	cmd := args[0]
-
-	var datasets []string
-	if *datasetArg != "" {
-		datasets = []string{*datasetArg}
-	} else {
-		for ds := range b.state.Datasets {
-			datasets = append(datasets, ds)
-		}
-		sort.Slice(datasets, func(i, j int) bool {
-			return len(datasets[i]) < len(datasets[j])
-		})
-	}
 
 	switch cmd {
 	case "refresh":
 		return b.RefreshState(ctx)
 	}
 
+	var datasets []model.DatasetName
+	switch *datasetArg {
+	case "":
+		return fmt.Errorf("must specify dataset flag or 'all'")
+	case "root":
+		datasets = []model.DatasetName{""}
+	case "all":
+		for ds := range b.state.Datasets {
+			datasets = append(datasets, ds)
+		}
+		sort.Slice(datasets, func(i, j int) bool {
+			return len(datasets[i]) < len(datasets[j])
+		})
+	default:
+		datasets = []model.DatasetName{model.DatasetName(*datasetArg)}
+	}
+
 	for _, ds := range datasets {
-		log.Printf("==== %s ====", ds)
+		fmt.Printf("======== %s ========\n", ds)
 
 		switch cmd {
 		case "plan":
@@ -95,6 +84,8 @@ func run() error {
 		default:
 			return fmt.Errorf("unsupported cmd '%s'", cmd)
 		}
+
+		fmt.Println()
 	}
 	return nil
 }

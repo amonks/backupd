@@ -2,6 +2,21 @@ package model
 
 import "fmt"
 
+type DatasetName string
+
+func (dn DatasetName) String() string {
+	switch dn {
+	case "":
+		return "<root>"
+	default:
+		return string(dn)
+	}
+}
+
+func (dn DatasetName) Path() string {
+	return string(dn)
+}
+
 //go:generate go run golang.org/x/tools/cmd/stringer -type Location
 type Location int
 
@@ -12,7 +27,7 @@ const (
 )
 
 type Dataset struct {
-	Name          string
+	Name          DatasetName
 	Local, Remote *Snapshots
 }
 

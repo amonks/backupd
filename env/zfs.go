@@ -22,15 +22,15 @@ func NewZFS(prefix string, x Executor) *ZFS {
 	return &ZFS{prefix, x}
 }
 
-func (zfs *ZFS) WithPrefix(dataset string) string {
-	return zfs.prefix + dataset
+func (zfs *ZFS) WithPrefix(dataset model.DatasetName) string {
+	return zfs.prefix + dataset.Path()
 }
 
-func (zfs *ZFS) WithoutPrefix(dataset string) string {
-	return strings.TrimPrefix(dataset, zfs.prefix)
+func (zfs *ZFS) WithoutPrefix(path string) model.DatasetName {
+	return model.DatasetName(strings.TrimPrefix(path, zfs.prefix))
 }
 
-func (zfs *ZFS) GetResumeToken(dataset string) (string, error) {
+func (zfs *ZFS) GetResumeToken(dataset model.DatasetName) (string, error) {
 	out, err := zfs.x.Execf("zfs list -H -o receive_resume_token -S name -d 0 %s", zfs.WithPrefix(dataset))
 	if err != nil {
 		return "", fmt.Errorf("zfs list: %w\n%s", err, strings.Join(out, "\n"))
@@ -44,7 +44,7 @@ func (zfs *ZFS) GetResumeToken(dataset string) (string, error) {
 	return value, nil
 }
 
-func (zfs *ZFS) AbortResumable(dataset string) error {
+func (zfs *ZFS) AbortResumable(dataset model.DatasetName) error {
 	_, err := zfs.x.Execf("zfs receive -A %s", zfs.WithPrefix(dataset))
 	if err != nil {
 		return err
@@ -53,26 +53,26 @@ func (zfs *ZFS) AbortResumable(dataset string) error {
 	return nil
 }
 
-func (zfs *ZFS) GetDatasets() ([]string, error) {
+func (zfs *ZFS) GetDatasets() ([]model.DatasetName, error) {
 	datasets, err := zfs.x.Execf("zfs list -H -t filesystem -o name -d 1000 %s", zfs.prefix)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]string, len(datasets))
+	out := make([]model.DatasetName, len(datasets))
 	for i, d := range datasets {
 		out[i] = zfs.WithoutPrefix(d)
 	}
 	return out, nil
 }
 
-func (zfs *ZFS) CreateDataset(dataset string) error {
+func (zfs *ZFS) CreateDataset(dataset model.DatasetName) error {
 	if _, err := zfs.x.Execf("zfs create -p %s", zfs.WithPrefix(dataset)); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (zfs *ZFS) GetLatestSnapshot(dataset string) (*model.Snapshot, error) {
+func (zfs *ZFS) GetLatestSnapshot(dataset model.DatasetName) (*model.Snapshot, error) {
 	snaps, err := zfs.GetSnapshots(dataset)
 	if err != nil {
 		return nil, err
@@ -80,21 +80,21 @@ func (zfs *ZFS) GetLatestSnapshot(dataset string) (*model.Snapshot, error) {
 	return snaps[len(snaps)-1], nil
 }
 
-func (zfs *ZFS) DestroySnapshot(dataset, snapshot string) error {
+func (zfs *ZFS) DestroySnapshot(dataset model.DatasetName, snapshot string) error {
 	if _, err := zfs.x.Execf("zfs destroy %s@%s", zfs.WithPrefix(dataset), snapshot); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (zfs *ZFS) DestroySnapshotRange(dataset, first, last string) error {
+func (zfs *ZFS) DestroySnapshotRange(dataset model.DatasetName, first, last string) error {
 	if _, err := zfs.x.Execf("zfs destroy %s@%s%%%s", zfs.WithPrefix(dataset), first, last); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (zfs *ZFS) GetSnapshots(dataset string) ([]*model.Snapshot, error) {
+func (zfs *ZFS) GetSnapshots(dataset  model.DatasetName) ([]*model.Snapshot, error) {
 	rows, err := zfs.x.Execf("zfs list -H -p -t snapshot -o name,creation -s creation -d 1 %s", zfs.WithPrefix(dataset))
 	if err != nil {
 		return nil, fmt.Errorf("zfs list: %w", err)
@@ -114,4 +114,3 @@ func (zfs *ZFS) GetSnapshots(dataset string) ([]*model.Snapshot, error) {
 	}
 	return snaps, nil
 }
-

@@ -44,9 +44,9 @@ func (db *DB) GetModel(ctx context.Context) (*model.Model, error) {
 	if err != nil {
 		return nil, err
 	}
-	datasets := make(map[string]*model.Dataset, len(names))
+	datasets := make(map[model.DatasetName]*model.Dataset, len(names))
 	for _, name := range names {
-		dataset, err := db.getDatasetModel(ctx, name)
+		dataset, err := db.getDatasetModel(ctx, model.DatasetName(name))
 		if err != nil {
 			return nil, err
 		}
@@ -58,8 +58,8 @@ func (db *DB) GetModel(ctx context.Context) (*model.Model, error) {
 	return model, nil
 }
 
-func (db *DB) getDatasetModel(ctx context.Context, dataset string) (*model.Dataset, error) {
-	snaps, err := db.q.GetAllSnapshots(ctx, dataset)
+func (db *DB) getDatasetModel(ctx context.Context, dataset model.DatasetName) (*model.Dataset, error) {
+	snaps, err := db.q.GetAllSnapshots(ctx, dataset.Path())
 	if err != nil {
 		return nil, err
 	}
@@ -81,13 +81,13 @@ func (db *DB) getDatasetModel(ctx context.Context, dataset string) (*model.Datas
 	}
 
 	return &model.Dataset{
-		Name:   dataset,
+		Name:   model.DatasetName(dataset),
 		Local:  local,
 		Remote: remote,
 	}, nil
 }
 
-func (db *DB) ObserveDatasets(ctx context.Context, location model.Location, datasets []string, observedAt time.Time) error {
+func (db *DB) ObserveDatasets(ctx context.Context, location model.Location, datasets []model.DatasetName, observedAt time.Time) error {
 	switch location {
 	case model.Local, model.Remote:
 	default:
@@ -105,7 +105,7 @@ func (db *DB) ObserveDatasets(ctx context.Context, location model.Location, data
 	case model.Local:
 		for _, dataset := range datasets {
 			if _, err := q.ObserveLocalDataset(ctx, ObserveLocalDatasetParams{
-				Name:            dataset,
+				Name:            dataset.Path(),
 				IsOnLocal:       True(),
 				LocalObservedAt: Int64(observedAt.Unix()),
 			}); err != nil {
@@ -119,7 +119,7 @@ func (db *DB) ObserveDatasets(ctx context.Context, location model.Location, data
 	case model.Remote:
 		for _, dataset := range datasets {
 			if _, err := q.ObserveRemoteDataset(ctx, ObserveRemoteDatasetParams{
-				Name:             dataset,
+				Name:             dataset.Path(),
 				IsOnRemote:       True(),
 				RemoteObservedAt: Int64(observedAt.Unix()),
 			}); err != nil {
@@ -137,7 +137,7 @@ func (db *DB) ObserveDatasets(ctx context.Context, location model.Location, data
 	return tx.Commit()
 }
 
-func (db *DB) ObserveSnapshots(ctx context.Context, location model.Location, dataset string, snapshots []*model.Snapshot, observedAt time.Time) error {
+func (db *DB) ObserveSnapshots(ctx context.Context, location model.Location, dataset model.DatasetName, snapshots []*model.Snapshot, observedAt time.Time) error {
 	switch location {
 	case model.Local, model.Remote:
 	default:
@@ -155,7 +155,7 @@ func (db *DB) ObserveSnapshots(ctx context.Context, location model.Location, dat
 	case model.Local:
 		for _, snap := range snapshots {
 			if _, err := q.ObserveLocalSnapshot(ctx, ObserveLocalSnapshotParams{
-				Dataset:         dataset,
+				Dataset:         dataset.Path(),
 				Name:            snap.Name,
 				CreatedAt:       snap.CreatedAt,
 				IsOnLocal:       True(),
@@ -165,7 +165,7 @@ func (db *DB) ObserveSnapshots(ctx context.Context, location model.Location, dat
 			}
 		}
 		if err := q.RemoveOlderLocalSnapshots(ctx, RemoveOlderLocalSnapshotsParams{
-			Dataset:         dataset,
+			Dataset:         dataset.Path(),
 			LocalObservedAt: Int64(observedAt.Unix()),
 		}); err != nil {
 			return err
@@ -174,7 +174,7 @@ func (db *DB) ObserveSnapshots(ctx context.Context, location model.Location, dat
 	case model.Remote:
 		for _, snap := range snapshots {
 			if _, err := q.ObserveRemoteSnapshot(ctx, ObserveRemoteSnapshotParams{
-				Dataset:          dataset,
+				Dataset:          dataset.Path(),
 				Name:             snap.Name,
 				CreatedAt:        snap.CreatedAt,
 				IsOnRemote:       True(),
@@ -184,7 +184,7 @@ func (db *DB) ObserveSnapshots(ctx context.Context, location model.Location, dat
 			}
 		}
 		if err := q.RemoveOlderRemoteSnapshots(ctx, RemoveOlderRemoteSnapshotsParams{
-			Dataset:          dataset,
+			Dataset:          dataset.Path(),
 			RemoteObservedAt: Int64(observedAt.Unix()),
 		}); err != nil {
 			return err
@@ -208,7 +208,7 @@ func (db *DB) RemoveSnapshot(ctx context.Context, location model.Location, snaps
 	switch location {
 	case model.Local:
 		if _, err := db.q.ObserveLocalSnapshot(ctx, ObserveLocalSnapshotParams{
-			Dataset:         snapshot.Dataset,
+			Dataset:         snapshot.Dataset.Path(),
 			Name:            snapshot.Name,
 			CreatedAt:       snapshot.CreatedAt,
 			IsOnLocal:       False(),
@@ -219,7 +219,7 @@ func (db *DB) RemoveSnapshot(ctx context.Context, location model.Location, snaps
 
 	case model.Remote:
 		if _, err := db.q.ObserveRemoteSnapshot(ctx, ObserveRemoteSnapshotParams{
-			Dataset:          snapshot.Dataset,
+			Dataset:          snapshot.Dataset.Path(),
 			Name:             snapshot.Name,
 			CreatedAt:        snapshot.CreatedAt,
 			IsOnRemote:       False(),
@@ -239,7 +239,7 @@ func (db *DB) RemoveSnapshotRange(ctx context.Context, location model.Location, 
 	case model.Local:
 		if err := db.q.DestroyLocalSnapshotRange(ctx, DestroyLocalSnapshotRangeParams{
 			LocalObservedAt: Int64(time.Now().Unix()),
-			Dataset:         start.Dataset,
+			Dataset:         start.Dataset.Path(),
 			CreatedAt:       start.CreatedAt,
 			CreatedAt_2:     end.CreatedAt,
 		}); err != nil {
@@ -249,7 +249,7 @@ func (db *DB) RemoveSnapshotRange(ctx context.Context, location model.Location, 
 	case model.Remote:
 		if err := db.q.DestroyRemoteSnapshotRange(ctx, DestroyRemoteSnapshotRangeParams{
 			RemoteObservedAt: Int64(time.Now().Unix()),
-			Dataset:          start.Dataset,
+			Dataset:          start.Dataset.Path(),
 			CreatedAt:        start.CreatedAt,
 			CreatedAt_2:      end.CreatedAt,
 		}); err != nil {
@@ -262,7 +262,7 @@ func (db *DB) RemoveSnapshotRange(ctx context.Context, location model.Location, 
 
 func (db *DB) TransferSnapshot(ctx context.Context, snapshot *model.Snapshot) error {
 	if _, err := db.q.ObserveRemoteSnapshot(ctx, ObserveRemoteSnapshotParams{
-		Dataset:          snapshot.Dataset,
+		Dataset:          snapshot.Dataset.Path(),
 		Name:             snapshot.Name,
 		CreatedAt:        snapshot.CreatedAt,
 		IsOnRemote:       True(),
