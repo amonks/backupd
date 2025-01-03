@@ -8,8 +8,8 @@ import (
 	"os/user"
 	"sort"
 
-	"monks.co/backupbot/db"
-	"monks.co/backupbot/model"
+	"monks.co/backupd/db"
+	"monks.co/backupd/model"
 )
 
 func main() {

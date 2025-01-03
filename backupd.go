@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"monks.co/backupbot/db"
-	"monks.co/backupbot/env"
-	"monks.co/backupbot/model"
+	"monks.co/backupd/db"
+	"monks.co/backupd/env"
+	"monks.co/backupd/model"
 )
 
 type Backupd struct {

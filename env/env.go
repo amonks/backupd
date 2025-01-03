@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os/exec"
 
-	"monks.co/backupbot/db"
-	"monks.co/backupbot/model"
+	"monks.co/backupd/db"
+	"monks.co/backupd/model"
 )
 
 type Env struct {

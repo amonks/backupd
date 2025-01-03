@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"monks.co/backupbot/model"
+	"monks.co/backupd/model"
 )
 
 type Executor interface {

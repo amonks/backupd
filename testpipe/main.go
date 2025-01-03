@@ -4,7 +4,7 @@ import (
 	"context"
 	"os/exec"
 
-	"monks.co/backupbot/env"
+	"monks.co/backupd/env"
 )
 
 func main() {

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"monks.co/backupbot/model"
+	"monks.co/backupd/model"
 )
 
 func (db *DB) Record(ctx context.Context, op model.Operation) error {
