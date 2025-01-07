@@ -20,18 +20,28 @@ const (
 )
 
 var _ Executor = LocalExecutor{}
+
+// Local is a global singleton instance of LocalExecutor.
 var Local = LocalExecutor{}
 
+// A LocalExecutor implements the Executor interface by executing commands on
+// the local machine.
 type LocalExecutor struct{}
 
+// Exec runs the given command, returning its stdout and stderr as a combined
+// slice of lines.
 func (LocalExecutor) Exec(args ...string) ([]string, error) {
 	return Exec(args...)
 }
 
+// Execf runs the given command, returning its stdout and stderr as a combined
+// slice of lines.
 func (LocalExecutor) Execf(s string, args ...any) ([]string, error) {
 	return Execf(s, args...)
 }
 
+// Exec runs the given command, returning its stdout and stderr as a combined
+// slice of lines.
 func Exec(args ...string) ([]string, error) {
 	name, args := args[0], args[1:]
 	var arglog []string
@@ -52,14 +62,11 @@ func Exec(args ...string) ([]string, error) {
 	return strings.Split(strings.TrimSpace(string(out)), "\n"), nil
 }
 
+// Execf runs the given command, returning its stdout and stderr as a combined
+// slice of lines.
 func Execf(s string, args ...any) ([]string, error) {
 	return Exec(strings.Fields(fmt.Sprintf(s, args...))...)
 }
-
-// Fix the context cancelation stuff here.
-// - When either command errors, cancel the other commands and the throughput
-// logging routine.
-// - When both commands have succeeded, cancel the throughput logging routine.
 
 // Pipe runs `from` and `to`, with `from`'s stdout piped into `to`'s stdin.
 // It's expected that this is a long running process, taking hours or more.
@@ -81,10 +88,13 @@ func Pipe(ctx context.Context, from, to *exec.Cmd) error {
 	to.Stdout = &toOutput
 	to.Stderr = &toOutput
 
+	// Start the `to` command.
 	if err := to.Start(); err != nil {
 		return fmt.Errorf("failed to start 'to' command: %w", err)
 	}
 
+	// Start the `from` command. If we fail to start it, kill the `to`
+	// command, too.
 	if err := from.Start(); err != nil {
 		pr.Close()
 		pw.Close()
@@ -96,6 +106,7 @@ func Pipe(ctx context.Context, from, to *exec.Cmd) error {
 	g, ctx := errgroup.WithContext(ctx)
 	ctx, cancel := context.WithCancel(ctx)
 
+	// Log every $interval until the context is canceled.
 	g.Go(func() error {
 		ticker := time.NewTicker(throughputLogInterval)
 		defer ticker.Stop()
@@ -111,6 +122,9 @@ func Pipe(ctx context.Context, from, to *exec.Cmd) error {
 		}
 	})
 
+	// Wait for the `from` command. If it errors, return that error to the
+	// errgroup. If the context is canceled, kill the command before
+	// returning to the errgroup.
 	g.Go(func() error {
 		c := make(chan error)
 		go func() { c <- from.Wait() }()
@@ -120,14 +134,24 @@ func Pipe(ctx context.Context, from, to *exec.Cmd) error {
 			if err != nil {
 				return fmt.Errorf("'from' command error: %w", err)
 			}
+
+			// I think we don't need to cancel the context here,
+			// because this pipe closure will cause the `to` command
+			// to terminate, which, in turn, will cancel the
+			// context.
 			pr.Close()
+
 			return nil
+
 		case <-ctx.Done():
 			from.Process.Kill()
 			return ctx.Err()
 		}
 	})
 
+	// Wait for the `to` command. If it errors, return that error to the
+	// errgroup. If the context is canceled, kill the command before
+	// returning to the errgroup.
 	g.Go(func() error {
 		c := make(chan error)
 		go func() { c <- to.Wait() }()
@@ -137,17 +161,25 @@ func Pipe(ctx context.Context, from, to *exec.Cmd) error {
 			if err != nil {
 				return fmt.Errorf("'to' command error: %w\n%s", err, toOutput.String())
 			}
+
 			cancel()
+
 			return nil
+
 		case <-ctx.Done():
 			to.Process.Kill()
 			return ctx.Err()
 		}
 	})
 
+	// Wait for the errgroup.
 	if err := g.Wait(); err != nil {
+
+		// XXX: is this necessary? If the errgroup ended, shouldn't
+		// the processes have already died?
 		from.Process.Kill()
 		to.Process.Kill()
+
 		return fmt.Errorf("process error: %w", err)
 	}
 
@@ -157,6 +189,7 @@ func Pipe(ctx context.Context, from, to *exec.Cmd) error {
 // ThroughputStat stores throughput statistics over various intervals.
 type ThroughputStat struct {
 	mu         sync.Mutex
+	startedAt  time.Time
 	totalBytes int64
 	dataPoints []dataPoint
 }
@@ -169,7 +202,7 @@ type dataPoint struct {
 
 // NewThroughputStat initializes a new ThroughputStat.
 func NewThroughputStat() *ThroughputStat {
-	return &ThroughputStat{}
+	return &ThroughputStat{startedAt: time.Now()}
 }
 
 func (s *ThroughputStat) Write(bs []byte) (int, error) {
@@ -227,23 +260,12 @@ func (s *ThroughputStat) Log() {
 		}
 	}
 
-	getElapsedSeconds := func(firstTimestamp *time.Time, windowSeconds int64) int64 {
-		if firstTimestamp == nil {
-			return windowSeconds // No data points in the window, default to full window size
-		}
+	minuteElapsedSeconds := getElapsedSeconds(&now, firstMinuteTimestamp, 60)
+	tenMinuteElapsedSeconds := getElapsedSeconds(&now, firstTenMinuteTimestamp, 600)
+	hourElapsedSeconds := getElapsedSeconds(&now, firstHourTimestamp, 3600)
 
-		elapsed := now.Sub(*firstTimestamp).Seconds()
-		if elapsed > float64(windowSeconds) {
-			return windowSeconds
-		}
-		return int64(elapsed)
-	}
-
-	minuteElapsedSeconds := getElapsedSeconds(firstMinuteTimestamp, 60)
-	tenMinuteElapsedSeconds := getElapsedSeconds(firstTenMinuteTimestamp, 600)
-	hourElapsedSeconds := getElapsedSeconds(firstHourTimestamp, 3600)
-
-	log.Printf("Throughput - Total: %s, Last minute: %s/sec, 10 mins: %s/sec, hour: %s/sec",
+	log.Printf("%s - Total: %s, Last minute: %s/sec, 10 mins: %s/sec, hour: %s/sec",
+		now.Sub(s.startedAt),
 		humanize.Bytes(uint64(s.totalBytes)),
 		printThroughput(minuteBytes, minuteElapsedSeconds),
 		printThroughput(tenMinuteBytes, tenMinuteElapsedSeconds),
@@ -251,9 +273,49 @@ func (s *ThroughputStat) Log() {
 	)
 }
 
+// printThroughput calculates and returns the human-readable network throughput given
+// the amount of data transferred in bytes and the duration of the transfer in seconds.
+// If the duration is zero, it returns the humanized byte size directly to avoid division by zero.
+//
+// Parameters:
+//   - bytes: The total number of bytes transferred.
+//   - durationSeconds: The time in seconds over which the data transfer took place.
+//
+// Returns:
+//   - A string representing the human-readable throughput (e.g., "10 MB/s") or the human-readable
+//     size if the duration is zero.
 func printThroughput(bytes, durationSeconds int64) string {
 	if durationSeconds == 0 {
 		return humanize.Bytes(uint64(bytes))
 	}
 	return humanize.Bytes(uint64(float64(bytes) / float64(durationSeconds)))
+}
+
+// getElapsedSeconds calculates the number of seconds elapsed between the given
+// 'firstTimestamp' and 'now'. If 'firstTimestamp' is nil, the function will
+// return the provided 'windowSeconds', indicating that no data points exist
+// within the window, thus defaulting to the full window size. If the elapsed
+// time exceeds 'windowSeconds', the function returns 'windowSeconds'.
+// Otherwise, it returns the actual elapsed time in seconds.
+//
+// Parameters:
+//   - now: A pointer to a time.Time object representing the current time.
+//   - firstTimestamp: A pointer to a time.Time object representing the starting
+//     point of the time interval. If this value is nil, it signifies that no
+//     relevant timestamp is available.
+//   - windowSeconds: An int64 representing the maximum window size in seconds.
+//
+// Returns:
+//   - An int64 representing the number of seconds elapsed or the full window
+//     size, whichever is smaller.
+func getElapsedSeconds(now, firstTimestamp *time.Time, windowSeconds int64) int64 {
+	if firstTimestamp == nil {
+		return windowSeconds // No data points in the window, default to full window size
+	}
+
+	elapsed := now.Sub(*firstTimestamp).Seconds()
+	if elapsed > float64(windowSeconds) {
+		return windowSeconds
+	}
+	return int64(elapsed)
 }
