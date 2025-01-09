@@ -1,7 +1,0 @@
-[[task]]
-  id = "sqlc"
-  type = "short"
-  watch = ["sqlc.yaml", "*.sql"]
-  cmd = "go run github.com/sqlc-dev/sqlc/cmd/sqlc@latest generate"
-
-

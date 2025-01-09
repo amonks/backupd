@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os/exec"
 
-	"monks.co/backupd/db"
 	"monks.co/backupd/model"
 )
 
@@ -13,7 +12,7 @@ type Env struct {
 	Local, Remote *ZFS
 }
 
-func New(db *db.DB) *Env {
+func New() *Env {
 	return &Env{
 		Local: NewZFS("data/tank", Local),
 		Remote: NewZFS(
@@ -33,7 +32,7 @@ func (env *Env) Resume(ctx context.Context, dataset model.DatasetName, token str
 	recv := exec.Command("ssh", "-i", remote.sshKey, remote.sshHost,
 		fmt.Sprintf("zfs receive -s %s", env.Remote.WithPrefix(dataset)))
 
-	if err := Pipe(ctx, send, recv); err != nil {
+	if err := Pipe(ctx, dataset.Path(), send, recv); err != nil {
 		return err
 	}
 
@@ -48,7 +47,7 @@ func (env *Env) TransferInitialSnapshot(ctx context.Context, dataset model.Datas
 	recv := exec.Command("ssh", "-i", remote.sshKey, remote.sshHost,
 		fmt.Sprintf("zfs receive -s %s", env.Remote.WithPrefix(dataset)))
 
-	if err := Pipe(ctx, send, recv); err != nil {
+	if err := Pipe(ctx, dataset.Path(), send, recv); err != nil {
 		return err
 	}
 
@@ -63,7 +62,7 @@ func (env *Env) TransferSnapshot(ctx context.Context, dataset model.DatasetName,
 	recv := exec.Command("ssh", "-i", remote.sshKey, remote.sshHost,
 		fmt.Sprintf("zfs receive -s -F %s", env.Remote.WithPrefix(dataset)))
 
-	if err := Pipe(ctx, send, recv); err != nil {
+	if err := Pipe(ctx, dataset.Path(), send, recv); err != nil {
 		return err
 	}
 
@@ -79,7 +78,7 @@ func (env *Env) TransferSnapshotIncrementally(ctx context.Context, dataset model
 	recv := exec.Command("ssh", "-i", remote.sshKey, remote.sshHost,
 		fmt.Sprintf("zfs receive -s -F %s", env.Remote.WithPrefix(dataset)))
 
-	if err := Pipe(ctx, send, recv); err != nil {
+	if err := Pipe(ctx, dataset.Path(), send, recv); err != nil {
 		return err
 	}
 

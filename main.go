@@ -8,7 +8,6 @@ import (
 	"os/user"
 	"sort"
 
-	"monks.co/backupd/db"
 	"monks.co/backupd/model"
 )
 
@@ -30,43 +29,40 @@ func run() error {
 	datasetArg := flag.String("dataset", "", "specify dataset; all by default")
 	flag.Parse()
 
-	db, err := db.Open("/data/tank/backup-info/backup-info.db")
-	if err != nil {
-		return fmt.Errorf("opening backup info db: %w", err)
-	}
-	defer db.Close()
-
-	b := New(db)
-	if err := b.LoadState(ctx); err != nil {
-		return err
-	}
-
 	args := flag.Args()
 	if len(args) < 1 {
 		return nil
 	}
 	cmd := args[0]
 
-	switch cmd {
-	case "refresh":
-		return b.RefreshState(ctx)
-	}
+	b := New()
 
 	var datasets []model.DatasetName
 	switch *datasetArg {
-	case "":
-		return fmt.Errorf("must specify dataset flag or 'all'")
-	case "root":
-		datasets = []model.DatasetName{""}
-	case "all":
-		for ds := range b.state.Datasets {
-			datasets = append(datasets, ds)
+	case "all", "":
+		if err := b.RefreshState(ctx); err != nil {
+			return err
 		}
+
+		datasets = b.state.ListDatasets()
 		sort.Slice(datasets, func(i, j int) bool {
 			return len(datasets[i]) < len(datasets[j])
 		})
+
+	case "root":
+		if err := b.RefreshDataset(ctx, ""); err != nil {
+			return err
+		}
+
+		datasets = []model.DatasetName{""}
+
 	default:
-		datasets = []model.DatasetName{model.DatasetName(*datasetArg)}
+		dataset := model.DatasetName(*datasetArg)
+		if err := b.RefreshDataset(ctx, dataset); err != nil {
+			return err
+		}
+
+		datasets = []model.DatasetName{dataset}
 	}
 
 	for _, ds := range datasets {

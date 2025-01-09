@@ -1,24 +1,62 @@
 package model
 
-import "fmt"
+import (
+	"sync"
+)
 
 type Model struct {
-	Datasets map[DatasetName]*Dataset
+	datasets map[DatasetName]*Dataset
+	mu       sync.RWMutex
 }
 
-func (model *Model) Clone() *Model {
-	datasets := make(map[DatasetName]*Dataset, len(model.Datasets))
-	for _, dataset := range model.Datasets {
-		datasets[dataset.Name] = dataset.Clone()
+func New() *Model {
+	return &Model{
+		datasets: make(map[DatasetName]*Dataset),
 	}
-	return &Model{datasets}
 }
 
-func (model *Model) String() string {
-	local, remote := 0, 0
-	for _, dataset := range model.Datasets {
-		local += dataset.Local.Len()
-		remote += dataset.Remote.Len()
+func (model *Model) GetDataset(name DatasetName) *Dataset {
+	model.mu.RLock()
+	defer model.mu.RUnlock()
+
+	return model.datasets[name]
+}
+
+func (model *Model) ListDatasets() []DatasetName {
+	model.mu.RLock()
+	defer model.mu.RUnlock()
+
+	var names []DatasetName
+	for name := range model.datasets {
+		names = append(names, name)
 	}
-	return fmt.Sprintf("<%d datasets, %dL, %dR>", len(model.Datasets), local, remote)
+
+	return names
+}
+
+func (model *Model) ReplaceDataset(name DatasetName, dataset *Dataset) {
+	model.mu.Lock()
+	defer model.mu.Unlock()
+
+	model.datasets[name] = dataset
+}
+
+func (model *Model) AddLocalDataset(name DatasetName, snapshots []*Snapshot) {
+	if _, has := model.datasets[name]; !has {
+		model.datasets[name] = &Dataset{
+			Name: name,
+		}
+	}
+
+	model.datasets[name].Local = NewSnapshots(snapshots...)
+}
+
+func (model *Model) AddRemoteDataset(name DatasetName, snapshots []*Snapshot) {
+	if _, has := model.datasets[name]; !has {
+		model.datasets[name] = &Dataset{
+			Name: name,
+		}
+	}
+
+	model.datasets[name].Remote = NewSnapshots(snapshots...)
 }

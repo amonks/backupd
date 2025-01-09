@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"monks.co/backupd/db"
 	"monks.co/backupd/env"
 	"monks.co/backupd/model"
 )
@@ -15,73 +14,78 @@ import (
 type Backupd struct {
 	state *model.Model
 	env   *env.Env
-	db    *db.DB
 }
 
-func New(db *db.DB) *Backupd {
-	return &Backupd{db: db, env: env.New(db)}
-}
-
-func (b *Backupd) LoadState(ctx context.Context) error {
-	model, err := b.db.GetModel(ctx)
-	if err != nil {
-		return err
-	}
-	b.state = model
-	return nil
+func New() *Backupd {
+	return &Backupd{env: env.New()}
 }
 
 func (b *Backupd) RefreshState(ctx context.Context) error {
+	b.state = model.New()
+
 	localDatasets, err := b.env.Local.GetDatasets()
 	if err != nil {
 		return err
 	}
-	if err := b.db.ObserveDatasets(ctx, model.Local, localDatasets, time.Now()); err != nil {
-		return err
+	for _, dataset := range localDatasets {
+		snapshots, err := b.env.Local.GetSnapshots(dataset)
+		if err != nil {
+			return err
+		}
+
+		b.state.AddLocalDataset(dataset, snapshots)
 	}
 
 	remoteDatasets, err := b.env.Remote.GetDatasets()
 	if err != nil {
 		return err
 	}
-	if err := b.db.ObserveDatasets(ctx, model.Remote, remoteDatasets, time.Now()); err != nil {
-		return err
-	}
-
-	for _, dataset := range localDatasets {
-		snapshots, err := b.env.Local.GetSnapshots(dataset)
-		if err != nil {
-			return err
-		}
-		if err := b.db.ObserveSnapshots(ctx, model.Local, dataset, snapshots, time.Now()); err != nil {
-			return err
-		}
-	}
-
 	for _, dataset := range remoteDatasets {
 		snapshots, err := b.env.Remote.GetSnapshots(dataset)
 		if err != nil {
 			return err
 		}
-		if err := b.db.ObserveSnapshots(ctx, model.Remote, dataset, snapshots, time.Now()); err != nil {
-			return err
-		}
+
+		b.state.AddRemoteDataset(dataset, snapshots)
 	}
+
+	return nil
+}
+
+func (b *Backupd) RefreshDataset(ctx context.Context, dataset model.DatasetName) error {
+	if b.state == nil {
+		b.state = model.New()
+	}
+
+	localSnapshots, err := b.env.Local.GetSnapshots(dataset)
+	if err != nil {
+		return err
+	}
+	b.state.AddLocalDataset(dataset, localSnapshots)
+
+	remoteSnapshots, err := b.env.Remote.GetSnapshots(dataset)
+	if err != nil {
+		return err
+	}
+	b.state.AddRemoteDataset(dataset, remoteSnapshots)
 
 	return nil
 }
 
 // Plan prints the plan for the given dataset
 func (b *Backupd) Plan(ctx context.Context, dataset model.DatasetName) error {
-	initial, has := b.state.Datasets[dataset]
-	if !has {
-		var datasets []string
-		for k := range b.state.Datasets {
-			datasets = append(datasets, k.Path())
+	initial := b.state.GetDataset(dataset)
+
+	if initial == nil {
+		names := b.state.ListDatasets()
+		paths := make([]string, len(names))
+		for i, name := range names {
+			paths[i] = name.Path()
 		}
 		return fmt.Errorf("no such dataset '%s'; must be one of {%s}",
-			dataset, strings.Join(datasets, ", "))
+			dataset, strings.Join(paths, ", "))
 	}
+
 	goal := initial.Goal()
 	plan, err := initial.Plan(goal)
 	if err != nil {
@@ -108,7 +112,7 @@ func (b *Backupd) Plan(ctx context.Context, dataset model.DatasetName) error {
 }
 
 func (b *Backupd) handleIncompleteTransfer(ctx context.Context, dataset model.DatasetName) error {
-	if b.state.Datasets[dataset].Remote == nil {
+	if b.state.GetDataset(dataset).Remote == nil {
 		return nil
 	}
 
@@ -122,7 +126,13 @@ func (b *Backupd) handleIncompleteTransfer(ctx context.Context, dataset model.Da
 		return nil
 	}
 
-	if err := b.env.Resume(ctx, dataset, token); err != nil {
+resume:
+	if err := b.env.Resume(ctx, dataset, token); err != nil && strings.Contains(err.Error(), "contains partially-complete state") {
+		if err := b.env.Remote.AbortResumable(dataset); err != nil {
+			return err
+		}
+		goto resume
+	} else if err != nil {
 		return err
 	}
 
@@ -135,7 +145,7 @@ func (b *Backupd) Go(ctx context.Context, dataset model.DatasetName) error {
 		return err
 	}
 
-	ds := b.state.Datasets[dataset]
+	ds := b.state.GetDataset(dataset)
 
 	goal := ds.Goal()
 	plan, err := ds.Plan(goal)
@@ -150,8 +160,8 @@ func (b *Backupd) Go(ctx context.Context, dataset model.DatasetName) error {
 	for _, op := range plan {
 		log.Printf("Applying op '%s'", op)
 
-		log.Printf("-- Updating in-memory state")
-		newState, err := op.Apply(b.state.Datasets[dataset])
+		log.Printf("-- Ensuring in-memory state supports this update...")
+		newState, err := op.Apply(b.state.GetDataset(dataset))
 		if err != nil {
 			return fmt.Errorf("applying op '%s' to in-memory state: %w", op, err)
 		}
@@ -175,11 +185,8 @@ func (b *Backupd) Go(ctx context.Context, dataset model.DatasetName) error {
 			}
 		}
 
-		log.Printf("-- Updating state database...")
-		b.state.Datasets[dataset] = newState
-		if err := b.db.Record(ctx, op); err != nil {
-			return fmt.Errorf("applying op '%s' to db state: %w", op, err)
-		}
+		log.Printf("-- Updating in-memory state...")
+		b.state.ReplaceDataset(dataset, newState)
 
 		log.Printf("-- Done.")
 	}

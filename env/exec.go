@@ -73,10 +73,10 @@ func Execf(s string, args ...any) ([]string, error) {
 // The process can be canceled gracefully using the passed-in context.
 // While the process runs, we log details each minute about the throughput of
 // the pipe.
-func Pipe(ctx context.Context, from, to *exec.Cmd) error {
+func Pipe(ctx context.Context, label string, from, to *exec.Cmd) error {
 	log.Printf("%s | %s", strings.Join(from.Args, " "), strings.Join(to.Args, " "))
 
-	throughputStat := NewThroughputStat()
+	throughputStat := NewThroughputStat(label)
 	defer throughputStat.Log()
 
 	pw, pr := io.Pipe()
@@ -189,6 +189,7 @@ func Pipe(ctx context.Context, from, to *exec.Cmd) error {
 // ThroughputStat stores throughput statistics over various intervals.
 type ThroughputStat struct {
 	mu         sync.Mutex
+	label      string
 	startedAt  time.Time
 	totalBytes int64
 	dataPoints []dataPoint
@@ -201,8 +202,8 @@ type dataPoint struct {
 }
 
 // NewThroughputStat initializes a new ThroughputStat.
-func NewThroughputStat() *ThroughputStat {
-	return &ThroughputStat{startedAt: time.Now()}
+func NewThroughputStat(label string) *ThroughputStat {
+	return &ThroughputStat{startedAt: time.Now(), label: label}
 }
 
 func (s *ThroughputStat) Write(bs []byte) (int, error) {
@@ -264,8 +265,8 @@ func (s *ThroughputStat) Log() {
 	tenMinuteElapsedSeconds := getElapsedSeconds(&now, firstTenMinuteTimestamp, 600)
 	hourElapsedSeconds := getElapsedSeconds(&now, firstHourTimestamp, 3600)
 
-	log.Printf("%s - Total: %s, Last minute: %s/sec, 10 mins: %s/sec, hour: %s/sec",
-		now.Sub(s.startedAt),
+	log.Printf("%s %s - Total: %s, Last minute: %s/sec, 10 mins: %s/sec, hour: %s/sec",
+		s.label, now.Sub(s.startedAt),
 		humanize.Bytes(uint64(s.totalBytes)),
 		printThroughput(minuteBytes, minuteElapsedSeconds),
 		printThroughput(tenMinuteBytes, tenMinuteElapsedSeconds),
