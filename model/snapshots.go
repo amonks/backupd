@@ -27,8 +27,18 @@ func NewSnapshots(snapshots ...*Snapshot) *Snapshots {
 	return snaps
 }
 
+func (snaps *Snapshots) String() string {
+	if snaps == nil {
+		return "<no snaps>"
+	}
+	return fmt.Sprintf("%d → %s", snaps.Len(), snaps.tail.val.Name)
+}
+
 func (snaps *Snapshots) All() iter.Seq[*Snapshot] {
 	return func(yield func(*Snapshot) bool) {
+		if snaps == nil {
+			return
+		}
 		node := snaps.head
 		if node == nil {
 			return
@@ -47,6 +57,9 @@ func (snaps *Snapshots) All() iter.Seq[*Snapshot] {
 
 func (snaps *Snapshots) AllDesc() iter.Seq[*Snapshot] {
 	return func(yield func(*Snapshot) bool) {
+		if snaps == nil {
+			return
+		}
 		node := snaps.tail
 		if node == nil {
 			return
@@ -148,17 +161,26 @@ func (snaps *Snapshots) Del(snap *Snapshot) {
 }
 
 func (snaps *Snapshots) Has(snap *Snapshot) bool {
+	if snaps == nil {
+		return false
+	}
 	_, exists := snaps.nodes[snap.ID()]
 	return exists
 }
 
 func (snaps *Snapshots) Len() int {
+	if snaps == nil {
+		return 0
+	}
 	return len(snaps.nodes)
 }
 
 // Oldest returns the oldest Snapshot.
 // It returns nil if there are no snapshots.
 func (snaps *Snapshots) Oldest() *Snapshot {
+	if snaps == nil {
+		return nil
+	}
 	if snaps.head == nil {
 		return nil
 	}
@@ -168,16 +190,13 @@ func (snaps *Snapshots) Oldest() *Snapshot {
 // Newest returns the newest Snapshot.
 // It returns nil if there are no snapshots.
 func (snaps *Snapshots) Newest() *Snapshot {
+	if snaps == nil {
+		return nil
+	}
 	if snaps.tail == nil {
 		return nil
 	}
 	return snaps.tail.val
-}
-
-func (snaps *Snapshots) Print() {
-	for snap := range snaps.All() {
-		fmt.Println(snap)
-	}
 }
 
 func (snapshots *Snapshots) MatchingPolicy(policy map[string]int) *Snapshots {
@@ -248,6 +267,9 @@ func (snaps *Snapshots) GroupByAdjacency(subset *Snapshots) []*Snapshots {
 }
 
 func (snaps *Snapshots) Clone() *Snapshots {
+	if snaps == nil {
+		return nil
+	}
 	out := NewSnapshots()
 	for snap := range snaps.All() {
 		out.Add(snap)

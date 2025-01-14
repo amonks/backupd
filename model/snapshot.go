@@ -3,6 +3,7 @@ package model
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 type Snapshot struct {
@@ -17,6 +18,10 @@ func (snap *Snapshot) ID() string {
 
 func (snap *Snapshot) Eq(other *Snapshot) bool {
 	return snap.ID() == other.ID()
+}
+
+func (snap *Snapshot) Time() time.Time {
+	return time.Unix(snap.CreatedAt, 0)
 }
 
 func (snap *Snapshot) String() string {

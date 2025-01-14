@@ -5,12 +5,13 @@ import (
 	"strconv"
 	"strings"
 
+	"monks.co/backupd/logger"
 	"monks.co/backupd/model"
 )
 
 type Executor interface {
-	Exec(cmd ...string) ([]string, error)
-	Execf(cmd string, args ...any) ([]string, error)
+	Exec(logger logger.Logger, cmd ...string) ([]string, error)
+	Execf(logger logger.Logger, cmd string, args ...any) ([]string, error)
 }
 
 type ZFS struct {
@@ -30,8 +31,8 @@ func (zfs *ZFS) WithoutPrefix(path string) model.DatasetName {
 	return model.DatasetName(strings.TrimPrefix(path, zfs.prefix))
 }
 
-func (zfs *ZFS) GetResumeToken(dataset model.DatasetName) (string, error) {
-	out, err := zfs.x.Execf("zfs list -H -o receive_resume_token -S name -d 0 %s", zfs.WithPrefix(dataset))
+func (zfs *ZFS) GetResumeToken(logger logger.Logger, dataset model.DatasetName) (string, error) {
+	out, err := zfs.x.Execf(logger, "zfs list -H -o receive_resume_token -S name -d 0 %s", zfs.WithPrefix(dataset))
 	if err != nil {
 		return "", fmt.Errorf("zfs list: %w\n%s", err, strings.Join(out, "\n"))
 	}
@@ -44,8 +45,8 @@ func (zfs *ZFS) GetResumeToken(dataset model.DatasetName) (string, error) {
 	return value, nil
 }
 
-func (zfs *ZFS) AbortResumable(dataset model.DatasetName) error {
-	_, err := zfs.x.Execf("zfs receive -A %s", zfs.WithPrefix(dataset))
+func (zfs *ZFS) AbortResumable(logger logger.Logger, dataset model.DatasetName) error {
+	_, err := zfs.x.Execf(logger, "zfs receive -A %s", zfs.WithPrefix(dataset))
 	if err != nil {
 		return err
 	}
@@ -53,8 +54,8 @@ func (zfs *ZFS) AbortResumable(dataset model.DatasetName) error {
 	return nil
 }
 
-func (zfs *ZFS) GetDatasets() ([]model.DatasetName, error) {
-	datasets, err := zfs.x.Execf("zfs list -H -t filesystem -o name -d 1000 %s", zfs.prefix)
+func (zfs *ZFS) GetDatasets(logger logger.Logger) ([]model.DatasetName, error) {
+	datasets, err := zfs.x.Execf(logger, "zfs list -H -t filesystem -o name -d 1000 %s", zfs.prefix)
 	if err != nil {
 		return nil, err
 	}
@@ -65,37 +66,37 @@ func (zfs *ZFS) GetDatasets() ([]model.DatasetName, error) {
 	return out, nil
 }
 
-func (zfs *ZFS) CreateDataset(dataset model.DatasetName) error {
-	if _, err := zfs.x.Execf("zfs create -p %s", zfs.WithPrefix(dataset)); err != nil {
+func (zfs *ZFS) CreateDataset(logger logger.Logger, dataset model.DatasetName) error {
+	if _, err := zfs.x.Execf(logger, "zfs create -p %s", zfs.WithPrefix(dataset)); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (zfs *ZFS) GetLatestSnapshot(dataset model.DatasetName) (*model.Snapshot, error) {
-	snaps, err := zfs.GetSnapshots(dataset)
+func (zfs *ZFS) GetLatestSnapshot(logger logger.Logger, dataset model.DatasetName) (*model.Snapshot, error) {
+	snaps, err := zfs.GetSnapshots(logger, dataset)
 	if err != nil {
 		return nil, err
 	}
 	return snaps[len(snaps)-1], nil
 }
 
-func (zfs *ZFS) DestroySnapshot(dataset model.DatasetName, snapshot string) error {
-	if _, err := zfs.x.Execf("zfs destroy %s@%s", zfs.WithPrefix(dataset), snapshot); err != nil {
+func (zfs *ZFS) DestroySnapshot(logger logger.Logger, dataset model.DatasetName, snapshot string) error {
+	if _, err := zfs.x.Execf(logger, "zfs destroy %s@%s", zfs.WithPrefix(dataset), snapshot); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (zfs *ZFS) DestroySnapshotRange(dataset model.DatasetName, first, last string) error {
-	if _, err := zfs.x.Execf("zfs destroy %s@%s%%%s", zfs.WithPrefix(dataset), first, last); err != nil {
+func (zfs *ZFS) DestroySnapshotRange(logger logger.Logger, dataset model.DatasetName, first, last string) error {
+	if _, err := zfs.x.Execf(logger, "zfs destroy %s@%s%%%s", zfs.WithPrefix(dataset), first, last); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (zfs *ZFS) GetSnapshots(dataset  model.DatasetName) ([]*model.Snapshot, error) {
-	rows, err := zfs.x.Execf("zfs list -H -p -t snapshot -o name,creation -s creation -d 1 %s", zfs.WithPrefix(dataset))
+func (zfs *ZFS) GetSnapshots(logger logger.Logger, dataset model.DatasetName) ([]*model.Snapshot, error) {
+	rows, err := zfs.x.Execf(logger, "zfs list -H -p -t snapshot -o name,creation -s creation -d 1 %s", zfs.WithPrefix(dataset))
 	if err != nil {
 		return nil, fmt.Errorf("zfs list: %w", err)
 	}

@@ -4,10 +4,11 @@ import (
 	"context"
 	"fmt"
 
+	"monks.co/backupd/logger"
 	"monks.co/backupd/model"
 )
 
-func (env *Env) Apply(ctx context.Context, op model.Operation) error {
+func (env *Env) Apply(ctx context.Context, logger logger.Logger, op model.Operation) error {
 	switch op := op.(type) {
 
 	case *model.SnapshotDeletion:
@@ -20,7 +21,7 @@ func (env *Env) Apply(ctx context.Context, op model.Operation) error {
 		default:
 			return fmt.Errorf("invalid location '%s'", op.Location)
 		}
-		if err := target.DestroySnapshot(op.Snapshot.Dataset, op.Snapshot.Name); err != nil {
+		if err := target.DestroySnapshot(logger, op.Snapshot.Dataset, op.Snapshot.Name); err != nil {
 			return err
 		}
 		return nil
@@ -35,25 +36,25 @@ func (env *Env) Apply(ctx context.Context, op model.Operation) error {
 		default:
 			return fmt.Errorf("invalid location '%s'", op.Location)
 		}
-		if err := target.DestroySnapshotRange(op.Start.Dataset, op.Start.Name, op.End.Name); err != nil {
+		if err := target.DestroySnapshotRange(logger, op.Start.Dataset, op.Start.Name, op.End.Name); err != nil {
 			return err
 		}
 		return nil
 
 	case *model.InitialSnapshotTransfer:
-		if err := env.TransferInitialSnapshot(ctx, op.Snapshot.Dataset, op.Snapshot.Name); err != nil {
+		if err := env.TransferInitialSnapshot(ctx, logger, op.Snapshot.Dataset, op.Snapshot.Name); err != nil {
 			return err
 		}
 		return nil
 
 	case *model.SnapshotTransfer:
-		if err := env.TransferSnapshot(ctx, op.Snapshot.Dataset, op.Snapshot.Name); err != nil {
+		if err := env.TransferSnapshot(ctx, logger, op.Snapshot.Dataset, op.Snapshot.Name); err != nil {
 			return err
 		}
 		return nil
 
 	case *model.SnapshotRangeTransfer:
-		if err := env.TransferSnapshotIncrementally(ctx, op.Start.Dataset, op.Start.Name, op.End.Name); err != nil {
+		if err := env.TransferSnapshotIncrementally(ctx, logger, op.Start.Dataset, op.Start.Name, op.End.Name); err != nil {
 			return err
 		}
 		return nil

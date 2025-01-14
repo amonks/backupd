@@ -1,13 +1,13 @@
 [[task]]
   id = "dev"
   type = "long"
-  dependencies = ["db/sqlc", "go-generate"]
+  dependencies = ["templ"]
 
 [[task]]
-  id = "go-generate"
+  id = "templ"
   type = "short"
-  cmd = "go generate ./..."
-  watch = ["model/state.go"]
+  watch = ["*.templ"]
+  cmd = "go run github.com/a-h/templ/cmd/templ generate ."
 
 [[task]]
   id = "test"

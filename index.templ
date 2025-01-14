@@ -1,0 +1,54 @@
+package main
+
+import (
+	"fmt"
+	"monks.co/backupd/model"
+	"monks.co/backupd/progress"
+	"time"
+)
+
+templ index(state *model.Model, progress progress.Value) {
+	<!DOCTYPE html>
+	<html>
+		<head>
+			<title>backupd</title>
+			<style>
+				td {
+					padding: .2em 2em;
+				}
+			</style>
+		</head>
+		<body>
+			<table>
+				<thead>
+					<tr>
+						<th>dataset</th>
+						<th>staleness</th>
+						<th>local</th>
+						<th>remote</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, ds := range state.ListDatasets() {
+						<tr>
+							<td>{ ds.Path() }</td>
+							<td>{ fmt.Sprintf("%s", state.Datasets[ds].Staleness().Truncate(time.Minute)) }</td>
+							<td><code>{ state.Datasets[ds].Local.String() }</code></td>
+							<td><code>{ state.Datasets[ds].Remote.String() }</code></td>
+						</tr>
+					}
+				</tbody>
+			</table>
+			for ds, logs := range progress {
+				<section>
+					<h2>{ ds.String() }</h2>
+					<ul>
+						for _, log := range logs {
+							<li><code>{ log.LogAt.Format(time.DateTime) } :: { log.Log }</code></li>
+						}
+					</ul>
+				</section>
+			}
+		</body>
+	</html>
+}

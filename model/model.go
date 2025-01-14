@@ -1,62 +1,78 @@
 package model
 
-import (
-	"sync"
-)
+import "sort"
 
 type Model struct {
-	datasets map[DatasetName]*Dataset
-	mu       sync.RWMutex
+	Datasets map[DatasetName]*Dataset
 }
 
 func New() *Model {
 	return &Model{
-		datasets: make(map[DatasetName]*Dataset),
+		Datasets: make(map[DatasetName]*Dataset),
 	}
+}
+
+func (model *Model) Clone() *Model {
+	out := New()
+	for k, ds := range model.Datasets {
+		out.Datasets[k] = ds.Clone()
+	}
+	return out
 }
 
 func (model *Model) GetDataset(name DatasetName) *Dataset {
-	model.mu.RLock()
-	defer model.mu.RUnlock()
-
-	return model.datasets[name]
+	return model.Datasets[name]
 }
 
 func (model *Model) ListDatasets() []DatasetName {
-	model.mu.RLock()
-	defer model.mu.RUnlock()
-
 	var names []DatasetName
-	for name := range model.datasets {
+	for name := range model.Datasets {
 		names = append(names, name)
 	}
-
+	sort.Slice(names, func(i, j int) bool {
+		a, b := names[i], names[j]
+		if len(a) == len(b) {
+			return a < b
+		}
+		return len(a) < len(b)
+	})
 	return names
 }
 
-func (model *Model) ReplaceDataset(name DatasetName, dataset *Dataset) {
-	model.mu.Lock()
-	defer model.mu.Unlock()
-
-	model.datasets[name] = dataset
+func ReplaceDataset(name DatasetName, dataset *Dataset) func(*Model) *Model {
+	return func(old *Model) *Model {
+		out := old.Clone()
+		out.Datasets[name] = dataset
+		return out
+	}
 }
 
-func (model *Model) AddLocalDataset(name DatasetName, snapshots []*Snapshot) {
-	if _, has := model.datasets[name]; !has {
-		model.datasets[name] = &Dataset{
-			Name: name,
-		}
-	}
+func AddLocalDataset(name DatasetName, snapshots []*Snapshot) func(*Model) *Model {
+	return func(old *Model) *Model {
+		out := old.Clone()
 
-	model.datasets[name].Local = NewSnapshots(snapshots...)
+		if _, has := out.Datasets[name]; !has {
+			out.Datasets[name] = &Dataset{
+				Name: name,
+			}
+		}
+		out.Datasets[name].Local = NewSnapshots(snapshots...)
+
+		return out
+	}
 }
 
-func (model *Model) AddRemoteDataset(name DatasetName, snapshots []*Snapshot) {
-	if _, has := model.datasets[name]; !has {
-		model.datasets[name] = &Dataset{
-			Name: name,
-		}
-	}
+func AddRemoteDataset(name DatasetName, snapshots []*Snapshot) func(*Model) *Model {
+	return func(old *Model) *Model {
+		out := old.Clone()
 
-	model.datasets[name].Remote = NewSnapshots(snapshots...)
+		if _, has := out.Datasets[name]; !has {
+			out.Datasets[name] = &Dataset{
+				Name: name,
+			}
+		}
+		out.Datasets[name].Remote = NewSnapshots(snapshots...)
+
+		return out
+	}
 }

@@ -1,6 +1,9 @@
 package model
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 type DatasetName string
 
@@ -29,6 +32,14 @@ const (
 type Dataset struct {
 	Name          DatasetName
 	Local, Remote *Snapshots
+}
+
+func (dataset *Dataset) Staleness() time.Duration {
+	local, remote := dataset.Local.Newest(), dataset.Remote.Newest()
+	if local == nil || remote == nil {
+		return 0
+	}
+	return local.Time().Sub(remote.Time())
 }
 
 func (dataset *Dataset) String() string {

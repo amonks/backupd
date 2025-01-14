@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"os/exec"
 	"strings"
 	"sync"
@@ -13,36 +12,38 @@ import (
 
 	"github.com/dustin/go-humanize"
 	"golang.org/x/sync/errgroup"
+
+	"monks.co/backupd/logger"
 )
 
 const (
 	throughputLogInterval = 60 * time.Second
 )
 
-var _ Executor = LocalExecutor{}
-
-// Local is a global singleton instance of LocalExecutor.
-var Local = LocalExecutor{}
+var _ Executor = &LocalExecutor{}
 
 // A LocalExecutor implements the Executor interface by executing commands on
 // the local machine.
-type LocalExecutor struct{}
+type LocalExecutor struct {
+}
+
+var Local = &LocalExecutor{}
 
 // Exec runs the given command, returning its stdout and stderr as a combined
 // slice of lines.
-func (LocalExecutor) Exec(args ...string) ([]string, error) {
-	return Exec(args...)
+func (*LocalExecutor) Exec(logger logger.Logger, args ...string) ([]string, error) {
+	return Exec(logger, args...)
 }
 
 // Execf runs the given command, returning its stdout and stderr as a combined
 // slice of lines.
-func (LocalExecutor) Execf(s string, args ...any) ([]string, error) {
-	return Execf(s, args...)
+func (*LocalExecutor) Execf(logger logger.Logger, s string, args ...any) ([]string, error) {
+	return Execf(logger, s, args...)
 }
 
 // Exec runs the given command, returning its stdout and stderr as a combined
 // slice of lines.
-func Exec(args ...string) ([]string, error) {
+func Exec(logger logger.Logger, args ...string) ([]string, error) {
 	name, args := args[0], args[1:]
 	var arglog []string
 	for _, arg := range args {
@@ -52,7 +53,7 @@ func Exec(args ...string) ([]string, error) {
 			arglog = append(arglog, arg)
 		}
 	}
-	log.Printf("%s %s", name, strings.Join(arglog, " "))
+	logger.Printf("%s %s", name, strings.Join(arglog, " "))
 	cmd := exec.Command(name, args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -64,8 +65,8 @@ func Exec(args ...string) ([]string, error) {
 
 // Execf runs the given command, returning its stdout and stderr as a combined
 // slice of lines.
-func Execf(s string, args ...any) ([]string, error) {
-	return Exec(strings.Fields(fmt.Sprintf(s, args...))...)
+func Execf(logger logger.Logger, s string, args ...any) ([]string, error) {
+	return Exec(logger, strings.Fields(fmt.Sprintf(s, args...))...)
 }
 
 // Pipe runs `from` and `to`, with `from`'s stdout piped into `to`'s stdin.
@@ -73,10 +74,10 @@ func Execf(s string, args ...any) ([]string, error) {
 // The process can be canceled gracefully using the passed-in context.
 // While the process runs, we log details each minute about the throughput of
 // the pipe.
-func Pipe(ctx context.Context, label string, from, to *exec.Cmd) error {
-	log.Printf("%s | %s", strings.Join(from.Args, " "), strings.Join(to.Args, " "))
+func Pipe(ctx context.Context, logger logger.Logger, from, to *exec.Cmd) error {
+	logger.Printf("%s | %s", strings.Join(from.Args, " "), strings.Join(to.Args, " "))
 
-	throughputStat := NewThroughputStat(label)
+	throughputStat := NewThroughputStat(logger)
 	defer throughputStat.Log()
 
 	pw, pr := io.Pipe()
@@ -189,7 +190,7 @@ func Pipe(ctx context.Context, label string, from, to *exec.Cmd) error {
 // ThroughputStat stores throughput statistics over various intervals.
 type ThroughputStat struct {
 	mu         sync.Mutex
-	label      string
+	logger     logger.Logger
 	startedAt  time.Time
 	totalBytes int64
 	dataPoints []dataPoint
@@ -202,8 +203,8 @@ type dataPoint struct {
 }
 
 // NewThroughputStat initializes a new ThroughputStat.
-func NewThroughputStat(label string) *ThroughputStat {
-	return &ThroughputStat{startedAt: time.Now(), label: label}
+func NewThroughputStat(logger logger.Logger) *ThroughputStat {
+	return &ThroughputStat{startedAt: time.Now(), logger: logger}
 }
 
 func (s *ThroughputStat) Write(bs []byte) (int, error) {
@@ -265,8 +266,8 @@ func (s *ThroughputStat) Log() {
 	tenMinuteElapsedSeconds := getElapsedSeconds(&now, firstTenMinuteTimestamp, 600)
 	hourElapsedSeconds := getElapsedSeconds(&now, firstHourTimestamp, 3600)
 
-	log.Printf("%s %s - Total: %s, Last minute: %s/sec, 10 mins: %s/sec, hour: %s/sec",
-		s.label, now.Sub(s.startedAt),
+	s.logger.Printf("%s\tTotal: %s\tLast minute: %s\t10 mins: %s\thour: %s",
+		now.Sub(s.startedAt).Truncate(time.Second),
 		humanize.Bytes(uint64(s.totalBytes)),
 		printThroughput(minuteBytes, minuteElapsedSeconds),
 		printThroughput(tenMinuteBytes, tenMinuteElapsedSeconds),
@@ -287,9 +288,9 @@ func (s *ThroughputStat) Log() {
 //     size if the duration is zero.
 func printThroughput(bytes, durationSeconds int64) string {
 	if durationSeconds == 0 {
-		return humanize.Bytes(uint64(bytes))
+		return humanize.SIWithDigits(float64(bytes*8), 1, "bps")
 	}
-	return humanize.Bytes(uint64(float64(bytes) / float64(durationSeconds)))
+	return humanize.SIWithDigits(float64(bytes*8)/float64(durationSeconds), 1, "bps")
 }
 
 // getElapsedSeconds calculates the number of seconds elapsed between the given

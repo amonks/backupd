@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/exec"
 
+	"monks.co/backupd/logger"
 	"monks.co/backupd/model"
 )
 
@@ -25,21 +26,21 @@ func New() *Env {
 	}
 }
 
-func (env *Env) Resume(ctx context.Context, dataset model.DatasetName, token string) error {
+func (env *Env) Resume(ctx context.Context, logger logger.Logger, dataset model.DatasetName, token string) error {
 	remote := env.Remote.x.(*Remote)
 
 	send := exec.Command("zfs", "send", "--raw", "-t", token)
 	recv := exec.Command("ssh", "-i", remote.sshKey, remote.sshHost,
 		fmt.Sprintf("zfs receive -s %s", env.Remote.WithPrefix(dataset)))
 
-	if err := Pipe(ctx, dataset.Path(), send, recv); err != nil {
+	if err := Pipe(ctx, logger, send, recv); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (env *Env) TransferInitialSnapshot(ctx context.Context, dataset model.DatasetName, snapshot string) error {
+func (env *Env) TransferInitialSnapshot(ctx context.Context, logger logger.Logger, dataset model.DatasetName, snapshot string) error {
 	remote := env.Remote.x.(*Remote)
 
 	send := exec.Command("zfs", "send", "--raw",
@@ -47,14 +48,14 @@ func (env *Env) TransferInitialSnapshot(ctx context.Context, dataset model.Datas
 	recv := exec.Command("ssh", "-i", remote.sshKey, remote.sshHost,
 		fmt.Sprintf("zfs receive -s %s", env.Remote.WithPrefix(dataset)))
 
-	if err := Pipe(ctx, dataset.Path(), send, recv); err != nil {
+	if err := Pipe(ctx, logger, send, recv); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (env *Env) TransferSnapshot(ctx context.Context, dataset model.DatasetName, snapshot string) error {
+func (env *Env) TransferSnapshot(ctx context.Context, logger logger.Logger, dataset model.DatasetName, snapshot string) error {
 	remote := env.Remote.x.(*Remote)
 
 	send := exec.Command("zfs", "send", "--raw",
@@ -62,14 +63,14 @@ func (env *Env) TransferSnapshot(ctx context.Context, dataset model.DatasetName,
 	recv := exec.Command("ssh", "-i", remote.sshKey, remote.sshHost,
 		fmt.Sprintf("zfs receive -s -F %s", env.Remote.WithPrefix(dataset)))
 
-	if err := Pipe(ctx, dataset.Path(), send, recv); err != nil {
+	if err := Pipe(ctx, logger, send, recv); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (env *Env) TransferSnapshotIncrementally(ctx context.Context, dataset model.DatasetName, from, to string) error {
+func (env *Env) TransferSnapshotIncrementally(ctx context.Context, logger logger.Logger, dataset model.DatasetName, from, to string) error {
 	remote := env.Remote.x.(*Remote)
 
 	send := exec.Command("zfs", "send", "--raw", "-i",
@@ -78,7 +79,7 @@ func (env *Env) TransferSnapshotIncrementally(ctx context.Context, dataset model
 	recv := exec.Command("ssh", "-i", remote.sshKey, remote.sshHost,
 		fmt.Sprintf("zfs receive -s -F %s", env.Remote.WithPrefix(dataset)))
 
-	if err := Pipe(ctx, dataset.Path(), send, recv); err != nil {
+	if err := Pipe(ctx, logger, send, recv); err != nil {
 		return err
 	}
 
