@@ -146,6 +146,8 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 		return fmt.Errorf("validating plan for '%s': %w", dataset, err)
 	}
 
+	logger.Printf("Plan has %d steps", len(plan))
+
 	for _, op := range plan {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -185,6 +187,8 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 		logger.Printf("-- Done.")
 	}
 
+	logger.Printf("sync complete")
+
 	return nil
 }
 
@@ -205,13 +209,17 @@ func (b *Backupd) handleIncompleteTransfer(ctx context.Context, logger logger.Lo
 
 resume:
 	if err := b.env.Resume(ctx, logger, dataset, token); err != nil && strings.Contains(err.Error(), "contains partially-complete state") {
+		logger.Printf("aborting resumable transfer")
 		if err := b.env.Remote.AbortResumable(logger, dataset); err != nil {
 			return fmt.Errorf("aborting resumable on '%s': %w", dataset, err)
 		}
+		logger.Printf("retrying resume")
 		goto resume
 	} else if err != nil {
 		return fmt.Errorf("resuming transfer on '%s': %w", dataset, err)
 	}
+
+	logger.Printf("resume complete")
 
 	return nil
 }
@@ -231,4 +239,46 @@ func listenAndServe(ctx context.Context, addr string, handler http.Handler) erro
 		shutdownErr := srv.Shutdown(context.Background())
 		return errors.Join(cause, shutdownErr)
 	}
+}
+
+// Plan prints the plan for the given dataset
+func (b *Backupd) Plan(ctx context.Context, dataset model.DatasetName) error {
+	initialState := b.state.Deref()
+	ds := initialState.GetDataset(dataset)
+
+	if ds == nil {
+		return fmt.Errorf("no such dataset '%s'", dataset)
+	}
+
+	goal := ds.Goal()
+	plan, err := ds.Plan(goal)
+	if err != nil {
+		return fmt.Errorf("constructing plan: %w", err)
+	}
+	fmt.Println("FROM LOCAL")
+	for snapshot := range ds.Local.All() {
+		fmt.Printf("- %s\n", snapshot.Name)
+	}
+	fmt.Println("TO LOCAL")
+	for snapshot := range goal.Local.All() {
+		fmt.Printf("- %s\n", snapshot.Name)
+	}
+	fmt.Println("FROM REMOTE")
+	for snapshot := range ds.Remote.All() {
+		fmt.Printf("- %s\n", snapshot.Name)
+	}
+	fmt.Println("TO REMOTE")
+	for snapshot := range goal.Remote.All() {
+		fmt.Printf("- %s\n", snapshot.Name)
+	}
+	fmt.Println("VIA PLAN")
+	for _, op := range plan {
+		fmt.Printf("- %s\n", op)
+	}
+
+	if err := ds.ValidatePlan(ctx, goal, plan); err != nil {
+		return fmt.Errorf("invalid plan: %w", err)
+	}
+
+	return nil
 }

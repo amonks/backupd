@@ -2,6 +2,8 @@ package progress
 
 import (
 	"fmt"
+	"iter"
+	"sort"
 	"time"
 
 	"monks.co/backupd/atom"
@@ -12,7 +14,44 @@ type Progress struct {
 	*atom.Atom[Value]
 }
 
-type Value = map[model.DatasetName][]LogEntry
+type Value map[model.DatasetName]*Process
+
+func (v Value) All() iter.Seq2[model.DatasetName, []LogEntry] {
+	var ks []model.DatasetName
+	for k := range v {
+		ks = append(ks, k)
+	}
+	sort.Slice(ks, func(i, j int) bool {
+		if string(ks[i]) == "global" {
+			return true
+		} else if string(ks[j]) == "global" {
+			return false
+		}
+		if len(ks[i]) == len(ks[j]) {
+			return ks[i] < ks[j]
+		}
+		return len(ks[i]) < len(ks[j])
+	})
+	return func(yield func(model.DatasetName, []LogEntry) bool) {
+		for _, k := range ks {
+			if !yield(k, v[k].logs) {
+				return
+			}
+		}
+	}
+}
+
+func (v Value) Get(k model.DatasetName) []LogEntry {
+	if v[k] == nil {
+		return nil
+	}
+	return v[k].logs
+}
+
+type Process struct {
+	isDone bool
+	logs   []LogEntry
+}
 
 type LogEntry struct {
 	LogAt time.Time
@@ -25,7 +64,7 @@ func New() *Progress {
 	}
 }
 
-func (pr *Progress) Deref() map[model.DatasetName][]LogEntry {
+func (pr *Progress) Deref() Value {
 	return pr.Atom.Deref()
 }
 
@@ -41,13 +80,19 @@ func (pr *Progress) Log(ds model.DatasetName, s string, args ...any) {
 		for k, v := range old {
 			if k != ds {
 				out[k] = v
-			} else {
-				seen = true
-				out[k] = append(v, entry)
+				continue
+			}
+
+			seen = true
+			out[k] = &Process{
+				isDone: false,
+				logs:   append(v.logs, entry),
 			}
 		}
 		if !seen {
-			out[ds] = []LogEntry{entry}
+			out[ds] = &Process{
+				logs: []LogEntry{entry},
+			}
 		}
 		return out
 	})
@@ -57,8 +102,10 @@ func (pr *Progress) Done(ds model.DatasetName) {
 	pr.Swap(func(old Value) Value {
 		out := make(Value, len(old)-1)
 		for k, v := range old {
-			if k != ds {
-				out[k] = v
+			out[k] = v
+			if k == ds {
+				process := out[k]
+				process.isDone = true
 			}
 		}
 		return out

@@ -1,9 +1,5 @@
 package model
 
-import (
-	"log"
-)
-
 func (state *Dataset) Goal() *Dataset {
 	localSnapshots := state.Local
 	remoteSnapshots := state.Remote
@@ -18,13 +14,15 @@ func (state *Dataset) Goal() *Dataset {
 	}
 
 	// Keep all snapshots matching the policy
-	for snap := range allSnapshots.MatchingPolicy(policy.Local).All() {
+	localMatches := allSnapshots.MatchingPolicy(policy.Remote)
+	for snap := range localMatches.All() {
 		if !localSnapshots.Has(snap) {
 			continue
 		}
 		goal.Local.Add(snap)
 	}
-	for snap := range allSnapshots.MatchingPolicy(policy.Remote).All() {
+	remoteMatches := allSnapshots.MatchingPolicy(policy.Remote)
+	for snap := range remoteMatches.All() {
 		if !localSnapshots.Has(snap) {
 			continue
 		}
@@ -37,7 +35,6 @@ func (state *Dataset) Goal() *Dataset {
 			continue
 		}
 		if snap.CreatedAt < remoteSnapshots.Newest().CreatedAt {
-			log.Printf("skipped remote snapshot: %s\n", snap)
 			continue
 		}
 		goal.Remote.Add(snap)

@@ -9,18 +9,21 @@ import (
 	"monks.co/backupd/model"
 )
 
+const readOnly = false
+
 type Executor interface {
 	Exec(logger logger.Logger, cmd ...string) ([]string, error)
 	Execf(logger logger.Logger, cmd string, args ...any) ([]string, error)
 }
 
 type ZFS struct {
-	prefix string
-	x      Executor
+	prefix   string
+	x        Executor
+	readOnly bool
 }
 
 func NewZFS(prefix string, x Executor) *ZFS {
-	return &ZFS{prefix, x}
+	return &ZFS{prefix, x, readOnly}
 }
 
 func (zfs *ZFS) WithPrefix(dataset model.DatasetName) string {
@@ -46,6 +49,9 @@ func (zfs *ZFS) GetResumeToken(logger logger.Logger, dataset model.DatasetName) 
 }
 
 func (zfs *ZFS) AbortResumable(logger logger.Logger, dataset model.DatasetName) error {
+	if zfs.readOnly {
+		panic("read only")
+	}
 	_, err := zfs.x.Execf(logger, "zfs receive -A %s", zfs.WithPrefix(dataset))
 	if err != nil {
 		return err
@@ -67,6 +73,9 @@ func (zfs *ZFS) GetDatasets(logger logger.Logger) ([]model.DatasetName, error) {
 }
 
 func (zfs *ZFS) CreateDataset(logger logger.Logger, dataset model.DatasetName) error {
+	if zfs.readOnly {
+		panic("read only")
+	}
 	if _, err := zfs.x.Execf(logger, "zfs create -p %s", zfs.WithPrefix(dataset)); err != nil {
 		return err
 	}
@@ -82,6 +91,9 @@ func (zfs *ZFS) GetLatestSnapshot(logger logger.Logger, dataset model.DatasetNam
 }
 
 func (zfs *ZFS) DestroySnapshot(logger logger.Logger, dataset model.DatasetName, snapshot string) error {
+	if zfs.readOnly {
+		panic("read only")
+	}
 	if _, err := zfs.x.Execf(logger, "zfs destroy %s@%s", zfs.WithPrefix(dataset), snapshot); err != nil {
 		return err
 	}
@@ -89,6 +101,9 @@ func (zfs *ZFS) DestroySnapshot(logger logger.Logger, dataset model.DatasetName,
 }
 
 func (zfs *ZFS) DestroySnapshotRange(logger logger.Logger, dataset model.DatasetName, first, last string) error {
+	if zfs.readOnly {
+		panic("read only")
+	}
 	if _, err := zfs.x.Execf(logger, "zfs destroy %s@%s%%%s", zfs.WithPrefix(dataset), first, last); err != nil {
 		return err
 	}

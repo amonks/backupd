@@ -13,7 +13,7 @@ type Snapshot struct {
 }
 
 func (snap *Snapshot) ID() string {
-	return fmt.Sprintf("%s-%d", snap.Dataset, snap.CreatedAt)
+	return fmt.Sprintf("%s-%s", snap.Dataset, snap.Name)
 }
 
 func (snap *Snapshot) Eq(other *Snapshot) bool {

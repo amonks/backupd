@@ -39,7 +39,7 @@ templ index(state *model.Model, progress progress.Value) {
 					}
 				</tbody>
 			</table>
-			for ds, logs := range progress {
+			for ds, logs := range progress.All() {
 				<section>
 					<h2>{ ds.String() }</h2>
 					<ul>

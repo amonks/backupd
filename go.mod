@@ -7,6 +7,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1
 	golang.org/x/sync v0.10.0
 	golang.org/x/vuln v1.1.3
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	honnef.co/go/tools v0.5.1
 )
 

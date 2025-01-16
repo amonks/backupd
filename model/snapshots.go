@@ -243,10 +243,40 @@ func (snaps *Snapshots) Difference(other *Snapshots) *Snapshots {
 	return difference
 }
 
+func (snaps *Snapshots) GetDuplicates(snap *Snapshot) []*Snapshot {
+	var group []*Snapshot
+	for candidate := range snaps.All() {
+		if candidate.CreatedAt == snap.CreatedAt && candidate.ID() != snap.ID() {
+			group = append(group, candidate)
+		}
+	}
+	return group
+}
+
 func (snaps *Snapshots) GroupByAdjacency(subset *Snapshots) []*Snapshots {
 	var groups []*Snapshots
 	var group *Snapshots
+
+snaploop:
 	for candidate := range snaps.All() {
+		// If this snapshot is a duplicate, and if we don't want to
+		// destroy _all_ of its copies, we can't include it in a range.
+		// We should:
+		// - close the existing group, if any
+		// - add this snapshot to a self-closing group
+		// - continue
+		if dupes := snaps.GetDuplicates(candidate); len(dupes) != 0 {
+			for _, dupe := range dupes {
+				if !subset.Has(dupe) {
+					if group != nil {
+						groups = append(groups, group)
+						group = nil
+					}
+					groups = append(groups, NewSnapshots(candidate))
+					continue snaploop
+				}
+			}
+		}
 		if subset.Has(candidate) {
 			if group == nil {
 				group = NewSnapshots(candidate)

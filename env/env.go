@@ -27,6 +27,9 @@ func New() *Env {
 }
 
 func (env *Env) Resume(ctx context.Context, logger logger.Logger, dataset model.DatasetName, token string) error {
+	if env.Local.readOnly || env.Remote.readOnly {
+		panic("read only")
+	}
 	remote := env.Remote.x.(*Remote)
 
 	send := exec.Command("zfs", "send", "--raw", "-t", token)
@@ -41,6 +44,9 @@ func (env *Env) Resume(ctx context.Context, logger logger.Logger, dataset model.
 }
 
 func (env *Env) TransferInitialSnapshot(ctx context.Context, logger logger.Logger, dataset model.DatasetName, snapshot string) error {
+	if env.Local.readOnly || env.Remote.readOnly {
+		panic("read only")
+	}
 	remote := env.Remote.x.(*Remote)
 
 	send := exec.Command("zfs", "send", "--raw",
@@ -56,6 +62,9 @@ func (env *Env) TransferInitialSnapshot(ctx context.Context, logger logger.Logge
 }
 
 func (env *Env) TransferSnapshot(ctx context.Context, logger logger.Logger, dataset model.DatasetName, snapshot string) error {
+	if env.Local.readOnly || env.Remote.readOnly {
+		panic("read only")
+	}
 	remote := env.Remote.x.(*Remote)
 
 	send := exec.Command("zfs", "send", "--raw",
@@ -71,6 +80,9 @@ func (env *Env) TransferSnapshot(ctx context.Context, logger logger.Logger, data
 }
 
 func (env *Env) TransferSnapshotIncrementally(ctx context.Context, logger logger.Logger, dataset model.DatasetName, from, to string) error {
+	if env.Local.readOnly || env.Remote.readOnly {
+		panic("read only")
+	}
 	remote := env.Remote.x.(*Remote)
 
 	send := exec.Command("zfs", "send", "--raw", "-i",
