@@ -1,6 +1,8 @@
 package model
 
-func (state *Dataset) Goal() *Dataset {
+import "log"
+
+func (state *Dataset) Goal(localPolicy, remotePolicy map[string]int) *Dataset {
 	localSnapshots := state.Local
 	remoteSnapshots := state.Remote
 
@@ -14,29 +16,37 @@ func (state *Dataset) Goal() *Dataset {
 	}
 
 	// Keep all snapshots matching the policy
-	localMatches := allSnapshots.MatchingPolicy(policy.Remote)
+	localMatches := allSnapshots.MatchingPolicy(localPolicy)
 	for snap := range localMatches.All() {
+		// too bad; already lost :shrug:
 		if !localSnapshots.Has(snap) {
 			continue
 		}
+
+		// keep it
 		goal.Local.Add(snap)
 	}
-	remoteMatches := allSnapshots.MatchingPolicy(policy.Remote)
+	remoteMatches := allSnapshots.MatchingPolicy(remotePolicy)
 	for snap := range remoteMatches.All() {
-		if !localSnapshots.Has(snap) {
-			continue
-		}
+		// keep it
 		if remoteSnapshots.Has(snap) {
 			goal.Remote.Add(snap)
 			continue
 		}
-		if remoteSnapshots.Len() == 0 {
-			goal.Remote.Add(snap)
+
+		// too bad; already lost :shrug:
+		if !localSnapshots.Has(snap) {
 			continue
 		}
+
+		// too bad; already skipped it :shrug:
 		if snap.CreatedAt < remoteSnapshots.Newest().CreatedAt {
 			continue
 		}
+
+		// transfer it
+		log.Printf("keep %s", snap.ID())
+		goal.Local.Add(snap)
 		goal.Remote.Add(snap)
 	}
 
@@ -58,17 +68,6 @@ func (state *Dataset) Goal() *Dataset {
 	if snap := sharedSnapshots.Newest(); snap != nil {
 		goal.Local.Add(snap)
 		goal.Remote.Add(snap)
-
-		// // On remote, delete any unplanned snapshots after the latest shared snapshot
-		// var rm []*Snapshot
-		// for candidate := range goal.Remote.All() {
-		// 	if candidate.CreatedAt > snap.CreatedAt {
-		// 		rm = append(rm, candidate)
-		// 	}
-		// }
-		// for _, snap := range rm {
-		// 	goal.Remote.Del(snap)
-		// }
 	}
 
 	return goal

@@ -129,6 +129,9 @@ func (op *InitialSnapshotTransfer) Apply(ds *Dataset) (*Dataset, error) {
 	}
 
 	out := ds.Clone()
+	if out.Remote == nil  {
+		out.Remote = NewSnapshots()
+	}
 	out.Remote.Add(op.Snapshot)
 
 	return out, nil
@@ -190,7 +193,7 @@ func (op *SnapshotRangeTransfer) Apply(dataset *Dataset) (*Dataset, error) {
 		return nil, fmt.Errorf("local doesn't have range-start %s", op.Start)
 	}
 	if !dataset.Local.Has(op.End) {
-		return nil, fmt.Errorf("local doesn't have range-end %s", op.Start)
+		return nil, fmt.Errorf("local doesn't have range-end %s", op.End)
 	}
 
 	out := dataset.Clone()

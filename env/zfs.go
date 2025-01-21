@@ -2,6 +2,7 @@ package env
 
 import (
 	"fmt"
+	"os/exec"
 	"strconv"
 	"strings"
 
@@ -46,6 +47,26 @@ func (zfs *ZFS) GetResumeToken(logger logger.Logger, dataset model.DatasetName) 
 	}
 
 	return value, nil
+}
+
+func (zfs *ZFS) Size(logger logger.Logger, cmd *exec.Cmd) (int64, error) {
+	if cmd.Args[0] != "zfs" || cmd.Args[1] != "send" {
+		return 0, fmt.Errorf("must be a zfs send command")
+	}
+
+	args := append(cmd.Args[:], "--dryrun", "--verbose", "--parsable")
+	out, err := zfs.x.Exec(logger, args...)
+	if err != nil {
+		return 0, fmt.Errorf("getting size of '%s': %w", strings.Join(args, " "), err)
+	}
+	lastLine := out[len(out)-1]
+	sizeField := strings.Fields(lastLine)[1]
+	size, err := strconv.ParseInt(sizeField, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parsing size from '%s': %w", sizeField, err)
+	}
+
+	return size, nil
 }
 
 func (zfs *ZFS) AbortResumable(logger logger.Logger, dataset model.DatasetName) error {

@@ -35,3 +35,17 @@ func (snap *Snapshot) Type() string {
 func (snap *Snapshot) Title() string {
 	return strings.SplitN(snap.Name, "-", 2)[1]
 }
+
+func (snap *Snapshot) Less(other *Snapshot) bool {
+	if snap.CreatedAt == other.CreatedAt {
+		return snap.Name < other.Name
+	}
+	return snap.CreatedAt < other.CreatedAt
+}
+
+func (snap *Snapshot) More(other *Snapshot) bool {
+	if snap.CreatedAt == other.CreatedAt {
+		return snap.Name > other.Name
+	}
+	return snap.CreatedAt > other.CreatedAt
+}

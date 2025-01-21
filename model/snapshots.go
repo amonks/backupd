@@ -3,6 +3,7 @@ package model
 import (
 	"fmt"
 	"iter"
+	"strings"
 )
 
 type Snapshots struct {
@@ -32,6 +33,57 @@ func (snaps *Snapshots) String() string {
 		return "<no snaps>"
 	}
 	return fmt.Sprintf("%d → %s", snaps.Len(), snaps.tail.val.Name)
+}
+
+func (snaps *Snapshots) Print() string {
+	var out strings.Builder
+	for _, snap := range snaps.nodes {
+		fmt.Fprintf(&out, "  - %s\n", snap.val.ID())
+	}
+	return out.String()
+}
+
+func (snaps *Snapshots) Eq(other *Snapshots) bool {
+	if snaps.Len() != other.Len() {
+		return false
+	}
+	rights := other.Each()
+	for left := range snaps.Each() {
+		right := <-rights
+		if left.ID() != right.ID() {
+			return false
+		}
+	}
+	return true
+}
+
+func (snaps *Snapshots) Each() <-chan *Snapshot {
+	out := make(chan *Snapshot)
+	go func() {
+		for snap := range snaps.All() {
+			out <- snap
+		}
+		close(out)
+	}()
+	return out
+}
+
+func (snaps *Snapshots) Diff(prefix string, other *Snapshots) string {
+	removed := snaps.Difference(other)
+	added := other.Difference(snaps)
+
+	var out strings.Builder
+	for snap := range snaps.Union(other).All() {
+		sigil := " "
+		if removed.Has(snap) {
+			sigil = "-"
+		} else if added.Has(snap) {
+			sigil = "+"
+		}
+		fmt.Fprintf(&out, "%s %s %s\n", prefix, sigil, snap.ID())
+	}
+
+	return out.String()
 }
 
 func (snaps *Snapshots) All() iter.Seq[*Snapshot] {
@@ -95,7 +147,7 @@ func (snaps *Snapshots) Add(snap *Snapshot) {
 	}
 
 	// new head
-	if snap.CreatedAt < snaps.head.val.CreatedAt {
+	if snap.Less(snaps.head.val) {
 		newNode.next = snaps.head
 		snaps.head.prev = newNode
 		snaps.head = newNode
@@ -104,7 +156,7 @@ func (snaps *Snapshots) Add(snap *Snapshot) {
 	}
 
 	// new tail
-	if snap.CreatedAt > snaps.tail.val.CreatedAt {
+	if snap.More(snaps.tail.val) {
 		newNode.prev = snaps.tail
 		snaps.tail.next = newNode
 		snaps.tail = newNode
@@ -114,12 +166,12 @@ func (snaps *Snapshots) Add(snap *Snapshot) {
 
 	// iter to find insertion
 	var prev, current = snaps.head, snaps.head.next
-	for current != nil && current.val.CreatedAt < snap.CreatedAt {
+	for current != nil && current.val.Less(snap) {
 		prev, current = current, current.next
 	}
 
 	if current == nil {
-		return // Should not happen, handled by previous conditions
+		panic("oops")
 	}
 
 	newNode.next = current
@@ -254,6 +306,10 @@ func (snaps *Snapshots) GetDuplicates(snap *Snapshot) []*Snapshot {
 }
 
 func (snaps *Snapshots) GroupByAdjacency(subset *Snapshots) []*Snapshots {
+	if subset.Len() == 0 {
+		return nil
+	}
+
 	var groups []*Snapshots
 	var group *Snapshots
 

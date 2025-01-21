@@ -31,7 +31,7 @@ templ index(state *model.Model, progress progress.Value) {
 				<tbody>
 					for _, ds := range state.ListDatasets() {
 						<tr>
-							<td>{ ds.Path() }</td>
+							<td>{ ds.String() }</td>
 							<td>{ fmt.Sprintf("%s", state.Datasets[ds].Staleness().Truncate(time.Minute)) }</td>
 							<td><code>{ state.Datasets[ds].Local.String() }</code></td>
 							<td><code>{ state.Datasets[ds].Remote.String() }</code></td>

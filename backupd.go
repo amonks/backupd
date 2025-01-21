@@ -12,6 +12,7 @@ import (
 	"github.com/a-h/templ"
 	"golang.org/x/sync/errgroup"
 	"monks.co/backupd/atom"
+	"monks.co/backupd/config"
 	"monks.co/backupd/env"
 	"monks.co/backupd/logger"
 	"monks.co/backupd/model"
@@ -19,16 +20,20 @@ import (
 )
 
 type Backupd struct {
+	config   *config.Config
 	state    *atom.Atom[*model.Model]
 	progress *progress.Progress
 	env      *env.Env
+	addr     string
 }
 
-func New() *Backupd {
+func New(config *config.Config, addr string) *Backupd {
 	return &Backupd{
+		config:   config,
 		state:    atom.New[*model.Model](nil),
 		progress: progress.New(),
-		env:      env.New(),
+		env:      env.New(config),
+		addr:     addr,
 	}
 }
 
@@ -55,7 +60,7 @@ func (b *Backupd) Serve(ctx context.Context) error {
 		templ.Handler(index(state, progress)).ServeHTTP(w, req)
 	})
 
-	return listenAndServe(ctx, ":8888", mux)
+	return listenAndServe(ctx, b.addr, mux)
 }
 
 func (b *Backupd) Sync(ctx context.Context) error {
@@ -124,6 +129,28 @@ func (b *Backupd) refreshState(ctx context.Context) error {
 	return nil
 }
 
+func (b *Backupd) refreshDataset(ctx context.Context, logger logger.Logger, dataset model.DatasetName) error {
+	{
+		snapshots, err := b.env.Local.GetSnapshots(logger, dataset)
+		if err != nil {
+			return fmt.Errorf("getting snapshots for '%s': %w", dataset, err)
+		}
+
+		b.state.Swap(model.AddLocalDataset(dataset, snapshots))
+	}
+
+	{
+		snapshots, err := b.env.Remote.GetSnapshots(logger, dataset)
+		if err != nil {
+			return fmt.Errorf("getting remote snapshots for '%s': %w", dataset, err)
+		}
+
+		b.state.Swap(model.AddRemoteDataset(dataset, snapshots))
+	}
+
+	return nil
+}
+
 // syncDataset executes the plan for the given dataset.
 func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) error {
 	logger := b.progress.Logger(dataset)
@@ -136,13 +163,13 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 	initialState := b.state.Deref()
 	ds := initialState.GetDataset(dataset)
 
-	goal := ds.Goal()
+	goal := ds.Goal(b.config.Local.Policy, b.config.Remote.Policy)
 	plan, err := ds.Plan(goal)
 	if err != nil {
 		return fmt.Errorf("constructing plan for '%s': %w", dataset, err)
 	}
 
-	if err := ds.ValidatePlan(ctx, goal, plan); err != nil {
+	if err := ds.ValidatePlan(ctx, goal, plan, false); err != nil {
 		return fmt.Errorf("validating plan for '%s': %w", dataset, err)
 	}
 
@@ -221,6 +248,10 @@ resume:
 
 	logger.Printf("resume complete")
 
+	if err := b.refreshDataset(ctx, logger, dataset); err != nil {
+		return fmt.Errorf("refreshing dataset '%s': %w", dataset, err)
+	}
+
 	return nil
 }
 
@@ -250,33 +281,19 @@ func (b *Backupd) Plan(ctx context.Context, dataset model.DatasetName) error {
 		return fmt.Errorf("no such dataset '%s'", dataset)
 	}
 
-	goal := ds.Goal()
+	goal := ds.Goal(b.config.Local.Policy, b.config.Remote.Policy)
 	plan, err := ds.Plan(goal)
 	if err != nil {
 		return fmt.Errorf("constructing plan: %w", err)
 	}
-	fmt.Println("FROM LOCAL")
-	for snapshot := range ds.Local.All() {
-		fmt.Printf("- %s\n", snapshot.Name)
-	}
-	fmt.Println("TO LOCAL")
-	for snapshot := range goal.Local.All() {
-		fmt.Printf("- %s\n", snapshot.Name)
-	}
-	fmt.Println("FROM REMOTE")
-	for snapshot := range ds.Remote.All() {
-		fmt.Printf("- %s\n", snapshot.Name)
-	}
-	fmt.Println("TO REMOTE")
-	for snapshot := range goal.Remote.All() {
-		fmt.Printf("- %s\n", snapshot.Name)
-	}
+	fmt.Println("ACHIEVING CHANGE")
+	fmt.Printf(ds.Diff(goal))
 	fmt.Println("VIA PLAN")
 	for _, op := range plan {
 		fmt.Printf("- %s\n", op)
 	}
 
-	if err := ds.ValidatePlan(ctx, goal, plan); err != nil {
+	if err := ds.ValidatePlan(ctx, goal, plan, true); err != nil {
 		return fmt.Errorf("invalid plan: %w", err)
 	}
 

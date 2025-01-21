@@ -10,10 +10,10 @@ import (
 
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 
+	"monks.co/backupd/config"
+	"monks.co/backupd/logger"
 	"monks.co/backupd/model"
 )
-
-const logpath = `/var/log/backupd.log`
 
 func main() {
 	if err := run(); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, flag.ErrHelp) {
@@ -28,30 +28,45 @@ func run() error {
 		return fmt.Errorf("must be root, not '%s'", whoami)
 	}
 
-	ctx := NewSigctx()
-	b := New()
+	config, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
 
-	var debugDS string
+	var (
+		debugDS string
+		logfile string
+		addr string
+	)
 	flag.StringVar(&debugDS, "debug", "", "debug a dataset")
+	flag.StringVar(&logfile, "logfile", "", "log to a file")
+	flag.StringVar(&addr, "addr", "0.0.0.0:8888", "server addr")
 	flag.Parse()
 
+	ctx := NewSigctx()
+	b := New(config, addr)
+
 	if debugDS != "" {
-		if err := b.refreshState(ctx); err != nil {
+		logger := logger.New("refresh")
+		ds := model.DatasetName(debugDS)
+		if err := b.refreshDataset(ctx, logger, ds); err != nil {
 			return err
-		} else if err := b.Plan(ctx, model.DatasetName(debugDS)); err != nil {
+		} else if err := b.Plan(ctx, ds); err != nil {
 			return err
 		}
 		return nil
 	}
 
-	logger := &lumberjack.Logger{
-		Filename:   logpath,
-		MaxSize:    15,
-		MaxBackups: 3,
-		MaxAge:     28,
+	if logfile != "" {
+		logger := &lumberjack.Logger{
+			Filename:   logfile,
+			MaxSize:    15,
+			MaxBackups: 3,
+			MaxAge:     28,
+		}
+		defer logger.Close()
+		log.SetOutput(logger)
 	}
-	defer logger.Close()
-	log.SetOutput(logger)
 
 	if err := b.Go(ctx); err != nil {
 		return err

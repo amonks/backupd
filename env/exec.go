@@ -1,10 +1,10 @@
 package env
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -74,10 +74,10 @@ func Execf(logger logger.Logger, s string, args ...any) ([]string, error) {
 // The process can be canceled gracefully using the passed-in context.
 // While the process runs, we log details each minute about the throughput of
 // the pipe.
-func Pipe(ctx context.Context, logger logger.Logger, from, to *exec.Cmd) error {
+func Pipe(ctx context.Context, logger logger.Logger, size int64, from, to *exec.Cmd) error {
 	logger.Printf("%s | %s", strings.Join(from.Args, " "), strings.Join(to.Args, " "))
 
-	throughputStat := NewThroughputStat(logger)
+	throughputStat := NewThroughputStat(logger, size)
 	defer throughputStat.Log()
 
 	pw, pr := io.Pipe()
@@ -85,9 +85,8 @@ func Pipe(ctx context.Context, logger logger.Logger, from, to *exec.Cmd) error {
 	from.Stdout = pr
 	to.Stdin = tee
 
-	var toOutput bytes.Buffer
-	to.Stdout = &toOutput
-	to.Stderr = &toOutput
+	to.Stdout = os.Stdout
+	to.Stderr = os.Stderr
 
 	// Start the `to` command.
 	if err := to.Start(); err != nil {
@@ -160,7 +159,7 @@ func Pipe(ctx context.Context, logger logger.Logger, from, to *exec.Cmd) error {
 		select {
 		case err := <-c:
 			if err != nil {
-				return fmt.Errorf("'to' command error: %w\n%s", err, toOutput.String())
+				return fmt.Errorf("'to' command error: %w", err)
 			}
 
 			cancel()
@@ -189,11 +188,12 @@ func Pipe(ctx context.Context, logger logger.Logger, from, to *exec.Cmd) error {
 
 // ThroughputStat stores throughput statistics over various intervals.
 type ThroughputStat struct {
-	mu         sync.Mutex
-	logger     logger.Logger
-	startedAt  time.Time
-	totalBytes int64
-	dataPoints []dataPoint
+	mu               sync.Mutex
+	logger           logger.Logger
+	startedAt        time.Time
+	bytesTransferred int64
+	size             int64
+	dataPoints       []dataPoint
 }
 
 // dataPoint stores the number of bytes written and the timestamp.
@@ -203,8 +203,12 @@ type dataPoint struct {
 }
 
 // NewThroughputStat initializes a new ThroughputStat.
-func NewThroughputStat(logger logger.Logger) *ThroughputStat {
-	return &ThroughputStat{startedAt: time.Now(), logger: logger}
+func NewThroughputStat(logger logger.Logger, size int64) *ThroughputStat {
+	return &ThroughputStat{
+		startedAt: time.Now(),
+		logger:    logger,
+		size:      size,
+	}
 }
 
 func (s *ThroughputStat) Write(bs []byte) (int, error) {
@@ -212,7 +216,7 @@ func (s *ThroughputStat) Write(bs []byte) (int, error) {
 	defer s.mu.Unlock()
 
 	bytes := int64(len(bs))
-	s.totalBytes += bytes
+	s.bytesTransferred += bytes
 
 	// Add the current data point
 	s.dataPoints = append(s.dataPoints, dataPoint{bytes: bytes, timestamp: time.Now()})
@@ -266,9 +270,11 @@ func (s *ThroughputStat) Log() {
 	tenMinuteElapsedSeconds := getElapsedSeconds(&now, firstTenMinuteTimestamp, 600)
 	hourElapsedSeconds := getElapsedSeconds(&now, firstHourTimestamp, 3600)
 
-	s.logger.Printf("%s\tTotal: %s\tLast minute: %s\t10 mins: %s\thour: %s",
+	s.logger.Printf("%s\t%.2f%% of %s\tTotal: %s\tLast minute: %s\t10 mins: %s\thour: %s",
 		now.Sub(s.startedAt).Truncate(time.Second),
-		humanize.Bytes(uint64(s.totalBytes)),
+		float64(s.bytesTransferred)/float64(s.size)*100.0,
+		humanize.Bytes(uint64(s.size)),
+		humanize.Bytes(uint64(s.bytesTransferred)),
 		printThroughput(minuteBytes, minuteElapsedSeconds),
 		printThroughput(tenMinuteBytes, tenMinuteElapsedSeconds),
 		printThroughput(hourBytes, hourElapsedSeconds),

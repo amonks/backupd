@@ -3,7 +3,6 @@ package model
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"strings"
 )
 
@@ -79,27 +78,39 @@ func (dataset *Dataset) Plan(goal *Dataset) ([]Operation, error) {
 	return plan, nil
 }
 
-func (dataset *Dataset) ValidatePlan(ctx context.Context, goal *Dataset, plan []Operation) error {
-	defer fmt.Printf("\n")
-	result := dataset.Clone()
+func (dataset *Dataset) ValidatePlan(ctx context.Context, goal *Dataset, plan []Operation, isDebugging bool) error {
+	debug := func(v string, args ...any) {
+		if isDebugging {
+			fmt.Printf(v+"\n", args...)
+		}
+	}
+
+	debug("PLAN STEPS")
+
+	out := dataset.Clone()
 	for _, op := range plan {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		fmt.Printf(".")
-		var err error
-		if result, err = op.Apply(result); err != nil {
+		got, err := op.Apply(out)
+
+		debug("-- %s", op)
+		debug(out.Diff(got))
+		debug("")
+
+		out = got
+		if err != nil {
 			return fmt.Errorf("invalid operation %s: %w", op, err)
 		}
 	}
 
 	var errors []string
-	if !reflect.DeepEqual(goal, result) {
-		errors = append(errors, fmt.Sprintf("%s should be %s", result, goal))
+	if !goal.Eq(out) {
+		errors = append(errors, fmt.Sprintf("flaws are:\n%s", goal.Diff(out)))
 	}
 
 	if errors != nil {
-		return fmt.Errorf("applying %s to %s does not produce %s\n%s", plan, dataset, goal, strings.Join(errors, "\n"))
+		return fmt.Errorf("applying %s to %s does not produce %s:\n%s", plan, dataset, goal, strings.Join(errors, "\n"))
 	}
 	return nil
 }

@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -44,6 +45,35 @@ func (dataset *Dataset) Staleness() time.Duration {
 
 func (dataset *Dataset) String() string {
 	return fmt.Sprintf("<%s: %dL, %dR>", dataset.Name, dataset.Local.Len(), dataset.Remote.Len())
+}
+
+func (dataset *Dataset) Diff(other *Dataset) string {
+	if dataset.Eq(other) {
+		return "<no diff>"
+	}
+
+	var out strings.Builder
+	if dataset.Name != other.Name {
+		fmt.Fprintf(&out, "  name change from '%s' to '%s'\n", dataset.Name, other.Name)
+	}
+	fmt.Fprintln(&out, "  local diff")
+	fmt.Fprintf(&out, dataset.Local.Diff("    ", other.Local))
+	fmt.Fprintln(&out, "  remote diff")
+	fmt.Fprintf(&out, dataset.Remote.Diff("    ", other.Remote))
+	return out.String()
+}
+
+func (dataset *Dataset) Eq(other *Dataset) bool {
+	if dataset.Name != other.Name {
+		return false
+	}
+	if !dataset.Local.Eq(other.Local) {
+		return false
+	}
+	if !dataset.Remote.Eq(other.Remote) {
+		return false
+	}
+	return true
 }
 
 func (dataset *Dataset) Clone() *Dataset {

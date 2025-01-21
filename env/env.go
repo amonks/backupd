@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/exec"
 
+	"monks.co/backupd/config"
 	"monks.co/backupd/logger"
 	"monks.co/backupd/model"
 )
@@ -13,14 +14,14 @@ type Env struct {
 	Local, Remote *ZFS
 }
 
-func New() *Env {
+func New(config *config.Config) *Env {
 	return &Env{
-		Local: NewZFS("data/tank", Local),
+		Local: NewZFS(config.Local.Root, Local),
 		Remote: NewZFS(
-			"data1/thor/tank",
+			config.Remote.Root,
 			NewRemote(
-				"/home/ajm/.ssh/id_ed25519",
-				"root@57269.zfs.rsync.net",
+				config.Remote.SSHKey,
+				config.Remote.SSHHost,
 			),
 		),
 	}
@@ -36,7 +37,12 @@ func (env *Env) Resume(ctx context.Context, logger logger.Logger, dataset model.
 	recv := exec.Command("ssh", "-i", remote.sshKey, remote.sshHost,
 		fmt.Sprintf("zfs receive -s %s", env.Remote.WithPrefix(dataset)))
 
-	if err := Pipe(ctx, logger, send, recv); err != nil {
+	size, err := env.Local.Size(logger, send)
+	if err != nil {
+		return fmt.Errorf("getting size of resume: %w", err)
+	}
+
+	if err := Pipe(ctx, logger, size, send, recv); err != nil {
 		return err
 	}
 
@@ -54,7 +60,12 @@ func (env *Env) TransferInitialSnapshot(ctx context.Context, logger logger.Logge
 	recv := exec.Command("ssh", "-i", remote.sshKey, remote.sshHost,
 		fmt.Sprintf("zfs receive -s %s", env.Remote.WithPrefix(dataset)))
 
-	if err := Pipe(ctx, logger, send, recv); err != nil {
+	size, err := env.Local.Size(logger, send)
+	if err != nil {
+		return fmt.Errorf("getting size of transfer '%s': %w", snapshot, err)
+	}
+
+	if err := Pipe(ctx, logger, size, send, recv); err != nil {
 		return err
 	}
 
@@ -72,7 +83,12 @@ func (env *Env) TransferSnapshot(ctx context.Context, logger logger.Logger, data
 	recv := exec.Command("ssh", "-i", remote.sshKey, remote.sshHost,
 		fmt.Sprintf("zfs receive -s -F %s", env.Remote.WithPrefix(dataset)))
 
-	if err := Pipe(ctx, logger, send, recv); err != nil {
+	size, err := env.Local.Size(logger, send)
+	if err != nil {
+		return fmt.Errorf("getting size of transfer '%s': %w", snapshot, err)
+	}
+
+	if err := Pipe(ctx, logger, size, send, recv); err != nil {
 		return err
 	}
 
@@ -91,7 +107,12 @@ func (env *Env) TransferSnapshotIncrementally(ctx context.Context, logger logger
 	recv := exec.Command("ssh", "-i", remote.sshKey, remote.sshHost,
 		fmt.Sprintf("zfs receive -s -F %s", env.Remote.WithPrefix(dataset)))
 
-	if err := Pipe(ctx, logger, send, recv); err != nil {
+	size, err := env.Local.Size(logger, send)
+	if err != nil {
+		return fmt.Errorf("getting size of range transfer from '%s' to '%s': %w", from, to, err)
+	}
+
+	if err := Pipe(ctx, logger, size, send, recv); err != nil {
 		return err
 	}
 

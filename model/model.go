@@ -14,8 +14,10 @@ func New() *Model {
 
 func (model *Model) Clone() *Model {
 	out := New()
-	for k, ds := range model.Datasets {
-		out.Datasets[k] = ds.Clone()
+	if model != nil {
+		for k, ds := range model.Datasets {
+			out.Datasets[k] = ds.Clone()
+		}
 	}
 	return out
 }
