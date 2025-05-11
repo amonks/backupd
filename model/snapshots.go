@@ -32,6 +32,9 @@ func (snaps *Snapshots) String() string {
 	if snaps == nil {
 		return "<no snaps>"
 	}
+	if snaps.tail == nil || snaps.tail.val == nil {
+		return fmt.Sprintf("%d snaps", snaps.Len())
+	}
 	return fmt.Sprintf("%d → %s", snaps.Len(), snaps.tail.val.Name)
 }
 
@@ -315,25 +318,25 @@ func (snaps *Snapshots) GroupByAdjacency(subset *Snapshots) []*Snapshots {
 
 snaploop:
 	for candidate := range snaps.All() {
-		// If this snapshot is a duplicate, and if we don't want to
-		// destroy _all_ of its copies, we can't include it in a range.
-		// We should:
-		// - close the existing group, if any
-		// - add this snapshot to a self-closing group
-		// - continue
-		if dupes := snaps.GetDuplicates(candidate); len(dupes) != 0 {
-			for _, dupe := range dupes {
-				if !subset.Has(dupe) {
-					if group != nil {
-						groups = append(groups, group)
-						group = nil
+		if subset.Has(candidate) {
+			// If this snapshot is a duplicate, and if we don't want to
+			// destroy _all_ of its copies, we can't include it in a range.
+			// We should:
+			// - close the existing group, if any
+			// - add this snapshot to a self-closing group
+			// - continue
+			if dupes := snaps.GetDuplicates(candidate); len(dupes) != 0 {
+				for _, dupe := range dupes {
+					if !subset.Has(dupe) {
+						if group != nil {
+							groups = append(groups, group)
+							group = nil
+						}
+						groups = append(groups, NewSnapshots(candidate))
+						continue snaploop
 					}
-					groups = append(groups, NewSnapshots(candidate))
-					continue snaploop
 				}
 			}
-		}
-		if subset.Has(candidate) {
 			if group == nil {
 				group = NewSnapshots(candidate)
 			} else {

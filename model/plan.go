@@ -79,13 +79,9 @@ func (dataset *Dataset) Plan(goal *Dataset) ([]Operation, error) {
 }
 
 func (dataset *Dataset) ValidatePlan(ctx context.Context, goal *Dataset, plan []Operation, isDebugging bool) error {
-	debug := func(v string, args ...any) {
-		if isDebugging {
-			fmt.Printf(v+"\n", args...)
-		}
+	if isDebugging {
+		fmt.Println("PLAN STEPS")
 	}
-
-	debug("PLAN STEPS")
 
 	out := dataset.Clone()
 	for _, op := range plan {
@@ -94,9 +90,11 @@ func (dataset *Dataset) ValidatePlan(ctx context.Context, goal *Dataset, plan []
 		}
 		got, err := op.Apply(out)
 
-		debug("-- %s", op)
-		debug(out.Diff(got))
-		debug("")
+		if isDebugging {
+			fmt.Printf("-- %s\n", op)
+			fmt.Println(out.Diff(got))
+			fmt.Println()
+		}
 
 		out = got
 		if err != nil {

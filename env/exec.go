@@ -1,10 +1,10 @@
 package env
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -60,6 +60,9 @@ func Exec(logger logger.Logger, args ...string) ([]string, error) {
 		output := strings.Join(strings.Split(strings.TrimSpace(string(out)), "\n"), "; ")
 		return nil, fmt.Errorf("running '%s': %w: %s", name, err, output)
 	}
+	if string(out) == "" {
+		return nil, nil
+	}
 	return strings.Split(strings.TrimSpace(string(out)), "\n"), nil
 }
 
@@ -67,6 +70,17 @@ func Exec(logger logger.Logger, args ...string) ([]string, error) {
 // slice of lines.
 func Execf(logger logger.Logger, s string, args ...any) ([]string, error) {
 	return Exec(logger, strings.Fields(fmt.Sprintf(s, args...))...)
+}
+
+type outputCollector struct {
+	logger logger.Logger
+	buf    *bytes.Buffer
+}
+
+func (oc *outputCollector) Write(bs []byte) (int, error) {
+	oc.buf.Write(bs)
+	oc.logger.Write(bs)
+	return len(bs), nil
 }
 
 // Pipe runs `from` and `to`, with `from`'s stdout piped into `to`'s stdin.
@@ -85,8 +99,9 @@ func Pipe(ctx context.Context, logger logger.Logger, size int64, from, to *exec.
 	from.Stdout = pr
 	to.Stdin = tee
 
-	to.Stdout = os.Stdout
-	to.Stderr = os.Stderr
+	out := &outputCollector{logger, &bytes.Buffer{}}
+	to.Stdout = out
+	to.Stderr = out
 
 	// Start the `to` command.
 	if err := to.Start(); err != nil {
@@ -159,7 +174,7 @@ func Pipe(ctx context.Context, logger logger.Logger, size int64, from, to *exec.
 		select {
 		case err := <-c:
 			if err != nil {
-				return fmt.Errorf("'to' command error: %w", err)
+				return fmt.Errorf("'to' command error: %w (%s)", err, out.buf.Bytes())
 			}
 
 			cancel()

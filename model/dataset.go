@@ -51,6 +51,12 @@ func (dataset *Dataset) Diff(other *Dataset) string {
 	if dataset.Eq(other) {
 		return "<no diff>"
 	}
+	if dataset == nil {
+		return "from nil to non-nil"
+	}
+	if other == nil {
+		return "from non-nill to nil"
+	}
 
 	var out strings.Builder
 	if dataset.Name != other.Name {
@@ -64,6 +70,12 @@ func (dataset *Dataset) Diff(other *Dataset) string {
 }
 
 func (dataset *Dataset) Eq(other *Dataset) bool {
+	if dataset == nil && other == nil {
+		return true
+	}
+	if dataset == nil || other == nil {
+		return false
+	}
 	if dataset.Name != other.Name {
 		return false
 	}

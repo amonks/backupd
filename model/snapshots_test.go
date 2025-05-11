@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -151,6 +152,48 @@ func TestSnapshots_Difference(t *testing.T) {
 		t.Errorf("Expected difference to contain only snap1")
 	}
 }
+
+func TestSnapshots_GroupByAdjacency_Duplicates(t *testing.T) {
+
+	snap1 := &Snapshot{Name: "snap1", CreatedAt: 1}
+	snap2a := &Snapshot{Name: "snap2a", CreatedAt: 2}
+	snap2b := &Snapshot{Name: "snap2b", CreatedAt: 2}
+	snap3 := &Snapshot{Name: "snap3", CreatedAt: 3}
+
+	snaps := NewSnapshots(snap1, snap2a, snap2b, snap3)
+
+	delsets := []*Snapshots{
+		NewSnapshots(snap1),
+		NewSnapshots(snap2a),
+		NewSnapshots(snap2b),
+		NewSnapshots(snap1, snap2a, snap2b, snap3),
+	}
+
+	for i, delset := range delsets {
+		t.Run(fmt.Sprintf("%d: %d dels", i, delset.Len()), func(t *testing.T) {
+			ranges := snaps.GroupByAdjacency(delset)
+			for _, delrange := range ranges {
+				for snap := range delrange.All() {
+					if !delset.Has(snap) {
+						t.Errorf("deleting %s and should not", snap)
+					}
+				}
+			}
+			for snap := range delset.All() {
+				isDeleted := false
+				for _, delrange := range ranges {
+					if delrange.Has(snap) {
+						isDeleted = true
+					}
+				}
+				if !isDeleted {
+					t.Errorf("failing to delete %s", snap)
+				}
+			}
+		})
+	}
+}
+
 func TestSnapshots_GroupByAdjacency(t *testing.T) {
 	snap1 := &Snapshot{Name: "snap1", CreatedAt: 1}
 	snap2 := &Snapshot{Name: "snap2", CreatedAt: 2}

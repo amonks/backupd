@@ -40,7 +40,7 @@ func (state *Dataset) Goal(localPolicy, remotePolicy map[string]int) *Dataset {
 		}
 
 		// too bad; already skipped it :shrug:
-		if snap.CreatedAt < remoteSnapshots.Newest().CreatedAt {
+		if newest := remoteSnapshots.Newest(); newest != nil && snap.CreatedAt < newest.CreatedAt {
 			continue
 		}
 

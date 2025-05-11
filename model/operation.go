@@ -178,7 +178,7 @@ func (op *SnapshotRangeTransfer) Apply(dataset *Dataset) (*Dataset, error) {
 		return nil, fmt.Errorf("cannot range-transfer into empty dataset")
 	}
 	if !op.Start.Eq(dataset.Remote.Newest()) {
-		return nil, fmt.Errorf("too late to transfer %s", op.Start)
+		return nil, fmt.Errorf("too late to transfer %s: newest on remote is %s", op.Start, dataset.Remote.Newest())
 	}
 	if op.Start.CreatedAt >= op.End.CreatedAt {
 		return nil, fmt.Errorf("invalid range %s to %s", op.Start, op.End)
@@ -187,7 +187,7 @@ func (op *SnapshotRangeTransfer) Apply(dataset *Dataset) (*Dataset, error) {
 		return nil, fmt.Errorf("remote doesn't have range-start %s", op.Start)
 	}
 	if dataset.Remote.Has(op.End) {
-		return nil, fmt.Errorf("remote already has range-end %s", op.Start)
+		return nil, fmt.Errorf("remote already has range-end %s", op.End)
 	}
 	if !dataset.Local.Has(op.Start) {
 		return nil, fmt.Errorf("local doesn't have range-start %s", op.Start)

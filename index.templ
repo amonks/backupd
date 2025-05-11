@@ -7,48 +7,277 @@ import (
 	"time"
 )
 
-templ index(state *model.Model, progress progress.Value) {
+templ index(state *model.Model, progress progress.Value, dataset string, dryrun bool) {
 	<!DOCTYPE html>
 	<html>
 		<head>
 			<title>backupd</title>
 			<style>
-				td {
-					padding: .2em 2em;
+				body {
+					font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+					margin: 0;
+					padding: 0;
+					display: flex;
+					height: 100vh;
+				}
+				.dryrun-banner {
+					background-color: #ff9800;
+					color: white;
+					text-align: center;
+					padding: 0.5rem;
+					position: fixed;
+					top: 0;
+					left: 0;
+					right: 0;
+					z-index: 1000;
+					font-weight: bold;
+				}
+				body.dryrun-active {
+					padding-top: 2.5rem;
+				}
+				.sidebar {
+					width: 250px;
+					background-color: #f5f5f5;
+					border-right: 1px solid #ddd;
+					padding: 1rem;
+					overflow-y: auto;
+				}
+				.sidebar h2 {
+					margin-top: 0;
+					font-size: 1.2rem;
+				}
+				.main-content {
+					flex: 1;
+					padding: 1rem;
+					overflow-y: auto;
+				}
+				.dataset-link {
+					display: block;
+					padding: 0.5rem;
+					text-decoration: none;
+					color: #333;
+					border-radius: 4px;
+					margin-bottom: 0.25rem;
+				}
+				.dataset-link:hover, .dataset-link.active {
+					background-color: #e0e0e0;
+				}
+				.dataset-link .status {
+					float: right;
+					font-size: 0.8rem;
+					color: #666;
+				}
+				.dataset-link .status.stale {
+					color: #f44336;
+				}
+				table {
+					width: 100%;
+					border-collapse: collapse;
+					margin-bottom: 1rem;
+				}
+				th, td {
+					padding: .2em 1em;
+					text-align: left;
+					border-bottom: 1px solid #ddd;
+				}
+				th {
+					font-weight: bold;
+				}
+				.logs {
+					background-color: #f9f9f9;
+					padding: 1rem;
+					border-radius: 4px;
+					margin-top: 1rem;
+				}
+				.logs h2 {
+					margin-top: 0;
+				}
+				.logs ul {
+					list-style-type: none;
+					padding: 0;
+					margin: 0;
+				}
+				.logs li {
+					padding: 0.25rem 0;
+					font-family: monospace;
+				}
+				.snapshot-table th, .snapshot-table td {
+					text-align: center;
+				}
+				.snapshot-present {
+					color: #4caf50;
+				}
+				.snapshot-absent {
+					color: #f44336;
 				}
 			</style>
 		</head>
-		<body>
-			<table>
-				<thead>
-					<tr>
-						<th>dataset</th>
-						<th>staleness</th>
-						<th>local</th>
-						<th>remote</th>
-					</tr>
-				</thead>
-				<tbody>
-					for _, ds := range state.ListDatasets() {
-						<tr>
-							<td>{ ds.String() }</td>
-							<td>{ fmt.Sprintf("%s", state.Datasets[ds].Staleness().Truncate(time.Minute)) }</td>
-							<td><code>{ state.Datasets[ds].Local.String() }</code></td>
-							<td><code>{ state.Datasets[ds].Remote.String() }</code></td>
-						</tr>
-					}
-				</tbody>
-			</table>
-			for ds, logs := range progress.All() {
-				<section>
-					<h2>{ ds.String() }</h2>
-					<ul>
-						for _, log := range logs {
-							<li><code>{ log.LogAt.Format(time.DateTime) } :: { log.Log }</code></li>
-						}
-					</ul>
-				</section>
+		<body class={ templ.KV("dryrun-active", dryrun) }>
+			if dryrun {
+				<div class="dryrun-banner">DRY RUN MODE - No actual transfers or deletions will occur</div>
 			}
+			<div class="sidebar">
+				<h2>Datasets</h2>
+				for _, ds := range state.ListDatasets() {
+					@renderDatasetLink(ds, state.Datasets[ds], dataset)
+				}
+			</div>
+			<div class="main-content">
+				if dataset == "" || dataset == "global" {
+					<h1>backupd Overview</h1>
+					<table>
+						<thead>
+							<tr>
+								<th>dataset</th>
+								<th>staleness</th>
+								<th>local</th>
+								<th>remote</th>
+							</tr>
+						</thead>
+						<tbody>
+							for _, ds := range state.ListDatasets() {
+								<tr>
+									<td>{ ds.String() }</td>
+									<td>{ fmt.Sprintf("%s", state.Datasets[ds].Staleness().Truncate(time.Minute)) }</td>
+									<td><code>{ state.Datasets[ds].Local.String() }</code></td>
+									<td><code>{ state.Datasets[ds].Remote.String() }</code></td>
+								</tr>
+							}
+						</tbody>
+					</table>
+					
+					// Display only global and root dataset logs on the overview page
+					for ds, logs := range progress.All() {
+						if ds.String() == "global" || ds.String() == "<root>" {
+							<section class="logs">
+								<h2>{ ds.String() }</h2>
+								<ul>
+									for i := len(logs) - 1; i >= 0; i-- {
+										<li><code>{ logs[i].LogAt.Format(time.DateTime) } :: { logs[i].Log }</code></li>
+									}
+								</ul>
+							</section>
+						}
+					}
+				} else {
+					<h1>Dataset: { dataset }</h1>
+					if ds, ok := state.Datasets[model.DatasetName(dataset)]; ok {
+						<div>
+							<h2>Status</h2>
+							<table>
+								<tr>
+									<th>Local snapshots</th>
+									<td><code>{ ds.Local.String() }</code></td>
+								</tr>
+								<tr>
+									<th>Remote snapshots</th>
+									<td><code>{ ds.Remote.String() }</code></td>
+								</tr>
+								<tr>
+									<th>Staleness</th>
+									<td>{ fmt.Sprintf("%s", ds.Staleness().Truncate(time.Minute)) }</td>
+								</tr>
+							</table>
+							
+							<h2>Snapshots</h2>
+							<table class="snapshot-table">
+								<thead>
+									<tr>
+										<th>Snapshot</th>
+										<th>Created</th>
+										<th>Local</th>
+										<th>Remote</th>
+									</tr>
+								</thead>
+								<tbody>
+									// Create a union of local and remote snapshots
+									@snapshotRows(ds)
+								</tbody>
+							</table>
+						</div>
+						
+						// Get logs for this specific dataset
+						if logs := progress.Get(model.DatasetName(dataset)); logs != nil && len(logs) > 0 {
+							<section class="logs">
+								<h2>Logs</h2>
+								<ul>
+									for i := len(logs) - 1; i >= 0; i-- {
+										<li><code>{ logs[i].LogAt.Format(time.DateTime) } :: { logs[i].Log }</code></li>
+									}
+								</ul>
+							</section>
+						}
+					} else {
+						<p>Dataset not found.</p>
+					}
+				}
+			</div>
 		</body>
 	</html>
+}
+
+templ renderDatasetLink(ds model.DatasetName, dataset *model.Dataset, currentDataset string) {
+	// Create a URL-safe path for the dataset
+	// For the special root dataset, we need a special case
+	if ds.String() == "<root>" {
+		<a href={ templ.SafeURL("/root") } class={ "dataset-link", templ.KV("active", ds.String() == currentDataset) }>
+			{ ds.String() }
+			<span class={ "status", templ.KV("stale", dataset.Staleness() > time.Minute*10) }>
+				{ fmt.Sprintf("%s", dataset.Staleness().Truncate(time.Minute)) }
+			</span>
+		</a>
+	} else {
+		// For normal datasets, create a URL using just the dataset name without the leading slash
+		// This allows the URL router to handle it properly
+		<a href={ templ.SafeURL("/" + ds.String()[1:]) } class={ "dataset-link", templ.KV("active", ds.String() == currentDataset) }>
+			{ ds.String() }
+			<span class={ "status", templ.KV("stale", dataset.Staleness() > time.Minute*10) }>
+				{ fmt.Sprintf("%s", dataset.Staleness().Truncate(time.Minute)) }
+			</span>
+		</a>
+	}
+}
+
+templ snapshotRows(ds *model.Dataset) {
+	// Create a union of snapshots
+	if ds.Local != nil && ds.Remote != nil {
+		for snap := range ds.Local.Union(ds.Remote).AllDesc() {
+			<tr>
+				<td>{ snap.Name }</td>
+				<td>{ snap.Time().Format(time.DateTime) }</td>
+				<td>
+					if ds.Local.Has(snap) {
+						<span class="snapshot-present">✓</span>
+					} else {
+						<span class="snapshot-absent">✗</span>
+					}
+				</td>
+				<td>
+					if ds.Remote.Has(snap) {
+						<span class="snapshot-present">✓</span>
+					} else {
+						<span class="snapshot-absent">✗</span>
+					}
+				</td>
+			</tr>
+		}
+	} else if ds.Local != nil {
+		for snap := range ds.Local.AllDesc() {
+			<tr>
+				<td>{ snap.Name }</td>
+				<td>{ snap.Time().Format(time.DateTime) }</td>
+				<td><span class="snapshot-present">✓</span></td>
+				<td><span class="snapshot-absent">✗</span></td>
+			</tr>
+		}
+	} else if ds.Remote != nil {
+		for snap := range ds.Remote.AllDesc() {
+			<tr>
+				<td>{ snap.Name }</td>
+				<td>{ snap.Time().Format(time.DateTime) }</td>
+				<td><span class="snapshot-absent">✗</span></td>
+				<td><span class="snapshot-present">✓</span></td>
+			</tr>
+		}
+	}
 }

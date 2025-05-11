@@ -16,6 +16,11 @@ import (
 )
 
 func main() {
+	defer func() {
+		if err := recover(); err != nil {
+			log.Fatalf("panic: %v", err)
+		}
+	}()
 	if err := run(); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, flag.ErrHelp) {
 		log.Fatalf("error: %v", err)
 	}
@@ -36,15 +41,17 @@ func run() error {
 	var (
 		debugDS string
 		logfile string
-		addr string
+		addr    string
+		dryrun  bool
 	)
 	flag.StringVar(&debugDS, "debug", "", "debug a dataset")
 	flag.StringVar(&logfile, "logfile", "", "log to a file")
 	flag.StringVar(&addr, "addr", "0.0.0.0:8888", "server addr")
+	flag.BoolVar(&dryrun, "dryrun", false, "refresh state but don't transfer or delete snapshots")
 	flag.Parse()
 
 	ctx := NewSigctx()
-	b := New(config, addr)
+	b := New(config, addr, dryrun)
 
 	if debugDS != "" {
 		logger := logger.New("refresh")

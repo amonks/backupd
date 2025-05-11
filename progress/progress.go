@@ -84,9 +84,16 @@ func (pr *Progress) Log(ds model.DatasetName, s string, args ...any) {
 			}
 
 			seen = true
-			out[k] = &Process{
-				isDone: false,
-				logs:   append(v.logs, entry),
+			if old[k].isDone {
+				out[k] = &Process{
+					isDone: false,
+					logs:   []LogEntry{entry},
+				}
+			} else {
+				out[k] = &Process{
+					isDone: false,
+					logs:   append(v.logs, entry),
+				}
 			}
 		}
 		if !seen {

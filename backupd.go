@@ -17,6 +17,7 @@ import (
 	"monks.co/backupd/logger"
 	"monks.co/backupd/model"
 	"monks.co/backupd/progress"
+	"monks.co/backupd/snitch"
 )
 
 type Backupd struct {
@@ -25,15 +26,17 @@ type Backupd struct {
 	progress *progress.Progress
 	env      *env.Env
 	addr     string
+	dryrun   bool
 }
 
-func New(config *config.Config, addr string) *Backupd {
+func New(config *config.Config, addr string, dryrun bool) *Backupd {
 	return &Backupd{
 		config:   config,
 		state:    atom.New[*model.Model](nil),
 		progress: progress.New(),
 		env:      env.New(config),
 		addr:     addr,
+		dryrun:   dryrun,
 	}
 }
 
@@ -54,10 +57,49 @@ func (b *Backupd) Go(ctx context.Context) error {
 func (b *Backupd) Serve(ctx context.Context) error {
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, req *http.Request) {
+	// Handle all routes with the generic handler and implement our own routing logic
+	mux.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
+		// Only handle GET requests
+		if req.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		
 		state := b.state.Deref()
 		progress := b.progress.Deref()
-		templ.Handler(index(state, progress)).ServeHTTP(w, req)
+		
+		// Get the path without the leading slash
+		path := req.URL.Path
+		if path == "/" {
+			// Root path redirects to global view
+			http.Redirect(w, req, "/global", http.StatusFound)
+			return
+		}
+
+		// Remove leading slash for routing but keep it for special cases
+		trimmedPath := strings.TrimPrefix(path, "/")
+		
+		// Handle special cases first
+		if trimmedPath == "global" {
+			templ.Handler(index(state, progress, "global", b.dryrun)).ServeHTTP(w, req)
+			return
+		} else if trimmedPath == "root" {
+			// The empty string is used as the dataset name for the root dataset
+			// Check if the root dataset exists in the model
+			_, ok := state.Datasets[""]
+			if !ok {
+				http.Error(w, "Root dataset not found", http.StatusNotFound)
+				return
+			}
+			templ.Handler(index(state, progress, "", b.dryrun)).ServeHTTP(w, req)
+			return
+		}
+		
+		// For all other paths, treat them as dataset paths
+		// Add leading slash for the dataset model
+		datasetForModel := "/" + trimmedPath
+		
+		templ.Handler(index(state, progress, datasetForModel, b.dryrun)).ServeHTTP(w, req)
 	})
 
 	return listenAndServe(ctx, b.addr, mux)
@@ -65,6 +107,10 @@ func (b *Backupd) Serve(ctx context.Context) error {
 
 func (b *Backupd) Sync(ctx context.Context) error {
 	for {
+		b.progress.Log(model.DatasetName("global"), "start")
+		inAnHour := time.After(time.Hour)
+		allOK := true
+
 		if err := b.refreshState(ctx); err != nil {
 			return fmt.Errorf("refreshing state: %w", err)
 		}
@@ -77,12 +123,26 @@ func (b *Backupd) Sync(ctx context.Context) error {
 			b.progress.Log(model.DatasetName("global"), "syncing '%s'", ds)
 
 			if err := b.syncDataset(ctx, ds); err != nil {
+				allOK = false
 				err := fmt.Errorf("syncing '%s': %w", ds, err)
+				// Log to both global and dataset-specific logs
 				b.progress.Log(model.DatasetName("global"), "sync error; skipping dataset: %s", err)
+				b.progress.Log(ds, "sync error: %s", err)
 			}
 		}
 
-		b.progress.Log(model.DatasetName("global"), "synced all datasets; back to the top")
+		b.progress.Log(model.DatasetName("global"), "synced all datasets")
+		if allOK {
+			b.progress.Log(model.DatasetName("global"), "waiting to restart")
+			if err := snitch.OK("97cb3d76e0"); err != nil {
+				b.progress.Log(model.DatasetName("global"), "snitch error: %v", err)
+			} else {
+				b.progress.Log(model.DatasetName("global"), "snitched success")
+			}
+			<-inAnHour
+		} else {
+			b.progress.Log(model.DatasetName("global"), "back to top")
+		}
 	}
 }
 
@@ -188,6 +248,16 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 			return fmt.Errorf("applying op '%s' to in-memory state of '%s': %w", op, dataset, err)
 		}
 
+		// In dryrun mode, we don't actually apply the operations to the ZFS environment
+		// We just update the in-memory state for display purposes
+		if b.dryrun {
+			logger.Printf("-- [DRYRUN] Would update zfs environment with op '%s'", op)
+			logger.Printf("-- [DRYRUN] Updating in-memory state only...")
+			b.state.Swap(model.ReplaceDataset(dataset, newState))
+			logger.Printf("-- [DRYRUN] Done.")
+			continue
+		}
+
 		allowRetry := false
 		attempts := 0
 	retry:
@@ -231,6 +301,12 @@ func (b *Backupd) handleIncompleteTransfer(ctx context.Context, logger logger.Lo
 		return fmt.Errorf("getting resume token for '%s': %w", dataset, err)
 	}
 	if token == "" {
+		return nil
+	}
+
+	// If in dryrun mode, skip the actual resume operation but log it
+	if b.dryrun {
+		logger.Printf("[DRYRUN] Would resume transfer for '%s' with token '%s'", dataset, token)
 		return nil
 	}
 

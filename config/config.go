@@ -22,7 +22,10 @@ type Config struct {
 }
 
 var pathHierarchy = []string{
+	"/etc/backupd.toml",
 	"/usr/local/etc/backupd.toml",
+	"/opt/local/etc/backupd.toml",
+	"/Library/Application Support/co.monks.backupd/backupd.toml",
 }
 
 func Load() (*Config, error) {

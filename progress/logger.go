@@ -19,6 +19,10 @@ type ProgressLogger struct {
 	pr     *Progress
 }
 
+func (pl *ProgressLogger) Write(bs []byte) (int, error) {
+	return pl.logger.Write(bs)
+}
+
 func (pl *ProgressLogger) Printf(s string, args ...any) {
 	pl.logger.Printf(s, args...)
 	pl.pr.Log(pl.ds, s, args...)
