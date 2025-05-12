@@ -9,7 +9,8 @@ import (
 )
 
 type Config struct {
-	Remote struct {
+	SnitchID string `toml:"snitch_id"`
+	Remote   struct {
 		SSHKey  string         `toml:"ssh_key"`
 		SSHHost string         `toml:"ssh_host"`
 		Policy  map[string]int `toml:"policy"`

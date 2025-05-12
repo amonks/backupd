@@ -107,7 +107,7 @@ func (b *Backupd) Serve(ctx context.Context) error {
 
 func (b *Backupd) Sync(ctx context.Context) error {
 	for {
-		b.progress.Log(model.DatasetName("global"), "start")
+		b.progress.Log(model.GlobalDataset, "start")
 		inAnHour := time.After(time.Hour)
 		allOK := true
 
@@ -120,32 +120,35 @@ func (b *Backupd) Sync(ctx context.Context) error {
 				return err
 			}
 
-			b.progress.Log(model.DatasetName("global"), "syncing '%s'", ds)
+			b.progress.Log(model.GlobalDataset, "syncing '%s'", ds)
 
 			if err := b.syncDataset(ctx, ds); err != nil {
 				allOK = false
 				err := fmt.Errorf("syncing '%s': %w", ds, err)
 				// Log to both global and dataset-specific logs
-				b.progress.Log(model.DatasetName("global"), "sync error; skipping dataset: %s", err)
+				b.progress.Log(model.GlobalDataset, "sync error; skipping dataset: %s", err)
 				b.progress.Log(ds, "sync error: %s", err)
 			}
 		}
 
-		b.progress.Log(model.DatasetName("global"), "synced all datasets")
+		b.progress.Log(model.GlobalDataset, "synced all datasets")
 		if allOK {
-			b.progress.Log(model.DatasetName("global"), "waiting to restart")
-			if err := snitch.OK("97cb3d76e0"); err != nil {
-				b.progress.Log(model.DatasetName("global"), "snitch error: %v", err)
-			} else {
-				b.progress.Log(model.DatasetName("global"), "snitched success")
+			if b.config.SnitchID != "" {
+				b.progress.Log(model.GlobalDataset, "alerting deadmanssnitch")
+				if err := snitch.OK(b.config.SnitchID); err != nil {
+					b.progress.Log(model.GlobalDataset, "snitch error: %v", err)
+				} else {
+					b.progress.Log(model.GlobalDataset, "snitched success")
+				}
 			}
+			b.progress.Log(model.GlobalDataset, "waiting to restart")
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-inAnHour:
 			}
 		} else {
-			b.progress.Log(model.DatasetName("global"), "back to top")
+			b.progress.Log(model.GlobalDataset, "back to top")
 		}
 	}
 }
@@ -379,4 +382,3 @@ func (b *Backupd) Plan(ctx context.Context, dataset model.DatasetName) error {
 
 	return nil
 }
-

@@ -1,9 +1,0 @@
-- group operations by dataset
-- handle n datasets at a time
-- webserver
-- report if refetch changes state unexpectedly
-- find total transfer size, log percentage
-
-bugs:
-- db had snapshots that didn't exist one time
-

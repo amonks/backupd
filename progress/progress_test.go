@@ -8,11 +8,11 @@ import (
 
 func TestProgress(t *testing.T) {
 	progress := New()
-	progress.Log(model.DatasetName("global"), "start")
+	progress.Log(model.GlobalDataset, "start")
 	progress.Log(model.DatasetName("a"), "hello %s", "world")
 	progress.Log(model.DatasetName("a"), "hello %s", "stars")
 	progress.Done(model.DatasetName("a"))
-	progress.Log(model.DatasetName("global"), "end")
+	progress.Log(model.GlobalDataset, "end")
 
 	logs := progress.Deref()
 	if len(logs) != 2 {

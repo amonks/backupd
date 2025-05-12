@@ -8,6 +8,8 @@ import (
 
 type DatasetName string
 
+const GlobalDataset DatasetName = "global"
+
 func (dn DatasetName) String() string {
 	switch dn {
 	case "":
