@@ -64,10 +64,10 @@ func (b *Backupd) Serve(ctx context.Context) error {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		
+
 		state := b.state.Deref()
 		progress := b.progress.Deref()
-		
+
 		// Get the path without the leading slash
 		path := req.URL.Path
 		if path == "/" {
@@ -78,7 +78,7 @@ func (b *Backupd) Serve(ctx context.Context) error {
 
 		// Remove leading slash for routing but keep it for special cases
 		trimmedPath := strings.TrimPrefix(path, "/")
-		
+
 		// Handle special cases first
 		if trimmedPath == "global" {
 			templ.Handler(index(state, progress, "global", b.dryrun)).ServeHTTP(w, req)
@@ -94,11 +94,11 @@ func (b *Backupd) Serve(ctx context.Context) error {
 			templ.Handler(index(state, progress, "", b.dryrun)).ServeHTTP(w, req)
 			return
 		}
-		
+
 		// For all other paths, treat them as dataset paths
 		// Add leading slash for the dataset model
 		datasetForModel := "/" + trimmedPath
-		
+
 		templ.Handler(index(state, progress, datasetForModel, b.dryrun)).ServeHTTP(w, req)
 	})
 
@@ -139,7 +139,11 @@ func (b *Backupd) Sync(ctx context.Context) error {
 			} else {
 				b.progress.Log(model.DatasetName("global"), "snitched success")
 			}
-			<-inAnHour
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-inAnHour:
+			}
 		} else {
 			b.progress.Log(model.DatasetName("global"), "back to top")
 		}
@@ -375,3 +379,4 @@ func (b *Backupd) Plan(ctx context.Context, dataset model.DatasetName) error {
 
 	return nil
 }
+
