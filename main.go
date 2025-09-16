@@ -54,6 +54,9 @@ func run() error {
 	b := New(config, addr, dryrun)
 
 	if debugDS != "" {
+		if debugDS == "<root>" {
+			debugDS = ""
+		}
 		logger := logger.New("refresh")
 		ds := model.DatasetName(debugDS)
 		if err := b.refreshDataset(ctx, logger, ds); err != nil {
