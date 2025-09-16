@@ -120,6 +120,13 @@ func (b *Backupd) Sync(ctx context.Context) error {
 				return err
 			}
 
+			b.progress.Log(model.GlobalDataset, "refreshing dataset '%s'", ds)
+			logger := b.progress.Logger("refresh")
+			if err := b.refreshDataset(ctx, logger, ds); err != nil {
+				b.progress.Log(model.GlobalDataset, "refresh error for '%s': %s", ds, err)
+			}
+			logger.Done()
+
 			b.progress.Log(model.GlobalDataset, "syncing '%s'", ds)
 
 			if err := b.syncDataset(ctx, ds); err != nil {
