@@ -49,7 +49,7 @@ func ReplaceDataset(name DatasetName, dataset *Dataset) func(*Model) *Model {
 	}
 }
 
-func AddLocalDataset(name DatasetName, snapshots []*Snapshot) func(*Model) *Model {
+func AddLocalDataset(name DatasetName, snapshots []*Snapshot, size *DatasetSize) func(*Model) *Model {
 	return func(old *Model) *Model {
 		out := old.Clone()
 
@@ -59,12 +59,16 @@ func AddLocalDataset(name DatasetName, snapshots []*Snapshot) func(*Model) *Mode
 			}
 		}
 		out.Datasets[name].Local = NewSnapshots(snapshots...)
+		// Only update size if the new size is not nil, preserving existing size info
+		if size != nil {
+			out.Datasets[name].LocalSize = size
+		}
 
 		return out
 	}
 }
 
-func AddRemoteDataset(name DatasetName, snapshots []*Snapshot) func(*Model) *Model {
+func AddRemoteDataset(name DatasetName, snapshots []*Snapshot, size *DatasetSize) func(*Model) *Model {
 	return func(old *Model) *Model {
 		out := old.Clone()
 
@@ -74,6 +78,10 @@ func AddRemoteDataset(name DatasetName, snapshots []*Snapshot) func(*Model) *Mod
 			}
 		}
 		out.Datasets[name].Remote = NewSnapshots(snapshots...)
+		// Only update size if the new size is not nil, preserving existing size info
+		if size != nil {
+			out.Datasets[name].RemoteSize = size
+		}
 
 		return out
 	}

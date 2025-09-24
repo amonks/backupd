@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/dustin/go-humanize"
 )
 
 type DatasetName string
@@ -32,9 +34,32 @@ const (
 	Remote
 )
 
+type DatasetSize struct {
+	Used              int64  // Total on-disk space with children, including all snapshots
+	LogicalReferenced int64  // Logical size of most recent snapshot (w/o children)
+}
+
+func (ds *DatasetSize) String() string {
+	if ds == nil {
+		return "<no size>"
+	}
+	return humanize.Bytes(uint64(ds.Used))
+}
+
+func (ds *DatasetSize) Clone() *DatasetSize {
+	if ds == nil {
+		return nil
+	}
+	return &DatasetSize{
+		Used:              ds.Used,
+		LogicalReferenced: ds.LogicalReferenced,
+	}
+}
+
 type Dataset struct {
 	Name          DatasetName
 	Local, Remote *Snapshots
+	LocalSize, RemoteSize *DatasetSize
 }
 
 func (dataset *Dataset) Staleness() time.Duration {
@@ -46,7 +71,15 @@ func (dataset *Dataset) Staleness() time.Duration {
 }
 
 func (dataset *Dataset) String() string {
-	return fmt.Sprintf("<%s: %dL, %dR>", dataset.Name, dataset.Local.Len(), dataset.Remote.Len())
+	localSize := ""
+	remoteSize := ""
+	if dataset.LocalSize != nil {
+		localSize = fmt.Sprintf(" %s", humanize.Bytes(uint64(dataset.LocalSize.Used)))
+	}
+	if dataset.RemoteSize != nil {
+		remoteSize = fmt.Sprintf(" %s", humanize.Bytes(uint64(dataset.RemoteSize.Used)))
+	}
+	return fmt.Sprintf("<%s: %dL%s, %dR%s>", dataset.Name, dataset.Local.Len(), localSize, dataset.Remote.Len(), remoteSize)
 }
 
 func (dataset *Dataset) Diff(other *Dataset) string {
@@ -65,9 +98,9 @@ func (dataset *Dataset) Diff(other *Dataset) string {
 		fmt.Fprintf(&out, "  name change from '%s' to '%s'\n", dataset.Name, other.Name)
 	}
 	fmt.Fprintln(&out, "  local diff")
-	fmt.Fprintf(&out, dataset.Local.Diff("    ", other.Local))
+	fmt.Fprint(&out, dataset.Local.Diff("    ", other.Local))
 	fmt.Fprintln(&out, "  remote diff")
-	fmt.Fprintf(&out, dataset.Remote.Diff("    ", other.Remote))
+	fmt.Fprint(&out, dataset.Remote.Diff("    ", other.Remote))
 	return out.String()
 }
 
@@ -92,8 +125,10 @@ func (dataset *Dataset) Eq(other *Dataset) bool {
 
 func (dataset *Dataset) Clone() *Dataset {
 	return &Dataset{
-		Name:   dataset.Name,
-		Local:  dataset.Local.Clone(),
-		Remote: dataset.Remote.Clone(),
+		Name:       dataset.Name,
+		Local:      dataset.Local.Clone(),
+		Remote:     dataset.Remote.Clone(),
+		LocalSize:  dataset.LocalSize.Clone(),
+		RemoteSize: dataset.RemoteSize.Clone(),
 	}
 }

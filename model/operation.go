@@ -67,9 +67,7 @@ func (op *SnapshotRangeDeletion) Apply(ds *Dataset) (*Dataset, error) {
 	for _, del := range dels {
 		var dupedels []*Snapshot
 		if dupes := target.GetDuplicates(del); len(dupes) > 0 {
-			for _, dupe := range dupes {
-				dupedels = append(dupedels, dupe)
-			}
+			dupedels = append(dupedels, dupes...)
 		}
 		for _, dupe := range dupedels {
 			target.Del(dupe)

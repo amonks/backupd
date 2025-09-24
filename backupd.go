@@ -170,34 +170,34 @@ func (b *Backupd) refreshState(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("getting local datasets: %s", err)
 	}
-	for _, dataset := range localDatasets {
+	for _, datasetInfo := range localDatasets {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 
-		snapshots, err := b.env.Local.GetSnapshots(logger, dataset)
+		snapshots, err := b.env.Local.GetSnapshots(logger, datasetInfo.Name)
 		if err != nil {
-			return fmt.Errorf("getting snapshots for '%s': %w", dataset, err)
+			return fmt.Errorf("getting snapshots for '%s': %w", datasetInfo.Name, err)
 		}
 
-		b.state.Swap(model.AddLocalDataset(dataset, snapshots))
+		b.state.Swap(model.AddLocalDataset(datasetInfo.Name, snapshots, datasetInfo.Size))
 	}
 
 	remoteDatasets, err := b.env.Remote.GetDatasets(logger)
 	if err != nil {
 		return fmt.Errorf("getting remote datasets: %w", err)
 	}
-	for _, dataset := range remoteDatasets {
+	for _, datasetInfo := range remoteDatasets {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 
-		snapshots, err := b.env.Remote.GetSnapshots(logger, dataset)
+		snapshots, err := b.env.Remote.GetSnapshots(logger, datasetInfo.Name)
 		if err != nil {
-			return fmt.Errorf("getting remote snapshots for '%s': %w", dataset, err)
+			return fmt.Errorf("getting remote snapshots for '%s': %w", datasetInfo.Name, err)
 		}
 
-		b.state.Swap(model.AddRemoteDataset(dataset, snapshots))
+		b.state.Swap(model.AddRemoteDataset(datasetInfo.Name, snapshots, datasetInfo.Size))
 	}
 
 	return nil
@@ -210,7 +210,9 @@ func (b *Backupd) refreshDataset(ctx context.Context, logger logger.Logger, data
 			return fmt.Errorf("getting snapshots for '%s': %w", dataset, err)
 		}
 
-		b.state.Swap(model.AddLocalDataset(dataset, snapshots))
+		// For individual dataset refresh, we don't have size info readily available
+		// This could be optimized later by caching or fetching size info
+		b.state.Swap(model.AddLocalDataset(dataset, snapshots, nil))
 	}
 
 	{
@@ -219,7 +221,7 @@ func (b *Backupd) refreshDataset(ctx context.Context, logger logger.Logger, data
 			return fmt.Errorf("getting remote snapshots for '%s': %w", dataset, err)
 		}
 
-		b.state.Swap(model.AddRemoteDataset(dataset, snapshots))
+		b.state.Swap(model.AddRemoteDataset(dataset, snapshots, nil))
 	}
 
 	return nil
@@ -377,7 +379,7 @@ func (b *Backupd) Plan(ctx context.Context, dataset model.DatasetName) error {
 		return fmt.Errorf("constructing plan: %w", err)
 	}
 	fmt.Println("ACHIEVING CHANGE")
-	fmt.Printf(ds.Diff(goal))
+	fmt.Print(ds.Diff(goal))
 	fmt.Println("VIA PLAN")
 	for _, op := range plan {
 		fmt.Printf("- %s\n", op)

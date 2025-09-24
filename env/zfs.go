@@ -81,14 +81,43 @@ func (zfs *ZFS) AbortResumable(logger logger.Logger, dataset model.DatasetName) 
 	return nil
 }
 
-func (zfs *ZFS) GetDatasets(logger logger.Logger) ([]model.DatasetName, error) {
-	datasets, err := zfs.x.Execf(logger, "zfs list -H -t filesystem -o name -d 1000 %s", zfs.prefix)
+type DatasetInfo struct {
+	Name model.DatasetName
+	Size *model.DatasetSize
+}
+
+func (zfs *ZFS) GetDatasets(logger logger.Logger) ([]DatasetInfo, error) {
+	// Use used for total on-disk size with children including all snapshots
+	// and logicalreferenced for logical size of most recent snapshot (w/o children)
+	rows, err := zfs.x.Execf(logger, "zfs list -H -p -t filesystem -o name,used,logicalreferenced -d 1000 %s", zfs.prefix)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("zfs list: %w", err)
 	}
-	out := make([]model.DatasetName, len(datasets))
-	for i, d := range datasets {
-		out[i] = zfs.WithoutPrefix(d)
+
+	out := make([]DatasetInfo, len(rows))
+	for i, row := range rows {
+		cols := strings.Split(row, "\t")
+		if len(cols) != 3 {
+			return nil, fmt.Errorf("expected 3 columns, got %d in row: %s", len(cols), row)
+		}
+
+		used, err := strconv.ParseInt(cols[1], 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("parsing used '%s': %w", cols[1], err)
+		}
+
+		logicalReferenced, err := strconv.ParseInt(cols[2], 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("parsing logicalreferenced '%s': %w", cols[2], err)
+		}
+
+		out[i] = DatasetInfo{
+			Name: zfs.WithoutPrefix(cols[0]),
+			Size: &model.DatasetSize{
+				Used:              used,
+				LogicalReferenced: logicalReferenced,
+			},
+		}
 	}
 	return out, nil
 }
@@ -132,21 +161,32 @@ func (zfs *ZFS) DestroySnapshotRange(logger logger.Logger, dataset model.Dataset
 }
 
 func (zfs *ZFS) GetSnapshots(logger logger.Logger, dataset model.DatasetName) ([]*model.Snapshot, error) {
-	rows, err := zfs.x.Execf(logger, "zfs list -H -p -t snapshot -o name,creation -s creation -d 1 %s", zfs.WithPrefix(dataset))
+	rows, err := zfs.x.Execf(logger, "zfs list -H -p -t snapshot -o name,creation,logicalreferenced -s creation -d 1 %s", zfs.WithPrefix(dataset))
 	if err != nil {
 		return nil, fmt.Errorf("zfs list: %w", err)
 	}
 	snaps := make([]*model.Snapshot, len(rows))
 	for i, row := range rows {
 		cols := strings.Split(row, "\t")
+		if len(cols) != 3 {
+			return nil, fmt.Errorf("expected 3 columns, got %d in row: %s", len(cols), row)
+		}
+
 		seconds, err := strconv.ParseInt(cols[1], 10, 64)
 		if err != nil {
 			return nil, fmt.Errorf("parsing timestamp '%s' (from '%s')", cols[0], cols[1])
 		}
+
+		logicalReferenced, err := strconv.ParseInt(cols[2], 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("parsing logicalreferenced '%s': %w", cols[2], err)
+		}
+
 		snaps[i] = &model.Snapshot{
-			Dataset:   dataset,
-			Name:      strings.SplitN(cols[0], "@", 2)[1],
-			CreatedAt: seconds,
+			Dataset:           dataset,
+			Name:              strings.SplitN(cols[0], "@", 2)[1],
+			CreatedAt:         seconds,
+			LogicalReferenced: logicalReferenced,
 		}
 	}
 	return snaps, nil

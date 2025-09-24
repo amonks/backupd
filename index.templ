@@ -1,10 +1,10 @@
 package main
 
 import (
-	"fmt"
 	"monks.co/backupd/model"
 	"monks.co/backupd/progress"
 	"time"
+	"github.com/dustin/go-humanize"
 )
 
 templ index(state *model.Model, progress progress.Value, dataset string, dryrun bool) {
@@ -131,21 +131,53 @@ templ index(state *model.Model, progress progress.Value, dataset string, dryrun 
 								<th>dataset</th>
 								<th>staleness</th>
 								<th>local</th>
+								<th>local disk</th>
+								<th>local logical</th>
 								<th>remote</th>
+								<th>remote disk</th>
+								<th>remote logical</th>
 							</tr>
 						</thead>
 						<tbody>
 							for _, ds := range state.ListDatasets() {
 								<tr>
 									<td>{ ds.String() }</td>
-									<td>{ fmt.Sprintf("%s", state.Datasets[ds].Staleness().Truncate(time.Minute)) }</td>
+									<td>{ state.Datasets[ds].Staleness().Truncate(time.Minute).String() }</td>
 									<td><code>{ state.Datasets[ds].Local.String() }</code></td>
+									<td><code>
+										if state.Datasets[ds].LocalSize != nil {
+											{ humanize.Bytes(uint64(state.Datasets[ds].LocalSize.Used)) }
+										} else {
+											-
+										}
+									</code></td>
+									<td><code>
+										if state.Datasets[ds].LocalSize != nil {
+											{ humanize.Bytes(uint64(state.Datasets[ds].LocalSize.LogicalReferenced)) }
+										} else {
+											-
+										}
+									</code></td>
 									<td><code>{ state.Datasets[ds].Remote.String() }</code></td>
+									<td><code>
+										if state.Datasets[ds].RemoteSize != nil {
+											{ humanize.Bytes(uint64(state.Datasets[ds].RemoteSize.Used)) }
+										} else {
+											-
+										}
+									</code></td>
+									<td><code>
+										if state.Datasets[ds].RemoteSize != nil {
+											{ humanize.Bytes(uint64(state.Datasets[ds].RemoteSize.LogicalReferenced)) }
+										} else {
+											-
+										}
+									</code></td>
 								</tr>
 							}
 						</tbody>
 					</table>
-					
+
 					// Display only global and root dataset logs on the overview page
 					for ds, logs := range progress.All() {
 						if ds.String() == "global" || ds.String() == "<root>" {
@@ -170,15 +202,55 @@ templ index(state *model.Model, progress progress.Value, dataset string, dryrun 
 									<td><code>{ ds.Local.String() }</code></td>
 								</tr>
 								<tr>
+									<th>Local disk size</th>
+									<td>
+										if ds.LocalSize != nil {
+											<code>{ humanize.Bytes(uint64(ds.LocalSize.Used)) }</code>
+										} else {
+											-
+										}
+									</td>
+								</tr>
+								<tr>
+									<th>Local logical size</th>
+									<td>
+										if ds.LocalSize != nil {
+											<code>{ humanize.Bytes(uint64(ds.LocalSize.LogicalReferenced)) }</code>
+										} else {
+											-
+										}
+									</td>
+								</tr>
+								<tr>
 									<th>Remote snapshots</th>
 									<td><code>{ ds.Remote.String() }</code></td>
 								</tr>
 								<tr>
+									<th>Remote disk size</th>
+									<td>
+										if ds.RemoteSize != nil {
+											<code>{ humanize.Bytes(uint64(ds.RemoteSize.Used)) }</code>
+										} else {
+											-
+										}
+									</td>
+								</tr>
+								<tr>
+									<th>Remote logical size</th>
+									<td>
+										if ds.RemoteSize != nil {
+											<code>{ humanize.Bytes(uint64(ds.RemoteSize.LogicalReferenced)) }</code>
+										} else {
+											-
+										}
+									</td>
+								</tr>
+								<tr>
 									<th>Staleness</th>
-									<td>{ fmt.Sprintf("%s", ds.Staleness().Truncate(time.Minute)) }</td>
+									<td>{ ds.Staleness().Truncate(time.Minute).String() }</td>
 								</tr>
 							</table>
-							
+
 							<h2>Snapshots</h2>
 							<table class="snapshot-table">
 								<thead>
@@ -187,6 +259,7 @@ templ index(state *model.Model, progress progress.Value, dataset string, dryrun 
 										<th>Created</th>
 										<th>Local</th>
 										<th>Remote</th>
+										<th>Size</th>
 									</tr>
 								</thead>
 								<tbody>
@@ -195,7 +268,7 @@ templ index(state *model.Model, progress progress.Value, dataset string, dryrun 
 								</tbody>
 							</table>
 						</div>
-						
+
 						// Get logs for this specific dataset
 						if logs := progress.Get(model.DatasetName(dataset)); logs != nil && len(logs) > 0 {
 							<section class="logs">
@@ -223,7 +296,7 @@ templ renderDatasetLink(ds model.DatasetName, dataset *model.Dataset, currentDat
 		<a href={ templ.SafeURL("/root") } class={ "dataset-link", templ.KV("active", ds.String() == currentDataset) }>
 			{ ds.String() }
 			<span class={ "status", templ.KV("stale", dataset.Staleness() > time.Minute*10) }>
-				{ fmt.Sprintf("%s", dataset.Staleness().Truncate(time.Minute)) }
+				{ dataset.Staleness().Truncate(time.Minute).String() }
 			</span>
 		</a>
 	} else {
@@ -232,7 +305,7 @@ templ renderDatasetLink(ds model.DatasetName, dataset *model.Dataset, currentDat
 		<a href={ templ.SafeURL("/" + ds.String()[1:]) } class={ "dataset-link", templ.KV("active", ds.String() == currentDataset) }>
 			{ ds.String() }
 			<span class={ "status", templ.KV("stale", dataset.Staleness() > time.Minute*10) }>
-				{ fmt.Sprintf("%s", dataset.Staleness().Truncate(time.Minute)) }
+				{ dataset.Staleness().Truncate(time.Minute).String() }
 			</span>
 		</a>
 	}
@@ -259,6 +332,7 @@ templ snapshotRows(ds *model.Dataset) {
 						<span class="snapshot-absent">✗</span>
 					}
 				</td>
+				<td><code>{ snap.SizeString() }</code></td>
 			</tr>
 		}
 	} else if ds.Local != nil {
@@ -268,6 +342,7 @@ templ snapshotRows(ds *model.Dataset) {
 				<td>{ snap.Time().Format(time.DateTime) }</td>
 				<td><span class="snapshot-present">✓</span></td>
 				<td><span class="snapshot-absent">✗</span></td>
+				<td><code>{ snap.SizeString() }</code></td>
 			</tr>
 		}
 	} else if ds.Remote != nil {
@@ -277,6 +352,7 @@ templ snapshotRows(ds *model.Dataset) {
 				<td>{ snap.Time().Format(time.DateTime) }</td>
 				<td><span class="snapshot-absent">✗</span></td>
 				<td><span class="snapshot-present">✓</span></td>
+				<td><code>{ snap.SizeString() }</code></td>
 			</tr>
 		}
 	}

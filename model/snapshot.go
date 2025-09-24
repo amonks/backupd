@@ -4,12 +4,15 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/dustin/go-humanize"
 )
 
 type Snapshot struct {
-	Dataset   DatasetName
-	Name      string
-	CreatedAt int64
+	Dataset           DatasetName
+	Name              string
+	CreatedAt         int64
+	LogicalReferenced int64  // Logical size of dataset at this snapshot (w/o children)
 }
 
 func (snap *Snapshot) ID() string {
@@ -25,7 +28,17 @@ func (snap *Snapshot) Time() time.Time {
 }
 
 func (snap *Snapshot) String() string {
+	if snap.LogicalReferenced > 0 {
+		return fmt.Sprintf("%s@%s (%s)", snap.Dataset.Path(), snap.Name, humanize.Bytes(uint64(snap.LogicalReferenced)))
+	}
 	return snap.Dataset.Path() + "@" + snap.Name
+}
+
+func (snap *Snapshot) SizeString() string {
+	if snap.LogicalReferenced > 0 {
+		return humanize.Bytes(uint64(snap.LogicalReferenced))
+	}
+	return "-"
 }
 
 func (snap *Snapshot) Type() string {
