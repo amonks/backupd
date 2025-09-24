@@ -60,6 +60,7 @@ type Dataset struct {
 	Name          DatasetName
 	Local, Remote *Snapshots
 	LocalSize, RemoteSize *DatasetSize
+	GoalState     *Dataset // The desired state based on policy
 }
 
 func (dataset *Dataset) Staleness() time.Duration {
@@ -124,11 +125,16 @@ func (dataset *Dataset) Eq(other *Dataset) bool {
 }
 
 func (dataset *Dataset) Clone() *Dataset {
+	var goalState *Dataset
+	if dataset.GoalState != nil {
+		goalState = dataset.GoalState.Clone()
+	}
 	return &Dataset{
 		Name:       dataset.Name,
 		Local:      dataset.Local.Clone(),
 		Remote:     dataset.Remote.Clone(),
 		LocalSize:  dataset.LocalSize.Clone(),
 		RemoteSize: dataset.RemoteSize.Clone(),
+		GoalState:  goalState,
 	}
 }

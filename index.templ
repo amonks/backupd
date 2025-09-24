@@ -321,15 +321,19 @@ templ snapshotRows(ds *model.Dataset) {
 				<td>
 					if ds.Local.Has(snap) {
 						<span class="snapshot-present">✓</span>
-					} else {
+					} else if ds.GoalState != nil && ds.GoalState.Local != nil && ds.GoalState.Local.Has(snap) {
 						<span class="snapshot-absent">✗</span>
+					} else {
+						<span>-</span>
 					}
 				</td>
 				<td>
 					if ds.Remote.Has(snap) {
 						<span class="snapshot-present">✓</span>
-					} else {
+					} else if ds.GoalState != nil && ds.GoalState.Remote != nil && ds.GoalState.Remote.Has(snap) {
 						<span class="snapshot-absent">✗</span>
+					} else {
+						<span>-</span>
 					}
 				</td>
 				<td><code>{ snap.SizeString() }</code></td>
@@ -341,7 +345,13 @@ templ snapshotRows(ds *model.Dataset) {
 				<td>{ snap.Name }</td>
 				<td>{ snap.Time().Format(time.DateTime) }</td>
 				<td><span class="snapshot-present">✓</span></td>
-				<td><span class="snapshot-absent">✗</span></td>
+				<td>
+					if ds.GoalState != nil && ds.GoalState.Remote != nil && ds.GoalState.Remote.Has(snap) {
+						<span class="snapshot-absent">✗</span>
+					} else {
+						<span>-</span>
+					}
+				</td>
 				<td><code>{ snap.SizeString() }</code></td>
 			</tr>
 		}
@@ -350,7 +360,13 @@ templ snapshotRows(ds *model.Dataset) {
 			<tr>
 				<td>{ snap.Name }</td>
 				<td>{ snap.Time().Format(time.DateTime) }</td>
-				<td><span class="snapshot-absent">✗</span></td>
+				<td>
+					if ds.GoalState != nil && ds.GoalState.Local != nil && ds.GoalState.Local.Has(snap) {
+						<span class="snapshot-absent">✗</span>
+					} else {
+						<span>-</span>
+					}
+				</td>
 				<td><span class="snapshot-present">✓</span></td>
 				<td><code>{ snap.SizeString() }</code></td>
 			</tr>
