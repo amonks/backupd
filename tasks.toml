@@ -24,19 +24,23 @@
 [[task]]
   id = "vulncheck"
   type = "short"
+  dependencies = ["templ"]
   cmd = "go run golang.org/x/vuln/cmd/govulncheck ./..."
 
 [[task]]
   id = "staticcheck"
   type = "short"
+  dependencies = ["templ"]
   cmd = "go run honnef.co/go/tools/cmd/staticcheck ./..."
 
 [[task]]
   id = "vet"
   type = "short"
+  dependencies = ["templ"]
   cmd = "go vet ./..."
 
 [[task]]
   id = "go-test"
   type = "short"
+  dependencies = ["templ"]
   cmd = "go test ./..."
