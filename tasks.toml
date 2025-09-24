@@ -4,6 +4,13 @@
   dependencies = ["templ"]
 
 [[task]]
+  id = "dryrun"
+  type = "long"
+  dependencies = ["templ"]
+  watch = ["**/*.go", "*.go"]
+  cmd = "sudo go run . -dryrun -addr=0.0.0.0:8887"
+
+[[task]]
   id = "templ"
   type = "short"
   watch = ["*.templ"]
