@@ -118,3 +118,11 @@ func (env *Env) TransferSnapshotIncrementally(ctx context.Context, logger logger
 
 	return nil
 }
+
+// CreateSnapshotRecursively creates a recursive snapshot for the configured root
+func (env *Env) CreateSnapshotRecursively(ctx context.Context, logger logger.Logger, root string, periodicity string) error {
+	if err := env.Local.CreateSnapshot(logger, root, periodicity); err != nil {
+		return fmt.Errorf("creating snapshot: %w", err)
+	}
+	return nil
+}

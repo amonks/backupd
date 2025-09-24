@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -56,6 +57,37 @@ func (b *Backupd) Go(ctx context.Context) error {
 
 func (b *Backupd) Serve(ctx context.Context) error {
 	mux := http.NewServeMux()
+
+	// Handle snapshot creation endpoint
+	mux.HandleFunc("/snapshot", func(w http.ResponseWriter, req *http.Request) {
+		if req.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		periodicity := req.URL.Query().Get("periodicity")
+		if periodicity == "" {
+			http.Error(w, "Missing periodicity parameter", http.StatusBadRequest)
+			return
+		}
+
+		logger := logger.New("snapshot")
+		root := b.config.Local.Root
+
+		if err := b.env.CreateSnapshotRecursively(ctx, logger, root, periodicity); err != nil {
+			http.Error(w, fmt.Sprintf("Error creating snapshot: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		if err := b.RefreshLocalSnapshots(ctx, logger); err != nil {
+			http.Error(w, fmt.Sprintf("Error refreshing state: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		b.progress.Log(model.GlobalDataset, "Created %s snapshot for root %s", periodicity, root)
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, "Created %s snapshot for root %s\n", periodicity, root)
+	})
 
 	// Handle all routes with the generic handler and implement our own routing logic
 	mux.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
@@ -240,6 +272,17 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 	ds := initialState.GetDataset(dataset)
 
 	goal := ds.Goal(b.config.Local.Policy, b.config.Remote.Policy)
+
+	// Store the goal in the dataset for display purposes
+	b.state.Swap(func(state *model.Model) *model.Model {
+		currentDS := state.GetDataset(dataset)
+		if currentDS == nil {
+			return state
+		}
+		updatedDS := currentDS.Clone()
+		updatedDS.GoalState = goal
+		return model.ReplaceDataset(dataset, updatedDS)(state)
+	})
 	plan, err := ds.Plan(goal)
 	if err != nil {
 		return fmt.Errorf("constructing plan for '%s': %w", dataset, err)
@@ -259,7 +302,7 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 		logger.Printf("Applying op '%s'", op)
 
 		logger.Printf("-- Ensuring in-memory state supports this update...")
-		newState, err := op.Apply(initialState.GetDataset(dataset))
+		_, err := op.Apply(initialState.GetDataset(dataset))
 		if err != nil {
 			return fmt.Errorf("applying op '%s' to in-memory state of '%s': %w", op, dataset, err)
 		}
@@ -269,7 +312,18 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 		if b.dryrun {
 			logger.Printf("-- [DRYRUN] Would update zfs environment with op '%s'", op)
 			logger.Printf("-- [DRYRUN] Updating in-memory state only...")
-			b.state.Swap(model.ReplaceDataset(dataset, newState))
+			b.state.Swap(func(state *model.Model) *model.Model {
+				currentDS := state.GetDataset(dataset)
+				if currentDS == nil {
+					return state
+				}
+				newState, err := op.Apply(currentDS)
+				if err != nil {
+					logger.Printf("-- [DRYRUN] Error applying op to current state: %v", err)
+					return state
+				}
+				return model.ReplaceDataset(dataset, newState)(state)
+			})
 			logger.Printf("-- [DRYRUN] Done.")
 			continue
 		}
@@ -295,7 +349,18 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 		}
 
 		logger.Printf("-- Updating in-memory state...")
-		b.state.Swap(model.ReplaceDataset(dataset, newState))
+		b.state.Swap(func(state *model.Model) *model.Model {
+			currentDS := state.GetDataset(dataset)
+			if currentDS == nil {
+				return state
+			}
+			newState, err := op.Apply(currentDS)
+			if err != nil {
+				logger.Printf("-- Error applying op to current state: %v", err)
+				return state
+			}
+			return model.ReplaceDataset(dataset, newState)(state)
+		})
 
 		logger.Printf("-- Done.")
 	}
@@ -374,6 +439,11 @@ func (b *Backupd) Plan(ctx context.Context, dataset model.DatasetName) error {
 	}
 
 	goal := ds.Goal(b.config.Local.Policy, b.config.Remote.Policy)
+
+	// Store the goal in the dataset for display purposes
+	updatedDS := ds.Clone()
+	updatedDS.GoalState = goal
+	b.state.Swap(model.ReplaceDataset(dataset, updatedDS))
 	plan, err := ds.Plan(goal)
 	if err != nil {
 		return fmt.Errorf("constructing plan: %w", err)
@@ -389,5 +459,69 @@ func (b *Backupd) Plan(ctx context.Context, dataset model.DatasetName) error {
 		return fmt.Errorf("invalid plan: %w", err)
 	}
 
+	return nil
+}
+
+// RefreshLocalSnapshots refreshes local snapshot information for all datasets in memory
+func (b *Backupd) RefreshLocalSnapshots(ctx context.Context, logger logger.Logger) error {
+	// Directly update state by refreshing snapshots for all datasets
+	// This is concurrency-safe due to the atom's RWMutex
+	b.state.Swap(func(currentState *model.Model) *model.Model {
+		if currentState == nil {
+			return currentState
+		}
+
+		newState := currentState
+		for _, dsName := range currentState.ListDatasets() {
+			snapshots, err := b.env.Local.GetSnapshots(logger, dsName)
+			if err != nil {
+				log.Printf("Warning: failed to refresh snapshots for dataset %s: %v", dsName, err)
+				continue
+			}
+
+			// Get current dataset size (preserve existing size info)
+			currentDS := currentState.GetDataset(dsName)
+			var size *model.DatasetSize
+			if currentDS != nil {
+				size = currentDS.LocalSize
+			}
+
+			// Update the dataset with new snapshots
+			newState = model.AddLocalDataset(dsName, snapshots, size)(newState)
+		}
+
+		return newState
+	})
+
+	return nil
+}
+
+// CreateSnapshot sends a request to the running daemon to create a snapshot
+func (b *Backupd) CreateSnapshot(ctx context.Context, periodicity string) error {
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	url := fmt.Sprintf("http://%s/snapshot?periodicity=%s", b.addr, periodicity)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, nil)
+	if err != nil {
+		return fmt.Errorf("creating request: %w", err)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("calling snapshot endpoint: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("snapshot endpoint returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("reading response: %w", err)
+	}
+
+	log.Printf("Snapshot created: %s", strings.TrimSpace(string(body)))
 	return nil
 }

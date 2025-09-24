@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"monks.co/backupd/logger"
 	"monks.co/backupd/model"
@@ -129,6 +130,22 @@ func (zfs *ZFS) CreateDataset(logger logger.Logger, dataset model.DatasetName) e
 	if _, err := zfs.x.Execf(logger, "zfs create -p %s", zfs.WithPrefix(dataset)); err != nil {
 		return err
 	}
+	return nil
+}
+
+func (zfs *ZFS) CreateSnapshot(logger logger.Logger, pool string, periodicity string) error {
+	if zfs.readOnly {
+		panic("read only")
+	}
+
+	// Generate timestamp in format: pool@periodicity-YYYY-MM-DD-HH:MM:SS
+	now := time.Now().Format("2006-01-02-15:04:05")
+	snapshotName := fmt.Sprintf("%s@%s-%s", pool, periodicity, now)
+
+	if _, err := zfs.x.Execf(logger, "zfs snapshot -r %s", snapshotName); err != nil {
+		return fmt.Errorf("creating snapshot %s: %w", snapshotName, err)
+	}
+
 	return nil
 }
 
