@@ -61,6 +61,7 @@ type Dataset struct {
 	Local, Remote *Snapshots
 	LocalSize, RemoteSize *DatasetSize
 	GoalState     *Dataset // The desired state based on policy
+	CurrentPlan   []Operation // The current plan to achieve the goal state
 }
 
 func (dataset *Dataset) Staleness() time.Duration {
@@ -129,6 +130,12 @@ func (dataset *Dataset) Clone() *Dataset {
 	if dataset.GoalState != nil {
 		goalState = dataset.GoalState.Clone()
 	}
+	// Copy current plan (operations are immutable so shallow copy is fine)
+	var currentPlan []Operation
+	if dataset.CurrentPlan != nil {
+		currentPlan = make([]Operation, len(dataset.CurrentPlan))
+		copy(currentPlan, dataset.CurrentPlan)
+	}
 	return &Dataset{
 		Name:       dataset.Name,
 		Local:      dataset.Local.Clone(),
@@ -136,5 +143,6 @@ func (dataset *Dataset) Clone() *Dataset {
 		LocalSize:  dataset.LocalSize.Clone(),
 		RemoteSize: dataset.RemoteSize.Clone(),
 		GoalState:  goalState,
+		CurrentPlan: currentPlan,
 	}
 }

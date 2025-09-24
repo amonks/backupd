@@ -3,11 +3,13 @@ package main
 import (
 	"monks.co/backupd/model"
 	"monks.co/backupd/progress"
+	"monks.co/backupd/sync"
 	"time"
+	"fmt"
 	"github.com/dustin/go-humanize"
 )
 
-templ index(state *model.Model, progress progress.Value, dataset string, dryrun bool) {
+templ index(state *model.Model, progress progress.Value, syncStatus *sync.Status, dataset string, dryrun bool) {
 	<!DOCTYPE html>
 	<html>
 		<head>
@@ -52,23 +54,61 @@ templ index(state *model.Model, progress progress.Value, dataset string, dryrun 
 					overflow-y: auto;
 				}
 				.dataset-link {
-					display: block;
+					display: flex;
+					align-items: flex-start;
 					padding: 0.5rem;
 					text-decoration: none;
 					color: #333;
 					border-radius: 4px;
 					margin-bottom: 0.25rem;
+					gap: 0.5rem;
 				}
 				.dataset-link:hover, .dataset-link.active {
 					background-color: #e0e0e0;
 				}
 				.dataset-link .status {
-					float: right;
+					margin-left: auto;
 					font-size: 0.8rem;
 					color: #666;
+					flex-shrink: 0;
 				}
 				.dataset-link .status.stale {
 					color: #f44336;
+				}
+				.dataset-info {
+					display: flex;
+					flex-direction: column;
+					gap: 0.2rem;
+					flex-grow: 1;
+					min-width: 0;
+				}
+				.dataset-name {
+					font-weight: 500;
+				}
+				.dataset-size {
+					font-size: 0.75rem;
+					color: #666;
+				}
+				.sync-indicator {
+					width: 12px;
+					height: 12px;
+					border-radius: 50%;
+					flex-shrink: 0;
+					margin-top: 0.1rem;
+				}
+				.sync-indicator.syncing {
+					background: linear-gradient(45deg, #2196f3, #64b5f6);
+					animation: pulse 1.5s ease-in-out infinite alternate;
+				}
+				.sync-indicator.synced {
+					background-color: #4caf50;
+				}
+				.sync-indicator.stale {
+					background-color: #ff9800;
+				}
+				@keyframes pulse {
+					from { opacity: 0.6; }
+					to { opacity: 1; }
 				}
 				table {
 					width: 100%;
@@ -82,6 +122,32 @@ templ index(state *model.Model, progress progress.Value, dataset string, dryrun 
 				}
 				th {
 					font-weight: bold;
+				}
+				th.sortable {
+					cursor: pointer;
+					user-select: none;
+					position: relative;
+				}
+				th.sortable:hover {
+					background-color: #f0f0f0;
+				}
+				th.sortable::after {
+					content: '↕';
+					position: absolute;
+					right: 0.5rem;
+					opacity: 0.3;
+					font-size: 0.8em;
+				}
+				th.sortable.sort-asc::after {
+					content: '↑';
+					opacity: 0.8;
+				}
+				th.sortable.sort-desc::after {
+					content: '↓';
+					opacity: 0.8;
+				}
+				th.sortable:hover::after {
+					opacity: 0.6;
 				}
 				.logs {
 					background-color: #f9f9f9;
@@ -117,25 +183,32 @@ templ index(state *model.Model, progress progress.Value, dataset string, dryrun 
 				<div class="dryrun-banner">DRY RUN MODE - No actual transfers or deletions will occur</div>
 			}
 			<div class="sidebar">
+				<h2>System</h2>
+				<a href="/global" class={ "dataset-link", templ.KV("active", dataset == "global") }>
+					<div class="dataset-info">
+						<div class="dataset-name">Global Overview</div>
+					</div>
+				</a>
 				<h2>Datasets</h2>
 				for _, ds := range state.ListDatasets() {
-					@renderDatasetLink(ds, state.Datasets[ds], dataset)
+					@renderDatasetLink(ds, state.Datasets[ds], syncStatus, dataset)
 				}
 			</div>
 			<div class="main-content">
-				if dataset == "" || dataset == "global" {
+				if dataset == "global" {
 					<h1>backupd Overview</h1>
 					<table>
 						<thead>
 							<tr>
-								<th>dataset</th>
-								<th>staleness</th>
+								<th class="sortable">dataset</th>
+								<th class="sortable">staleness</th>
+								<th>sync status</th>
 								<th>local</th>
-								<th>local disk</th>
-								<th>local logical</th>
+								<th class="sortable">local disk</th>
+								<th class="sortable">local logical</th>
 								<th>remote</th>
-								<th>remote disk</th>
-								<th>remote logical</th>
+								<th class="sortable">remote disk</th>
+								<th class="sortable">remote logical</th>
 							</tr>
 						</thead>
 						<tbody>
@@ -143,6 +216,7 @@ templ index(state *model.Model, progress progress.Value, dataset string, dryrun 
 								<tr>
 									<td>{ ds.String() }</td>
 									<td>{ state.Datasets[ds].Staleness().Truncate(time.Minute).String() }</td>
+									<td>@renderSyncIndicator(ds, state.Datasets[ds], syncStatus)</td>
 									<td><code>{ state.Datasets[ds].Local.String() }</code></td>
 									<td><code>
 										if state.Datasets[ds].LocalSize != nil {
@@ -178,18 +252,16 @@ templ index(state *model.Model, progress progress.Value, dataset string, dryrun 
 						</tbody>
 					</table>
 
-					// Display only global and root dataset logs on the overview page
-					for ds, logs := range progress.All() {
-						if ds.String() == "global" || ds.String() == "<root>" {
-							<section class="logs">
-								<h2>{ ds.String() }</h2>
-								<ul>
-									for i := len(logs) - 1; i >= 0; i-- {
-										<li><code>{ logs[i].LogAt.Format(time.DateTime) } :: { logs[i].Log }</code></li>
-									}
-								</ul>
-							</section>
-						}
+					// Display only global logs on the overview page
+					if logs := progress.Get(model.GlobalDataset); logs != nil && len(logs) > 0 {
+						<section class="logs">
+							<h2>Global Logs</h2>
+							<ul>
+								for _, log := range logs {
+									<li><code>{ log.LogAt.Format(time.DateTime) } :: { log.Log }</code></li>
+								}
+							</ul>
+						</section>
 					}
 				} else {
 					<h1>Dataset: { dataset }</h1>
@@ -251,15 +323,35 @@ templ index(state *model.Model, progress progress.Value, dataset string, dryrun 
 								</tr>
 							</table>
 
+							if ds.CurrentPlan != nil && len(ds.CurrentPlan) > 0 {
+								<h2>Sync Plan</h2>
+								<table>
+									<thead>
+										<tr>
+											<th>#</th>
+											<th>Operation</th>
+										</tr>
+									</thead>
+									<tbody>
+										for i, op := range ds.CurrentPlan {
+											<tr>
+												<td>{ fmt.Sprint(i + 1) }</td>
+												<td><code>{ op.String() }</code></td>
+											</tr>
+										}
+									</tbody>
+								</table>
+							}
+
 							<h2>Snapshots</h2>
 							<table class="snapshot-table">
 								<thead>
 									<tr>
 										<th>Snapshot</th>
-										<th>Created</th>
+										<th class="sortable">Created</th>
 										<th>Local</th>
 										<th>Remote</th>
-										<th>Size</th>
+										<th class="sortable">Size</th>
 									</tr>
 								</thead>
 								<tbody>
@@ -274,8 +366,8 @@ templ index(state *model.Model, progress progress.Value, dataset string, dryrun 
 							<section class="logs">
 								<h2>Logs</h2>
 								<ul>
-									for i := len(logs) - 1; i >= 0; i-- {
-										<li><code>{ logs[i].LogAt.Format(time.DateTime) } :: { logs[i].Log }</code></li>
+									for _, log := range logs {
+										<li><code>{ log.LogAt.Format(time.DateTime) } :: { log.Log }</code></li>
 									}
 								</ul>
 							</section>
@@ -285,16 +377,150 @@ templ index(state *model.Model, progress progress.Value, dataset string, dryrun 
 					}
 				}
 			</div>
+		<script>
+			// Table sorting functionality
+			function makeSortable(table) {
+				const headers = table.querySelectorAll('th.sortable');
+				console.log('Found sortable headers:', headers.length);
+				headers.forEach((header, index) => {
+					const actualColumnIndex = Array.from(table.querySelectorAll('th')).indexOf(header);
+					console.log(`Header ${index} (${header.textContent.trim()}) is at column ${actualColumnIndex}`);
+					header.addEventListener('click', () => sortTable(table, actualColumnIndex));
+				});
+			}
+
+			function sortTable(table, column) {
+				const tbody = table.querySelector('tbody');
+				const rows = Array.from(tbody.querySelectorAll('tr'));
+				const header = table.querySelectorAll('th')[column];
+				const headerText = header.textContent.trim().toLowerCase();
+
+				// Special handling for dataset column only in the main overview table
+				// (not in the snapshot table)
+				if (column === 0 && headerText === 'dataset') {
+					// Dataset column: toggle between name-length and lexical
+					const isLexical = header.classList.contains('sort-asc');
+
+					// Remove previous sort classes
+					table.querySelectorAll('th').forEach(th => {
+						th.classList.remove('sort-asc', 'sort-desc');
+					});
+
+					if (isLexical) {
+						// Switch to name-length sort (default state, no indicator)
+						rows.sort((a, b) => {
+							const aVal = a.cells[0].textContent.trim();
+							const bVal = b.cells[0].textContent.trim();
+
+							// Always keep <root> at the top
+							if (aVal === '<root>') return -1;
+							if (bVal === '<root>') return 1;
+
+							if (aVal.length === bVal.length) {
+								return aVal.localeCompare(bVal);
+							}
+							return aVal.length - bVal.length;
+						});
+					} else {
+						// Switch to lexical sort (show ascending indicator)
+						header.classList.add('sort-asc');
+						rows.sort((a, b) => {
+							const aVal = a.cells[0].textContent.trim();
+							const bVal = b.cells[0].textContent.trim();
+
+							// Always keep <root> at the top
+							if (aVal === '<root>') return -1;
+							if (bVal === '<root>') return 1;
+
+							return aVal.localeCompare(bVal);
+						});
+					}
+				} else {
+					// Other columns: normal asc/desc toggle
+					const isAsc = !header.classList.contains('sort-asc');
+
+					// Remove previous sort classes
+					table.querySelectorAll('th').forEach(th => {
+						th.classList.remove('sort-asc', 'sort-desc');
+					});
+
+					// Add current sort class
+					header.classList.add(isAsc ? 'sort-asc' : 'sort-desc');
+
+					// Sort rows
+					rows.sort((a, b) => {
+						let aVal = a.cells[column].textContent.trim();
+						let bVal = b.cells[column].textContent.trim();
+
+						// Debug: log values for problematic columns
+						if (column === 4 || column === 5) {
+							console.log(`Column ${column}: "${aVal}" vs "${bVal}"`);
+						}
+
+						// Handle dashes (no data)
+						if (aVal === '-' && bVal === '-') return 0;
+						if (aVal === '-') return isAsc ? 1 : -1;
+						if (bVal === '-') return isAsc ? -1 : 1;
+
+						// Check if values are sizes (contain 'B', 'KB', 'MB', etc.)
+						// More flexible regex to handle whitespace and formatting
+						if ((aVal.match(/\d+(\.\d+)?\s*[KMGTPE]?B/i) || aVal === '-') &&
+						    (bVal.match(/\d+(\.\d+)?\s*[KMGTPE]?B/i) || bVal === '-')) {
+							return compareSize(aVal, bVal) * (isAsc ? 1 : -1);
+						}
+
+						// Check if values are dates
+						if (aVal.match(/\d{4}-\d{2}-\d{2}/) && bVal.match(/\d{4}-\d{2}-\d{2}/)) {
+							return (new Date(aVal) - new Date(bVal)) * (isAsc ? 1 : -1);
+						}
+
+						// Check if values are numbers
+						const aNum = parseFloat(aVal.replace(/[^0-9.-]/g, ''));
+						const bNum = parseFloat(bVal.replace(/[^0-9.-]/g, ''));
+						if (!isNaN(aNum) && !isNaN(bNum)) {
+							return (aNum - bNum) * (isAsc ? 1 : -1);
+						}
+
+						// Default string comparison
+						return aVal.localeCompare(bVal) * (isAsc ? 1 : -1);
+					});
+				}
+
+				// Append sorted rows
+				rows.forEach(row => tbody.appendChild(row));
+			}
+
+			function compareSize(a, b) {
+				const units = { 'B': 1, 'KB': 1024, 'MB': 1024**2, 'GB': 1024**3, 'TB': 1024**4, 'PB': 1024**5, 'EB': 1024**6 };
+
+				function parseSize(str) {
+					const match = str.match(/([\d.]+)\s*([KMGTPE]?B)/);
+					if (!match) return 0;
+					return parseFloat(match[1]) * (units[match[2]] || 1);
+				}
+
+				return parseSize(a) - parseSize(b);
+			}
+
+			// Initialize sortable tables
+			document.addEventListener('DOMContentLoaded', function() {
+				document.querySelectorAll('table').forEach(makeSortable);
+			});
+		</script>
 		</body>
 	</html>
 }
 
-templ renderDatasetLink(ds model.DatasetName, dataset *model.Dataset, currentDataset string) {
+templ renderDatasetLink(ds model.DatasetName, dataset *model.Dataset, syncStatus *sync.Status, currentDataset string) {
 	// Create a URL-safe path for the dataset
 	// For the special root dataset, we need a special case
 	if ds.String() == "<root>" {
 		<a href={ templ.SafeURL("/root") } class={ "dataset-link", templ.KV("active", ds.String() == currentDataset) }>
-			{ ds.String() }
+			@renderSyncIndicator(ds, dataset, syncStatus)
+			<div class="dataset-info">
+				<div class="dataset-name">{ ds.String() }</div>
+				@renderDatasetSize(dataset)
+			</div>
 			<span class={ "status", templ.KV("stale", dataset.Staleness() > time.Minute*10) }>
 				{ dataset.Staleness().Truncate(time.Minute).String() }
 			</span>
@@ -303,12 +529,43 @@ templ renderDatasetLink(ds model.DatasetName, dataset *model.Dataset, currentDat
 		// For normal datasets, create a URL using just the dataset name without the leading slash
 		// This allows the URL router to handle it properly
 		<a href={ templ.SafeURL("/" + ds.String()[1:]) } class={ "dataset-link", templ.KV("active", ds.String() == currentDataset) }>
-			{ ds.String() }
+			@renderSyncIndicator(ds, dataset, syncStatus)
+			<div class="dataset-info">
+				<div class="dataset-name">{ ds.String() }</div>
+				@renderDatasetSize(dataset)
+			</div>
 			<span class={ "status", templ.KV("stale", dataset.Staleness() > time.Minute*10) }>
 				{ dataset.Staleness().Truncate(time.Minute).String() }
 			</span>
 		</a>
 	}
+}
+
+templ renderSyncIndicator(ds model.DatasetName, dataset *model.Dataset, syncStatus *sync.Status) {
+	if syncStatus.IsSyncing(ds) {
+		<span class="sync-indicator syncing" title="Currently syncing"></span>
+	} else if dataset.Staleness() > time.Minute*10 {
+		<span class="sync-indicator stale" title="Stale - needs sync"></span>
+	} else {
+		<span class="sync-indicator synced" title="Up to date"></span>
+	}
+}
+
+templ renderDatasetSize(dataset *model.Dataset) {
+	<div class="dataset-size">
+		if dataset.LocalSize != nil {
+			Local: { humanize.Bytes(uint64(dataset.LocalSize.Used)) }
+		}
+		if dataset.RemoteSize != nil {
+			if dataset.LocalSize != nil {
+				<br/>
+			}
+			Remote: { humanize.Bytes(uint64(dataset.RemoteSize.Used)) }
+		}
+		if dataset.LocalSize == nil && dataset.RemoteSize == nil {
+			No size info
+		}
+	</div>
 }
 
 templ snapshotRows(ds *model.Dataset) {

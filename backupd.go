@@ -19,25 +19,28 @@ import (
 	"monks.co/backupd/model"
 	"monks.co/backupd/progress"
 	"monks.co/backupd/snitch"
+	"monks.co/backupd/sync"
 )
 
 type Backupd struct {
-	config   *config.Config
-	state    *atom.Atom[*model.Model]
-	progress *progress.Progress
-	env      *env.Env
-	addr     string
-	dryrun   bool
+	config     *config.Config
+	state      *atom.Atom[*model.Model]
+	progress   *progress.Progress
+	syncStatus *sync.Status
+	env        *env.Env
+	addr       string
+	dryrun     bool
 }
 
 func New(config *config.Config, addr string, dryrun bool) *Backupd {
 	return &Backupd{
-		config:   config,
-		state:    atom.New[*model.Model](nil),
-		progress: progress.New(),
-		env:      env.New(config),
-		addr:     addr,
-		dryrun:   dryrun,
+		config:     config,
+		state:      atom.New[*model.Model](nil),
+		progress:   progress.New(),
+		syncStatus: sync.New(),
+		env:        env.New(config),
+		addr:       addr,
+		dryrun:     dryrun,
 	}
 }
 
@@ -99,6 +102,7 @@ func (b *Backupd) Serve(ctx context.Context) error {
 
 		state := b.state.Deref()
 		progress := b.progress.Deref()
+		syncStatus := b.syncStatus
 
 		// Get the path without the leading slash
 		path := req.URL.Path
@@ -113,7 +117,7 @@ func (b *Backupd) Serve(ctx context.Context) error {
 
 		// Handle special cases first
 		if trimmedPath == "global" {
-			templ.Handler(index(state, progress, "global", b.dryrun)).ServeHTTP(w, req)
+			templ.Handler(index(state, progress, syncStatus, "global", b.dryrun)).ServeHTTP(w, req)
 			return
 		} else if trimmedPath == "root" {
 			// The empty string is used as the dataset name for the root dataset
@@ -123,7 +127,7 @@ func (b *Backupd) Serve(ctx context.Context) error {
 				http.Error(w, "Root dataset not found", http.StatusNotFound)
 				return
 			}
-			templ.Handler(index(state, progress, "", b.dryrun)).ServeHTTP(w, req)
+			templ.Handler(index(state, progress, syncStatus, "", b.dryrun)).ServeHTTP(w, req)
 			return
 		}
 
@@ -131,7 +135,7 @@ func (b *Backupd) Serve(ctx context.Context) error {
 		// Add leading slash for the dataset model
 		datasetForModel := "/" + trimmedPath
 
-		templ.Handler(index(state, progress, datasetForModel, b.dryrun)).ServeHTTP(w, req)
+		templ.Handler(index(state, progress, syncStatus, datasetForModel, b.dryrun)).ServeHTTP(w, req)
 	})
 
 	return listenAndServe(ctx, b.addr, mux)
@@ -261,6 +265,10 @@ func (b *Backupd) refreshDataset(ctx context.Context, logger logger.Logger, data
 
 // syncDataset executes the plan for the given dataset.
 func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) error {
+	// Mark dataset as syncing
+	b.syncStatus.SetSyncing(dataset, true)
+	defer b.syncStatus.SetSyncing(dataset, false)
+
 	logger := b.progress.Logger(dataset)
 	defer logger.Done()
 
@@ -273,7 +281,12 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 
 	goal := ds.Goal(b.config.Local.Policy, b.config.Remote.Policy)
 
-	// Store the goal in the dataset for display purposes
+	plan, err := ds.Plan(goal)
+	if err != nil {
+		return fmt.Errorf("constructing plan for '%s': %w", dataset, err)
+	}
+
+	// Store both the goal and plan in the dataset for display purposes
 	b.state.Swap(func(state *model.Model) *model.Model {
 		currentDS := state.GetDataset(dataset)
 		if currentDS == nil {
@@ -281,12 +294,9 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 		}
 		updatedDS := currentDS.Clone()
 		updatedDS.GoalState = goal
+		updatedDS.CurrentPlan = plan
 		return model.ReplaceDataset(dataset, updatedDS)(state)
 	})
-	plan, err := ds.Plan(goal)
-	if err != nil {
-		return fmt.Errorf("constructing plan for '%s': %w", dataset, err)
-	}
 
 	if err := ds.ValidatePlan(ctx, goal, plan, false); err != nil {
 		return fmt.Errorf("validating plan for '%s': %w", dataset, err)
