@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // StepStatus represents the execution status of a plan step
@@ -19,7 +20,17 @@ const (
 // PlanStep wraps an Operation with its execution status
 type PlanStep struct {
 	Operation
-	Status StepStatus
+	Status    StepStatus
+	StartedAt *time.Time
+	StoppedAt *time.Time
+}
+
+// Duration returns the duration of the step execution
+func (ps *PlanStep) Duration() time.Duration {
+	if ps.StartedAt == nil || ps.StoppedAt == nil {
+		return 0
+	}
+	return ps.StoppedAt.Sub(*ps.StartedAt)
 }
 
 // Verify PlanStep implements Operation
@@ -46,18 +57,28 @@ func NewPlanStep(op Operation) *PlanStep {
 	}
 }
 
-// TryExecute runs the provided function, managing the step's status through callbacks.
-// The updateStatus callback is called with StepInProgress before execution,
-// then with StepCompleted on success or StepFailed on error.
+// TryExecute runs the provided function, managing the step's status and timing.
+// The updateStep callback is called to atomically update the step's state.
 // This design avoids direct mutation of the PlanStep to prevent race conditions.
-func (ps *PlanStep) TryExecute(updateStatus func(StepStatus), work func() error) error {
-	updateStatus(StepInProgress)
+func (ps *PlanStep) TryExecute(updateStep func(func(*PlanStep)), work func() error) error {
+	updateStep(func(s *PlanStep) {
+		now := time.Now()
+		s.StartedAt = &now
+		s.Status = StepInProgress
+	})
+
 	err := work()
-	if err != nil {
-		updateStatus(StepFailed)
-	} else {
-		updateStatus(StepCompleted)
-	}
+
+	updateStep(func(s *PlanStep) {
+		now := time.Now()
+		s.StoppedAt = &now
+		if err != nil {
+			s.Status = StepFailed
+		} else {
+			s.Status = StepCompleted
+		}
+	})
+
 	return err
 }
 

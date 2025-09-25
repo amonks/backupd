@@ -313,6 +313,9 @@ templ index(state *model.Model, progress progress.Value, syncStatus *sync.Status
 											<th>#</th>
 											<th>Status</th>
 											<th>Operation</th>
+											<th>Started</th>
+											<th>Stopped</th>
+											<th>Duration</th>
 										</tr>
 									</thead>
 									<tbody>
@@ -323,6 +326,27 @@ templ index(state *model.Model, progress progress.Value, syncStatus *sync.Status
 													@renderStepStatus(step.Status)
 												</td>
 												<td><code>{ step.String() }</code></td>
+												<td>
+													if step.StartedAt != nil {
+														{ step.StartedAt.Format("15:04:05") }
+													} else {
+														-
+													}
+												</td>
+												<td>
+													if step.StoppedAt != nil {
+														{ step.StoppedAt.Format("15:04:05") }
+													} else {
+														-
+													}
+												</td>
+												<td>
+													if dur := step.Duration(); dur > 0 {
+														{ dur.Round(time.Millisecond).String() }
+													} else {
+														-
+													}
+												</td>
 											</tr>
 										}
 									</tbody>

@@ -56,14 +56,14 @@ func (b *Backupd) notifyStateChange() {
 	}
 }
 
-// updateStepStatus updates the status of a plan step in a thread-safe manner
-func (b *Backupd) updateStepStatus(dataset model.DatasetName, stepIndex int, status model.StepStatus) {
+// updateStep updates a plan step in a thread-safe manner
+func (b *Backupd) updateStep(dataset model.DatasetName, stepIndex int, update func(*model.PlanStep)) {
 	b.state.Swap(func(state *model.Model) *model.Model {
 		currentDS := state.GetDataset(dataset)
 		if currentDS == nil || currentDS.Plan == nil || stepIndex >= len(currentDS.Plan) {
 			return state
 		}
-		currentDS.Plan[stepIndex].Status = status
+		update(currentDS.Plan[stepIndex])
 		return model.ReplaceDataset(dataset, currentDS)(state)
 	})
 	b.notifyStateChange()
@@ -431,9 +431,11 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 
 		logger.Printf("Applying op '%s'", step.Operation)
 
-		// Use TryExecute to manage status transitions
+		// Use TryExecute to manage status and timing
 		err := step.TryExecute(
-			func(status model.StepStatus) { b.updateStepStatus(dataset, i, status) },
+			func(updateFunc func(*model.PlanStep)) {
+				b.updateStep(dataset, i, updateFunc)
+			},
 			func() error {
 				logger.Printf("-- Ensuring in-memory state supports this update...")
 				initialDS := initialState.GetDataset(dataset)
