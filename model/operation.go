@@ -127,7 +127,7 @@ func (op *InitialSnapshotTransfer) Apply(inv *SnapshotInventory) (*SnapshotInven
 	}
 
 	out := inv.Clone()
-	if out.Remote == nil  {
+	if out.Remote == nil {
 		out.Remote = NewSnapshots()
 	}
 	out.Remote.Add(op.Snapshot)

@@ -6,8 +6,8 @@ import (
 
 // DatasetSize represents the physical storage size of a dataset
 type DatasetSize struct {
-	Used              int64  // Total on-disk space with children, including all snapshots
-	LogicalReferenced int64  // Logical size of most recent snapshot (w/o children)
+	Used              int64 // Total on-disk space with children, including all snapshots
+	LogicalReferenced int64 // Logical size of most recent snapshot (w/o children)
 }
 
 func (ds DatasetSize) String() string {

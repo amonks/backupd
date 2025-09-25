@@ -31,4 +31,3 @@ func (at *Atom[T]) Reset(v T) {
 
 	at.v = v
 }
-

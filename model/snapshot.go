@@ -12,7 +12,7 @@ type Snapshot struct {
 	Dataset           DatasetName
 	Name              string
 	CreatedAt         int64
-	LogicalReferenced int64  // Logical size of dataset at this snapshot (w/o children)
+	LogicalReferenced int64 // Logical size of dataset at this snapshot (w/o children)
 }
 
 func (snap *Snapshot) ID() string {
