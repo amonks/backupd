@@ -208,10 +208,8 @@ func (b *Backupd) Sync(ctx context.Context) error {
 			logger := b.progress.Logger("refresh")
 			if err := b.refreshDataset(ctx, logger, ds); err != nil {
 				b.progress.Log(model.GlobalDataset, "refresh error for '%s': %s", ds, err)
-				logger.Done()
 				continue
 			}
-			logger.Done()
 
 			// Replan after refresh
 			if err := b.replanDataset(ctx, ds); err != nil {
@@ -256,7 +254,6 @@ func (b *Backupd) refreshAllDatasetsAndPlans(ctx context.Context) error {
 	b.state.Reset(model.New())
 
 	logger := b.progress.Logger("refresh-all")
-	defer logger.Done()
 
 	// First, discover and refresh all datasets
 	localDatasets, err := b.env.Local.GetDatasets(logger)
@@ -395,7 +392,6 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 	defer b.syncStatus.SetSyncing(dataset, false)
 
 	logger := b.progress.Logger(dataset)
-	defer logger.Done()
 
 	if err := b.handleIncompleteTransfer(ctx, logger, dataset); err != nil {
 		return fmt.Errorf("handling incomplete transfer of '%s': %w", dataset, err)

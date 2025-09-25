@@ -27,7 +27,3 @@ func (pl *ProgressLogger) Printf(s string, args ...any) {
 	pl.logger.Printf(s, args...)
 	pl.pr.Log(pl.ds, s, args...)
 }
-
-func (pl *ProgressLogger) Done() {
-	pl.pr.Done(pl.ds)
-}

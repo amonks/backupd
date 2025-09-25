@@ -49,8 +49,7 @@ func (v Value) Get(k model.DatasetName) []LogEntry {
 }
 
 type Process struct {
-	isDone bool
-	logs   []LogEntry
+	logs []LogEntry
 }
 
 type LogEntry struct {
@@ -68,6 +67,8 @@ func (pr *Progress) Deref() Value {
 	return pr.Atom.Deref()
 }
 
+const maxLogsPerDataset = 1000
+
 func (pr *Progress) Log(ds model.DatasetName, s string, args ...any) {
 	pr.Swap(func(old Value) Value {
 		entry := LogEntry{
@@ -84,35 +85,19 @@ func (pr *Progress) Log(ds model.DatasetName, s string, args ...any) {
 			}
 
 			seen = true
-			if old[k].isDone {
-				out[k] = &Process{
-					isDone: false,
-					logs:   []LogEntry{entry},
-				}
-			} else {
-				out[k] = &Process{
-					isDone: false,
-					logs:   append(v.logs, entry),
-				}
+			// Append new entry and enforce max size limit
+			newLogs := append(v.logs, entry)
+			if len(newLogs) > maxLogsPerDataset {
+				// Remove oldest entries to maintain the limit
+				newLogs = newLogs[len(newLogs)-maxLogsPerDataset:]
+			}
+			out[k] = &Process{
+				logs: newLogs,
 			}
 		}
 		if !seen {
 			out[ds] = &Process{
 				logs: []LogEntry{entry},
-			}
-		}
-		return out
-	})
-}
-
-func (pr *Progress) Done(ds model.DatasetName) {
-	pr.Swap(func(old Value) Value {
-		out := make(Value, len(old)-1)
-		for k, v := range old {
-			out[k] = v
-			if k == ds {
-				process := out[k]
-				process.isDone = true
 			}
 		}
 		return out
