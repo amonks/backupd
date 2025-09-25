@@ -46,6 +46,21 @@ func NewPlanStep(op Operation) *PlanStep {
 	}
 }
 
+// TryExecute runs the provided function, managing the step's status through callbacks.
+// The updateStatus callback is called with StepInProgress before execution,
+// then with StepCompleted on success or StepFailed on error.
+// This design avoids direct mutation of the PlanStep to prevent race conditions.
+func (ps *PlanStep) TryExecute(updateStatus func(StepStatus), work func() error) error {
+	updateStatus(StepInProgress)
+	err := work()
+	if err != nil {
+		updateStatus(StepFailed)
+	} else {
+		updateStatus(StepCompleted)
+	}
+	return err
+}
+
 // PlanFromOperations converts a slice of operations to a Plan
 func PlanFromOperations(ops []Operation) Plan {
 	steps := make(Plan, len(ops))

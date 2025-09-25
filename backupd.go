@@ -56,6 +56,19 @@ func (b *Backupd) notifyStateChange() {
 	}
 }
 
+// updateStepStatus updates the status of a plan step in a thread-safe manner
+func (b *Backupd) updateStepStatus(dataset model.DatasetName, stepIndex int, status model.StepStatus) {
+	b.state.Swap(func(state *model.Model) *model.Model {
+		currentDS := state.GetDataset(dataset)
+		if currentDS == nil || currentDS.Plan == nil || stepIndex >= len(currentDS.Plan) {
+			return state
+		}
+		currentDS.Plan[stepIndex].Status = status
+		return model.ReplaceDataset(dataset, currentDS)(state)
+	})
+	b.notifyStateChange()
+}
+
 func (b *Backupd) Go(ctx context.Context) error {
 	g, ctx := errgroup.WithContext(ctx)
 
@@ -422,114 +435,91 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 
 		logger.Printf("Applying op '%s'", step.Operation)
 
-		// Mark step as in progress
-		b.state.Swap(func(state *model.Model) *model.Model {
-			currentDS := state.GetDataset(dataset)
-			if currentDS == nil || currentDS.Plan == nil || i >= len(currentDS.Plan) {
-				return state
-			}
-			currentDS.Plan[i].Status = model.StepInProgress
-			return model.ReplaceDataset(dataset, currentDS)(state)
-		})
-		b.notifyStateChange()
-
-		logger.Printf("-- Ensuring in-memory state supports this update...")
-		initialDS := initialState.GetDataset(dataset)
-		if initialDS == nil || initialDS.Current == nil {
-			return fmt.Errorf("dataset '%s' has no current inventory", dataset)
-		}
-		_, err := step.Apply(initialDS.Current)
-		if err != nil {
-			return fmt.Errorf("applying op '%s' to in-memory state of '%s': %w", step, dataset, err)
-		}
-
-		// In dryrun mode, we don't actually apply the operations to the ZFS environment
-		// We just update the in-memory state for display purposes
-		if b.dryrun {
-			logger.Printf("-- [DRYRUN] Would update zfs environment with op '%s'", step)
-			logger.Printf("-- [DRYRUN] Updating in-memory state only...")
-			b.state.Swap(func(state *model.Model) *model.Model {
-				currentDS := state.GetDataset(dataset)
-				if currentDS == nil || currentDS.Current == nil {
-					return state
+		// Use TryExecute to manage status transitions
+		err := step.TryExecute(
+			func(status model.StepStatus) { b.updateStepStatus(dataset, i, status) },
+			func() error {
+				logger.Printf("-- Ensuring in-memory state supports this update...")
+				initialDS := initialState.GetDataset(dataset)
+				if initialDS == nil || initialDS.Current == nil {
+					return fmt.Errorf("dataset '%s' has no current inventory", dataset)
 				}
-				newInventory, err := step.Apply(currentDS.Current)
+				_, err := step.Apply(initialDS.Current)
 				if err != nil {
-					logger.Printf("-- [DRYRUN] Error applying op to current state: %v", err)
-					// Mark step as failed
-					if currentDS.Plan != nil && i < len(currentDS.Plan) {
-						currentDS.Plan[i].Status = model.StepFailed
+					return fmt.Errorf("applying op '%s' to in-memory state of '%s': %w", step, dataset, err)
+				}
+
+				// In dryrun mode, we don't actually apply the operations to the ZFS environment
+				// We just update the in-memory state for display purposes
+				if b.dryrun {
+					logger.Printf("-- [DRYRUN] Would update zfs environment with op '%s'", step)
+					logger.Printf("-- [DRYRUN] Updating in-memory state only...")
+					b.state.Swap(func(state *model.Model) *model.Model {
+						currentDS := state.GetDataset(dataset)
+						if currentDS == nil || currentDS.Current == nil {
+							return state
+						}
+						newInventory, err := step.Apply(currentDS.Current)
+						if err != nil {
+							logger.Printf("-- [DRYRUN] Error applying op to current state: %v", err)
+							return state
+						}
+						// Update inventory
+						updatedDS := currentDS.Clone()
+						updatedDS.Current = newInventory
+						return model.ReplaceDataset(dataset, updatedDS)(state)
+					})
+					b.notifyStateChange()
+					logger.Printf("-- [DRYRUN] Done.")
+					return nil
+				}
+
+				allowRetry := false
+				attempts := 0
+			retry:
+				attempts++
+
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+
+				logger.Printf("-- Updating zfs environment...")
+				if err := b.env.Apply(ctx, logger, step); err != nil {
+					if allowRetry && strings.Contains(err.Error(), "exit status 255") && attempts < 5 {
+						logger.Printf("-- Got status code 255 on attempt %d; retrying", attempts)
+						time.Sleep(time.Minute * time.Duration(attempts))
+						goto retry
+					} else {
+						return fmt.Errorf("applying op '%s' to zfs env (attempt %d) of '%s': %w", step, attempts, dataset, err)
 					}
-					return state
 				}
-				// Update inventory and mark step as completed
-				updatedDS := currentDS.Clone()
-				updatedDS.Current = newInventory
-				if updatedDS.Plan != nil && i < len(updatedDS.Plan) {
-					updatedDS.Plan[i].Status = model.StepCompleted
-				}
-				return model.ReplaceDataset(dataset, updatedDS)(state)
-			})
-			b.notifyStateChange()
-			logger.Printf("-- [DRYRUN] Done.")
-			continue
-		}
 
-		allowRetry := false
-		attempts := 0
-	retry:
-		attempts++
-
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-
-		logger.Printf("-- Updating zfs environment...")
-		if err := b.env.Apply(ctx, logger, step); err != nil {
-			if allowRetry && strings.Contains(err.Error(), "exit status 255") && attempts < 5 {
-				logger.Printf("-- Got status code 255 on attempt %d; retrying", attempts)
-				time.Sleep(time.Minute * time.Duration(attempts))
-				goto retry
-			} else {
-				// Mark step as failed
+				logger.Printf("-- Updating in-memory state...")
 				b.state.Swap(func(state *model.Model) *model.Model {
 					currentDS := state.GetDataset(dataset)
-					if currentDS != nil && currentDS.Plan != nil && i < len(currentDS.Plan) {
-						currentDS.Plan[i].Status = model.StepFailed
+					if currentDS == nil || currentDS.Current == nil {
+						return state
 					}
-					return model.ReplaceDataset(dataset, currentDS)(state)
+					newInventory, err := step.Apply(currentDS.Current)
+					if err != nil {
+						logger.Printf("-- Error applying op to current state: %v", err)
+						return state
+					}
+					// Update inventory
+					updatedDS := currentDS.Clone()
+					updatedDS.Current = newInventory
+					return model.ReplaceDataset(dataset, updatedDS)(state)
 				})
 				b.notifyStateChange()
-				return fmt.Errorf("applying op '%s' to zfs env (attempt %d) of '%s': %w", step, attempts, dataset, err)
-			}
+
+				logger.Printf("-- Done.")
+				return nil
+			})
+
+		if err != nil {
+			// Status is already set to Failed by TryExecute via updateStepStatus
+			return err
 		}
-
-		logger.Printf("-- Updating in-memory state...")
-		b.state.Swap(func(state *model.Model) *model.Model {
-			currentDS := state.GetDataset(dataset)
-			if currentDS == nil || currentDS.Current == nil {
-				return state
-			}
-			newInventory, err := step.Apply(currentDS.Current)
-			if err != nil {
-				logger.Printf("-- Error applying op to current state: %v", err)
-				// Mark step as failed
-				if currentDS.Plan != nil && i < len(currentDS.Plan) {
-					currentDS.Plan[i].Status = model.StepFailed
-				}
-				return state
-			}
-			// Update inventory and mark step as completed
-			updatedDS := currentDS.Clone()
-			updatedDS.Current = newInventory
-			if updatedDS.Plan != nil && i < len(updatedDS.Plan) {
-				updatedDS.Plan[i].Status = model.StepCompleted
-			}
-			return model.ReplaceDataset(dataset, updatedDS)(state)
-		})
-		b.notifyStateChange()
-
-		logger.Printf("-- Done.")
 	}
 
 	logger.Printf("sync complete")
