@@ -268,8 +268,11 @@ func (b *Backupd) generatePlansForAllDatasets(ctx context.Context) {
 		}
 
 		// Generate goal and plan for this dataset
-		goal := ds.Goal(b.config.Local.Policy, b.config.Remote.Policy)
-		plan, err := ds.Plan(goal)
+		if ds.Current == nil {
+			continue
+		}
+		target := model.CalculateTargetInventory(ds.Current, b.config.Local.Policy, b.config.Remote.Policy)
+		plan, err := model.CalculateTransitionPlan(ds.Current, target)
 		if err != nil {
 			// Log error but continue with other datasets
 			b.progress.Log(model.GlobalDataset, "error generating plan for '%s': %s", dsName, err)
@@ -283,8 +286,8 @@ func (b *Backupd) generatePlansForAllDatasets(ctx context.Context) {
 				return state
 			}
 			updatedDS := currentDS.Clone()
-			updatedDS.GoalState = goal
-			updatedDS.CurrentPlan = plan
+			updatedDS.Target = target
+			updatedDS.Plan = plan
 			return model.ReplaceDataset(dsName, updatedDS)(state)
 		})
 	}
@@ -314,9 +317,13 @@ func (b *Backupd) replanDataset(ctx context.Context, dataset model.DatasetName) 
 		return fmt.Errorf("dataset '%s' not found", dataset)
 	}
 
+	if ds.Current == nil {
+		return fmt.Errorf("dataset '%s' has no current inventory", dataset)
+	}
+
 	// Generate goal and plan
-	goal := ds.Goal(b.config.Local.Policy, b.config.Remote.Policy)
-	plan, err := ds.Plan(goal)
+	target := model.CalculateTargetInventory(ds.Current, b.config.Local.Policy, b.config.Remote.Policy)
+	plan, err := model.CalculateTransitionPlan(ds.Current, target)
 	if err != nil {
 		return fmt.Errorf("generating plan for '%s': %w", dataset, err)
 	}
@@ -328,8 +335,8 @@ func (b *Backupd) replanDataset(ctx context.Context, dataset model.DatasetName) 
 			return state
 		}
 		updatedDS := currentDS.Clone()
-		updatedDS.GoalState = goal
-		updatedDS.CurrentPlan = plan
+		updatedDS.Target = target
+		updatedDS.Plan = plan
 		return model.ReplaceDataset(dataset, updatedDS)(state)
 	})
 
@@ -355,19 +362,19 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 		return fmt.Errorf("dataset '%s' not found", dataset)
 	}
 
-	if ds.CurrentPlan == nil {
+	if ds.Plan == nil {
 		return fmt.Errorf("no plan available for dataset '%s'", dataset)
 	}
 
-	plan := ds.CurrentPlan
-	goal := ds.GoalState
+	plan := ds.Plan
+	target := ds.Target
 
-	if goal == nil {
-		return fmt.Errorf("no goal state available for dataset '%s'", dataset)
+	if target == nil {
+		return fmt.Errorf("no target state available for dataset '%s'", dataset)
 	}
 
 	// Validate the plan before execution
-	if err := ds.ValidatePlan(ctx, goal, plan, false); err != nil {
+	if err := model.ValidatePlan(ctx, ds.Current, target, plan, false); err != nil {
 		return fmt.Errorf("validating plan for '%s': %w", dataset, err)
 	}
 
@@ -386,15 +393,19 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 		// Mark step as in progress
 		b.state.Swap(func(state *model.Model) *model.Model {
 			currentDS := state.GetDataset(dataset)
-			if currentDS == nil || currentDS.CurrentPlan == nil || i >= len(currentDS.CurrentPlan) {
+			if currentDS == nil || currentDS.Plan == nil || i >= len(currentDS.Plan) {
 				return state
 			}
-			currentDS.CurrentPlan[i].Status = model.StepInProgress
+			currentDS.Plan[i].Status = model.StepInProgress
 			return model.ReplaceDataset(dataset, currentDS)(state)
 		})
 
 		logger.Printf("-- Ensuring in-memory state supports this update...")
-		_, err := step.Apply(initialState.GetDataset(dataset))
+		initialDS := initialState.GetDataset(dataset)
+		if initialDS == nil || initialDS.Current == nil {
+			return fmt.Errorf("dataset '%s' has no current inventory", dataset)
+		}
+		_, err := step.Apply(initialDS.Current)
 		if err != nil {
 			return fmt.Errorf("applying op '%s' to in-memory state of '%s': %w", step, dataset, err)
 		}
@@ -406,23 +417,25 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 			logger.Printf("-- [DRYRUN] Updating in-memory state only...")
 			b.state.Swap(func(state *model.Model) *model.Model {
 				currentDS := state.GetDataset(dataset)
-				if currentDS == nil {
+				if currentDS == nil || currentDS.Current == nil {
 					return state
 				}
-				newState, err := step.Apply(currentDS)
+				newInventory, err := step.Apply(currentDS.Current)
 				if err != nil {
 					logger.Printf("-- [DRYRUN] Error applying op to current state: %v", err)
 					// Mark step as failed
-					if currentDS.CurrentPlan != nil && i < len(currentDS.CurrentPlan) {
-						currentDS.CurrentPlan[i].Status = model.StepFailed
+					if currentDS.Plan != nil && i < len(currentDS.Plan) {
+						currentDS.Plan[i].Status = model.StepFailed
 					}
 					return state
 				}
-				// Mark step as completed
-				if currentDS.CurrentPlan != nil && i < len(currentDS.CurrentPlan) {
-					currentDS.CurrentPlan[i].Status = model.StepCompleted
+				// Update inventory and mark step as completed
+				updatedDS := currentDS.Clone()
+				updatedDS.Current = newInventory
+				if updatedDS.Plan != nil && i < len(updatedDS.Plan) {
+					updatedDS.Plan[i].Status = model.StepCompleted
 				}
-				return model.ReplaceDataset(dataset, newState)(state)
+				return model.ReplaceDataset(dataset, updatedDS)(state)
 			})
 			logger.Printf("-- [DRYRUN] Done.")
 			continue
@@ -447,8 +460,8 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 				// Mark step as failed
 				b.state.Swap(func(state *model.Model) *model.Model {
 					currentDS := state.GetDataset(dataset)
-					if currentDS != nil && currentDS.CurrentPlan != nil && i < len(currentDS.CurrentPlan) {
-						currentDS.CurrentPlan[i].Status = model.StepFailed
+					if currentDS != nil && currentDS.Plan != nil && i < len(currentDS.Plan) {
+						currentDS.Plan[i].Status = model.StepFailed
 					}
 					return model.ReplaceDataset(dataset, currentDS)(state)
 				})
@@ -459,23 +472,25 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 		logger.Printf("-- Updating in-memory state...")
 		b.state.Swap(func(state *model.Model) *model.Model {
 			currentDS := state.GetDataset(dataset)
-			if currentDS == nil {
+			if currentDS == nil || currentDS.Current == nil {
 				return state
 			}
-			newState, err := step.Apply(currentDS)
+			newInventory, err := step.Apply(currentDS.Current)
 			if err != nil {
 				logger.Printf("-- Error applying op to current state: %v", err)
 				// Mark step as failed
-				if currentDS.CurrentPlan != nil && i < len(currentDS.CurrentPlan) {
-					currentDS.CurrentPlan[i].Status = model.StepFailed
+				if currentDS.Plan != nil && i < len(currentDS.Plan) {
+					currentDS.Plan[i].Status = model.StepFailed
 				}
 				return state
 			}
-			// Mark step as completed
-			if newState.CurrentPlan != nil && i < len(newState.CurrentPlan) {
-				newState.CurrentPlan[i].Status = model.StepCompleted
+			// Update inventory and mark step as completed
+			updatedDS := currentDS.Clone()
+			updatedDS.Current = newInventory
+			if updatedDS.Plan != nil && i < len(updatedDS.Plan) {
+				updatedDS.Plan[i].Status = model.StepCompleted
 			}
-			return model.ReplaceDataset(dataset, newState)(state)
+			return model.ReplaceDataset(dataset, updatedDS)(state)
 		})
 
 		logger.Printf("-- Done.")
@@ -487,7 +502,8 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 }
 
 func (b *Backupd) handleIncompleteTransfer(ctx context.Context, logger logger.Logger, dataset model.DatasetName) error {
-	if b.state.Deref().GetDataset(dataset).Remote == nil {
+	ds := b.state.Deref().GetDataset(dataset)
+	if ds == nil || ds.Current == nil || ds.Current.Remote == nil {
 		return nil
 	}
 
@@ -554,24 +570,30 @@ func (b *Backupd) Plan(ctx context.Context, dataset model.DatasetName) error {
 		return fmt.Errorf("no such dataset '%s'", dataset)
 	}
 
-	goal := ds.Goal(b.config.Local.Policy, b.config.Remote.Policy)
+	if ds.Current == nil {
+		return fmt.Errorf("dataset '%s' has no current inventory", dataset)
+	}
 
-	// Store the goal in the dataset for display purposes
+	target := model.CalculateTargetInventory(ds.Current, b.config.Local.Policy, b.config.Remote.Policy)
+
+	// Store the target in the dataset for display purposes
 	updatedDS := ds.Clone()
-	updatedDS.GoalState = goal
+	updatedDS.Target = target
 	b.state.Swap(model.ReplaceDataset(dataset, updatedDS))
-	plan, err := ds.Plan(goal)
+
+	plan, err := model.CalculateTransitionPlan(ds.Current, target)
 	if err != nil {
 		return fmt.Errorf("constructing plan: %w", err)
 	}
+
 	fmt.Println("ACHIEVING CHANGE")
-	fmt.Print(ds.Diff(goal))
+	fmt.Print(ds.Current.Diff(target))
 	fmt.Println("VIA PLAN")
 	for _, op := range plan {
 		fmt.Printf("- %s\n", op)
 	}
 
-	if err := ds.ValidatePlan(ctx, goal, plan, true); err != nil {
+	if err := model.ValidatePlan(ctx, ds.Current, target, plan, true); err != nil {
 		return fmt.Errorf("invalid plan: %w", err)
 	}
 
@@ -595,11 +617,11 @@ func (b *Backupd) RefreshLocalSnapshots(ctx context.Context, logger logger.Logge
 				continue
 			}
 
-			// Get current dataset size (preserve existing size info)
+			// Get current dataset metrics (preserve existing size info)
 			currentDS := currentState.GetDataset(dsName)
 			var size *model.DatasetSize
-			if currentDS != nil {
-				size = currentDS.LocalSize
+			if currentDS != nil && currentDS.Metrics.HasLocal {
+				size = &currentDS.Metrics.LocalSize
 			}
 
 			// Update the dataset with new snapshots

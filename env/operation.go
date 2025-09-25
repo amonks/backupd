@@ -9,6 +9,11 @@ import (
 )
 
 func (env *Env) Apply(ctx context.Context, logger logger.Logger, op model.Operation) error {
+	// Unwrap PlanStep if necessary
+	if step, ok := op.(*model.PlanStep); ok {
+		op = step.Operation
+	}
+
 	switch op := op.(type) {
 
 	case *model.SnapshotDeletion:
@@ -60,6 +65,6 @@ func (env *Env) Apply(ctx context.Context, logger logger.Logger, op model.Operat
 		return nil
 
 	default:
-		return fmt.Errorf("not supported")
+		return fmt.Errorf("%s is not supported", op)
 	}
 }

@@ -31,8 +31,8 @@ func (ps *PlanStep) String() string {
 }
 
 // Apply delegates to the wrapped operation
-func (ps *PlanStep) Apply(ds *Dataset) (*Dataset, error) {
-	return ps.Operation.Apply(ds)
+func (ps *PlanStep) Apply(inv *SnapshotInventory) (*SnapshotInventory, error) {
+	return ps.Operation.Apply(inv)
 }
 
 // Plan is a sequence of plan steps
@@ -55,14 +55,14 @@ func PlanFromOperations(ops []Operation) Plan {
 	return steps
 }
 
-func (dataset *Dataset) Plan(goal *Dataset) (Plan, error) {
+func CalculateTransitionPlan(current, target *SnapshotInventory) (Plan, error) {
 	var ops []Operation
 
-	localDeletions := dataset.Local.Difference(goal.Local)
-	remoteDeletions := dataset.Remote.Difference(goal.Remote)
+	localDeletions := current.Local.Difference(target.Local)
+	remoteDeletions := current.Remote.Difference(target.Remote)
 
-	localDeletionRanges := dataset.Local.GroupByAdjacency(localDeletions)
-	remoteDeletionRanges := dataset.Remote.GroupByAdjacency(remoteDeletions)
+	localDeletionRanges := current.Local.GroupByAdjacency(localDeletions)
+	remoteDeletionRanges := current.Remote.GroupByAdjacency(remoteDeletions)
 
 	for _, del := range localDeletionRanges {
 		if del.Len() == 1 {
@@ -94,26 +94,26 @@ func (dataset *Dataset) Plan(goal *Dataset) (Plan, error) {
 		}
 	}
 
-	transfers := goal.Remote.Difference(dataset.Remote)
+	transfers := target.Remote.Difference(current.Remote)
 	if transfers.Len() == 0 {
 		return PlanFromOperations(ops), nil
 	}
 
-	sharedSnapshots := dataset.Remote.Intersection(dataset.Local)
+	sharedSnapshots := current.Remote.Intersection(current.Local)
 
 	// if there is no shared snapshot, but there are remote snapshots, error
 	last := sharedSnapshots.Newest()
-	if last == nil && dataset.Remote.Len() > 0 {
+	if last == nil && current.Remote.Len() > 0 {
 		return nil, fmt.Errorf("remote has data, but none is shared with local")
 	}
-	if dataset.Remote.Len() == 0 {
+	if current.Remote.Len() == 0 {
 		ops = append(ops, &InitialSnapshotTransfer{
 			Snapshot: transfers.Oldest(),
 		})
 		last = transfers.Oldest()
 		transfers.Del(transfers.Oldest())
 	}
-	if last == nil || !dataset.Local.Has(last) {
+	if last == nil || !current.Local.Has(last) {
 		return nil, fmt.Errorf("local doesn't have transfer base snapshot %s", last)
 	}
 	for snapshot := range transfers.All() {
@@ -127,12 +127,12 @@ func (dataset *Dataset) Plan(goal *Dataset) (Plan, error) {
 	return PlanFromOperations(ops), nil
 }
 
-func (dataset *Dataset) ValidatePlan(ctx context.Context, goal *Dataset, plan Plan, isDebugging bool) error {
+func ValidatePlan(ctx context.Context, current, target *SnapshotInventory, plan Plan, isDebugging bool) error {
 	if isDebugging {
 		fmt.Println("PLAN STEPS")
 	}
 
-	out := dataset.Clone()
+	out := current.Clone()
 	for _, op := range plan {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -152,12 +152,12 @@ func (dataset *Dataset) ValidatePlan(ctx context.Context, goal *Dataset, plan Pl
 	}
 
 	var errors []string
-	if !goal.Eq(out) {
-		errors = append(errors, fmt.Sprintf("flaws are:\n%s", goal.Diff(out)))
+	if !target.Eq(out) {
+		errors = append(errors, fmt.Sprintf("flaws are:\n%s", target.Diff(out)))
 	}
 
 	if errors != nil {
-		return fmt.Errorf("applying %s to %s does not produce %s:\n%s", plan, dataset, goal, strings.Join(errors, "\n"))
+		return fmt.Errorf("applying plan does not produce target state:\n%s", strings.Join(errors, "\n"))
 	}
 	return nil
 }

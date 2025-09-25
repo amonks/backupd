@@ -7,53 +7,82 @@ A daemon for managing ZFS snapshot backups with local and remote targets.
 `backupd` is a service that manages ZFS snapshots across local and remote systems. It provides automated snapshot creation, replication, and retention policy enforcement to ensure your data is safely backed up according to configurable policies.
 
 Key features:
-- Local and remote ZFS snapshot management
-- Configurable retention policies for different snapshot types
-- Web interface for monitoring backup status
-- Resumable snapshot transfers
-- Dead Man's Snitch monitoring integration
+- Automated ZFS snapshot replication with intelligent planning
+- Type-based retention policies with configurable limits
+- Real-time web dashboard for monitoring and control
+- Resumable transfers with progress tracking
+- RESTful API for snapshot creation
+- Dead Man's Snitch integration for external monitoring
+- Dry-run mode for safe testing
+- Atomic state management for consistency
 
-### Functional Description
+### How It Works
 
-**What backupd Does:**
+**Core Functionality:**
 
-1. **Snapshot Retention Management:**
-   - Enforces retention policies for local snapshots based on snapshot type and age
-   - Deletes snapshots that exceed retention limits or don't match policy types
-   - Preserves critical snapshots required for system function (oldest, shared)
+1. **Automatic Sync Cycle (Hourly):**
+   - Discovers all datasets under configured local and remote roots
+   - Refreshes snapshot inventories from both locations
+   - Calculates target state based on retention policies
+   - Generates and validates execution plan
+   - Executes transfers and deletions to reach target state
+   - Reports status to monitoring services
 
-2. **Remote Backup Management:**
-   - Transfers policy-matching snapshots to remote storage systems
-   - Uses ZFS's efficient incremental transfer capabilities
-   - Ensures remote systems maintain policy-compliant snapshot sets
+2. **Snapshot Retention Management:**
+   - Applies per-type retention policies (e.g., keep 24 hourly, 7 daily)
+   - Processes snapshots by creation time, keeping newest first
+   - Preserves critical snapshots:
+     - Oldest snapshot at each location (historical baseline)
+     - Earliest shared snapshot (incremental transfer base)
+     - Latest shared snapshot (synchronization point)
+   - Deletes non-policy snapshots unless they're critical
 
-3. **Policy-Based Data Lifecycle:**
-   - Snapshots are categorized by type (hourly, daily, weekly, etc.)
-   - Each type has configurable retention counts
-   - Newer snapshots are preserved over older ones within each type
+3. **Intelligent Transfer Planning:**
+   - Only transfers snapshots matching remote retention policy
+   - Uses incremental transfers when possible (requires common snapshot)
+   - Handles initial transfers for empty remote datasets
+   - Skips transfers for snapshots older than remote's newest
+   - Groups adjacent snapshots into range operations for efficiency
 
-4. **Snapshot Pruning Rules:**
-   - Snapshots without matching policy types are deleted (with limited exceptions)
-   - When count limits are exceeded, oldest snapshots of that type are removed first
-   - Special snapshots are preserved regardless of policy (oldest, shared between local/remote)
+4. **Operation Types:**
+   - **InitialSnapshotTransfer**: First snapshot to empty remote
+   - **SnapshotRangeTransfer**: Incremental transfer between two snapshots
+   - **SnapshotDeletion**: Remove single snapshot
+   - **SnapshotRangeDeletion**: Remove range of snapshots (e.g., `@snap1%snap5`)
 
-5. **Transfer Logic:**
-   - Only transfers snapshots that match remote policy configuration
-   - Requires at least one common snapshot for incremental transfers
-   - Can't transfer snapshots that are older than existing remote snapshots
+5. **Progress and State Management:**
+   - Thread-safe state updates using atomic operations
+   - Per-dataset progress tracking with operation logs
+   - Plan validation before execution (simulated apply)
+   - Resumable transfers using ZFS receive tokens
+   - Dry-run mode for testing without modifications
 
 ## Requirements
 
-- Must be run as root
+- Must be run as root (for ZFS operations)
 - ZFS filesystem
-- FreeBSD/Linux
+- FreeBSD or Linux operating system
+- SSH access to remote backup server (if using remote backups)
+- Go 1.21+ (for building from source)
 
 ## Installation
 
-Build from source:
+### Build from source
 
-```
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/backupd.git
+cd backupd
+
+# Build the binary
 go build -o backupd
+
+# Install to system path (optional)
+sudo cp backupd /usr/local/bin/
+sudo chmod +x /usr/local/bin/backupd
+
+# Create log directory
+sudo mkdir -p /var/log
 ```
 
 ## Configuration
@@ -64,58 +93,120 @@ Configuration is loaded from one of the following locations (in order of precede
 - `/opt/local/etc/backupd.toml`
 - `/Library/Application Support/co.monks.backupd/backupd.toml`
 
-Example configuration:
+### Configuration Structure
 
 ```toml
-# Optional Dead Man's Snitch ID for monitoring
+# Optional: External monitoring via Dead Man's Snitch
+# Get your snitch ID from https://deadmanssnitch.com
 snitch_id = "your-snitch-id"
 
-[remote]
-ssh_key = "/path/to/ssh/key"
-ssh_host = "backup-server.example.com"
-root = "tank/backups"
-
-# Retention policy for remote snapshots
-# Format: snapshot-type = count
-[remote.policy]
-hourly = 24
-daily = 7
-weekly = 4
-monthly = 6
-yearly = 2
-
 [local]
+# Root dataset to backup (all child datasets included)
 root = "tank/data"
 
-# Retention policy for local snapshots
+# Retention policy: how many snapshots of each type to keep locally
+# Format: type = count
 [local.policy]
-hourly = 24
+hourly = 24      # Keep 24 most recent hourly snapshots (1 day)
+daily = 7        # Keep 7 most recent daily snapshots (1 week)
+weekly = 4       # Keep 4 most recent weekly snapshots (1 month)
+monthly = 12     # Keep 12 most recent monthly snapshots (1 year)
+yearly = 5       # Keep 5 most recent yearly snapshots
+
+[remote]
+# SSH connection details for remote backup server
+ssh_key = "/home/user/.ssh/backup_key"    # Path to SSH private key
+ssh_host = "user@backup-server.example.com"  # SSH connection string
+root = "tank/backups"                     # Remote dataset root
+
+# Retention policy for remote location
+# Typically more conservative than local to save space
+[remote.policy]
+hourly = 0       # Don't keep hourly on remote
+daily = 7        # Keep 7 most recent daily snapshots
+weekly = 4       # Keep 4 most recent weekly snapshots
+monthly = 6      # Keep 6 most recent monthly snapshots
+yearly = 2       # Keep 2 most recent yearly snapshots
+```
+
+### Example Configurations
+
+<details>
+<summary><b>Minimal Local-Only Configuration</b></summary>
+
+```toml
+[local]
+root = "zpool/data"
+
+[local.policy]
+daily = 30
+weekly = 8
+monthly = 12
+
+# Empty remote section disables remote backups
+[remote]
+root = ""
+```
+</details>
+
+<details>
+<summary><b>Production Configuration with Monitoring</b></summary>
+
+```toml
+snitch_id = "abc123def456"
+
+[local]
+root = "production/data"
+
+[local.policy]
+hourly = 48
+daily = 14
+weekly = 8
+monthly = 12
+yearly = 7
+
+[remote]
+ssh_key = "/root/.ssh/backup_rsa"
+ssh_host = "backup@192.168.1.100"
+root = "backup/production"
+
+[remote.policy]
 daily = 7
 weekly = 4
 monthly = 12
 yearly = 5
 ```
+</details>
 
 ## Usage
 
 ### Command Line Arguments
 
 - `-debug <dataset>`: Debug a specific dataset (performs refresh and plan but no transfers)
-- `-logfile <path>`: Log to a file instead of stdout
+- `-logfile <path>`: Log to a file instead of stdout (recommended for production)
 - `-addr <address>`: Server address for the web interface (default: "0.0.0.0:8888")
-- `-dryrun`: Refresh state but don't transfer or delete snapshots
+- `-dryrun`: Refresh state but don't execute transfers or deletions (preview mode)
 
 ### Basic Usage
 
-```
-# Run as a service
+```bash
+# Run as a service (default mode)
 sudo backupd
 
-# Debug a specific dataset
-sudo backupd -debug pool/dataset
-
-# Run with a specific log file
+# Run with logging to file (recommended for production)
 sudo backupd -logfile /var/log/backupd.log
+
+# Run in dry-run mode (preview changes without executing)
+sudo backupd -dryrun
+
+# Debug a specific dataset (shows plan without executing)
+sudo backupd -debug tank/dataset
+
+# Run on custom port
+sudo backupd -addr 127.0.0.1:9999
+
+# Create a snapshot via API
+curl -X POST "http://localhost:8888/snapshot?periodicity=daily"
 ```
 
 ### Setting Up as a Daemon
@@ -201,12 +292,36 @@ systemctl status backupd
 ```
 </details>
 
-## Web Interface
+## Web Interface and API
 
-The web interface is available at:
-- Global view: http://localhost:8888/global
-- Root dataset: http://localhost:8888/root
-- Specific dataset: http://localhost:8888/<dataset-path>
+### Web UI Endpoints
+
+The web interface provides real-time monitoring:
+- **Global view**: http://localhost:8888/global - Overview of all datasets
+- **Root dataset**: http://localhost:8888/root - Root dataset status
+- **Specific dataset**: http://localhost:8888/dataset-name - Individual dataset details
+- **Automatic redirect**: http://localhost:8888/ → /global
+
+### REST API Endpoints
+
+#### Create Snapshot
+```
+POST /snapshot?periodicity=<type>
+```
+Creates a new recursive snapshot for the configured local root dataset.
+
+**Parameters:**
+- `periodicity`: Snapshot type (e.g., "hourly", "daily", "weekly")
+
+**Example:**
+```bash
+curl -X POST "http://localhost:8888/snapshot?periodicity=hourly"
+```
+
+**Response:**
+- 200 OK: Snapshot created successfully
+- 400 Bad Request: Missing periodicity parameter
+- 500 Internal Server Error: Creation failed
 
 ## Snapshot Naming Format and Policy Resolution
 
@@ -252,28 +367,56 @@ A good snapshot strategy involves creating periodic snapshots at different inter
 - **Monthly snapshots**: Keep for 6-12 months
 - **Yearly snapshots**: Keep for several years
 
-You can automate snapshot creation using cron jobs. Here's a simple example script that creates a snapshot with the appropriate naming convention:
+You can automate snapshot creation using either the API or cron jobs:
 
+### Method 1: Using the API (Recommended)
+
+Add these entries to your crontab:
+```cron
+# Hourly snapshots
+0 * * * * curl -X POST "http://localhost:8888/snapshot?periodicity=hourly"
+
+# Daily snapshot at midnight
+0 0 * * * curl -X POST "http://localhost:8888/snapshot?periodicity=daily"
+
+# Weekly snapshot on Sundays
+0 0 * * 0 curl -X POST "http://localhost:8888/snapshot?periodicity=weekly"
+
+# Monthly snapshot on the 1st
+0 0 1 * * curl -X POST "http://localhost:8888/snapshot?periodicity=monthly"
+
+# Yearly snapshot on January 1st
+0 0 1 1 * curl -X POST "http://localhost:8888/snapshot?periodicity=yearly"
+```
+
+### Method 2: Direct ZFS Commands
+
+Create a snapshot script:
 ```bash
 #!/bin/bash
-# Usage: ./snapshot.sh daily|weekly|monthly|yearly
+# snapshot.sh - Create ZFS snapshots with proper naming
 
 type=$1
 if [ -z "$type" ]; then
-  echo "Usage: ./snapshot.sh daily|weekly|monthly|yearly"
+  echo "Usage: $0 <type>"
+  echo "Where <type> matches your policy (hourly, daily, etc.)"
   exit 1
 fi
 
-pool="tank/data"  # Your dataset name
-now=$(date +%Y-%m-%d-%H:%M:%S)
+# Read from backupd config or set manually
+pool="tank/data"  # Should match your local.root in backupd.toml
+now=$(date +%Y%m%d-%H%M%S)
 snapshot_name="$pool@$type-$now"
 
-echo "Creating snapshot $snapshot_name"
+echo "Creating snapshot: $snapshot_name"
 zfs snapshot -r "$snapshot_name"
 ```
 
-Add this to your crontab to run at appropriate intervals:
-```
+Then add to crontab:
+```cron
+# Hourly snapshots
+0 * * * * /path/to/snapshot.sh hourly
+
 # Daily snapshot at midnight
 0 0 * * * /path/to/snapshot.sh daily
 
@@ -289,50 +432,78 @@ Add this to your crontab to run at appropriate intervals:
 
 ## Architecture
 
+### Domain Model
+
+The application uses a clear domain-driven design with the following core entities:
+
+1. **Model**: The top-level system state containing all datasets and their current status
+2. **Dataset**: Represents a ZFS dataset with its current snapshots, target state, metrics, and execution plan
+3. **Snapshot**: Individual point-in-time backup with metadata (creation time, size, type)
+4. **SnapshotInventory**: Tracks which snapshots exist at each location (local/remote)
+5. **Operation**: Abstract representation of actions (transfers, deletions) to be performed
+6. **Plan**: Ordered sequence of operations to transition from current to target state
+
 ### Operational Flow
 
 **How backupd Works:**
 
 1. **State Discovery and Assessment:**
-   - Scans local ZFS datasets using system commands
+   - Scans local ZFS datasets recursively from configured root
    - Connects to remote systems via SSH to catalog remote snapshots
-   - Creates a complete inventory of all snapshots with metadata (creation time, type)
+   - Creates a complete inventory (`SnapshotInventory`) of all snapshots with metadata
+   - Updates the global `Model` with current state for all datasets
 
 2. **Goal State Calculation:**
-   - Constructs an ideal state based on policy configuration
-   - Determines which snapshots should exist on local and remote systems
-   - Incorporates special preservation rules for critical snapshots
-   - Ignores snapshots with types not found in policy (with limited exceptions)
+   - Uses `CalculateTargetInventory` to determine ideal snapshot distribution
+   - Applies retention policies (configurable per snapshot type)
+   - Preserves critical snapshots:
+     - Oldest snapshot on each location
+     - Earliest and latest shared snapshots between locations
+     - Policy-matching snapshots up to retention limits
+   - Non-policy snapshots are candidates for deletion (with exceptions above)
 
 3. **Plan Generation:**
-   - Compares current state with goal state to identify differences
-   - Creates a series of operations (transfers, deletions) to reach goal state
-   - Groups adjacent snapshots into ranges for efficient operations when possible
-   - Validates plan against expected outcomes to catch errors
+   - `CalculateTransitionPlan` compares current vs target inventories
+   - Creates `Operation` instances for each required action:
+     - `SnapshotDeletion` / `SnapshotRangeDeletion` for removals
+     - `InitialSnapshotTransfer` for first-time transfers
+     - `SnapshotRangeTransfer` for incremental transfers
+   - Groups adjacent operations into ranges for efficiency
+   - `ValidatePlan` simulates execution to ensure correctness
 
 4. **Execution:**
-   - Deletes snapshots on both local and remote systems that aren't in goal state
-   - Transfers snapshots using ZFS send/receive for efficient incremental backups
-   - Manages snapshot dependencies to ensure transfers can be completed
-   - Tracks progress and can resume interrupted transfers
+   - Processes each `PlanStep` sequentially
+   - Tracks execution status (Pending → InProgress → Completed/Failed)
+   - Uses ZFS send/receive with raw mode for transfers
+   - Supports resumable transfers via ZFS receive tokens
+   - Updates progress tracking for web UI visibility
 
 5. **Monitoring and Reporting:**
-   - Provides real-time status via web interface
-   - Logs all operations for auditing
-   - Sends notifications through Dead Man's Snitch if configured
-   - Presents results in human-readable format
+   - Real-time status via web interface at http://localhost:8888
+   - Progress tracking per dataset with operation logs
+   - Dead Man's Snitch integration for external monitoring
+   - Atomic state updates using thread-safe `Atom` wrapper
 
 ### System Components
 
-The service runs in two concurrent goroutines:
-- Web server for the UI (provides status monitoring)
-- Sync process that runs hourly to maintain backups (executes core backup logic)
+**Core Packages:**
+- `model/`: Domain entities and business logic
+- `env/`: ZFS command execution and SSH communication
+- `config/`: TOML configuration parsing and validation
+- `sync/`: Synchronization status tracking
+- `progress/`: Operation progress logging
+- `atom/`: Thread-safe state management
 
-Core system components involve:
-- Dataset and snapshot management (model package)
-- Plan generation and execution (operations)
-- Remote system communication (SSH)
-- Web status reporting
+**Concurrent Architecture:**
+The service runs two main goroutines:
+1. **Web Server**: Serves HTTP endpoints for UI and API
+2. **Sync Loop**: Hourly execution of backup operations
+
+**Key Design Patterns:**
+- Immutable state with functional transformations
+- Command pattern for operations
+- Observer pattern for progress tracking
+- Repository pattern for ZFS interactions
 
 ## License
 

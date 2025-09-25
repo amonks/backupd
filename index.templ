@@ -6,7 +6,6 @@ import (
 	"monks.co/backupd/sync"
 	"time"
 	"fmt"
-	"github.com/dustin/go-humanize"
 )
 
 templ index(state *model.Model, progress progress.Value, syncStatus *sync.Status, dataset string, dryrun bool) {
@@ -248,36 +247,12 @@ templ index(state *model.Model, progress progress.Value, syncStatus *sync.Status
 									<td>{ ds.String() }</td>
 									<td>{ state.Datasets[ds].Staleness().Truncate(time.Minute).String() }</td>
 									<td>@renderSyncIndicator(ds, state.Datasets[ds], syncStatus)</td>
-									<td><code>{ state.Datasets[ds].Local.String() }</code></td>
-									<td><code>
-										if state.Datasets[ds].LocalSize != nil {
-											{ humanize.Bytes(uint64(state.Datasets[ds].LocalSize.Used)) }
-										} else {
-											-
-										}
-									</code></td>
-									<td><code>
-										if state.Datasets[ds].LocalSize != nil {
-											{ humanize.Bytes(uint64(state.Datasets[ds].LocalSize.LogicalReferenced)) }
-										} else {
-											-
-										}
-									</code></td>
-									<td><code>{ state.Datasets[ds].Remote.String() }</code></td>
-									<td><code>
-										if state.Datasets[ds].RemoteSize != nil {
-											{ humanize.Bytes(uint64(state.Datasets[ds].RemoteSize.Used)) }
-										} else {
-											-
-										}
-									</code></td>
-									<td><code>
-										if state.Datasets[ds].RemoteSize != nil {
-											{ humanize.Bytes(uint64(state.Datasets[ds].RemoteSize.LogicalReferenced)) }
-										} else {
-											-
-										}
-									</code></td>
+									<td><code>{ state.Datasets[ds].Current.LocalString() }</code></td>
+									<td><code>{ state.Datasets[ds].Metrics.LocalUsedString() }</code></td>
+									<td><code>{ state.Datasets[ds].Metrics.LocalLogicalString() }</code></td>
+									<td><code>{ state.Datasets[ds].Current.RemoteString() }</code></td>
+									<td><code>{ state.Datasets[ds].Metrics.RemoteUsedString() }</code></td>
+									<td><code>{ state.Datasets[ds].Metrics.RemoteLogicalString() }</code></td>
 								</tr>
 							}
 						</tbody>
@@ -302,51 +277,27 @@ templ index(state *model.Model, progress progress.Value, syncStatus *sync.Status
 							<table>
 								<tr>
 									<th>Local snapshots</th>
-									<td><code>{ ds.Local.String() }</code></td>
+									<td><code>{ ds.Current.LocalString() }</code></td>
 								</tr>
 								<tr>
 									<th>Local disk size</th>
-									<td>
-										if ds.LocalSize != nil {
-											<code>{ humanize.Bytes(uint64(ds.LocalSize.Used)) }</code>
-										} else {
-											-
-										}
-									</td>
+									<td><code>{ ds.Metrics.LocalUsedString() }</code></td>
 								</tr>
 								<tr>
 									<th>Local logical size</th>
-									<td>
-										if ds.LocalSize != nil {
-											<code>{ humanize.Bytes(uint64(ds.LocalSize.LogicalReferenced)) }</code>
-										} else {
-											-
-										}
-									</td>
+									<td><code>{ ds.Metrics.LocalLogicalString() }</code></td>
 								</tr>
 								<tr>
 									<th>Remote snapshots</th>
-									<td><code>{ ds.Remote.String() }</code></td>
+									<td><code>{ ds.Current.RemoteString() }</code></td>
 								</tr>
 								<tr>
 									<th>Remote disk size</th>
-									<td>
-										if ds.RemoteSize != nil {
-											<code>{ humanize.Bytes(uint64(ds.RemoteSize.Used)) }</code>
-										} else {
-											-
-										}
-									</td>
+									<td><code>{ ds.Metrics.RemoteUsedString() }</code></td>
 								</tr>
 								<tr>
 									<th>Remote logical size</th>
-									<td>
-										if ds.RemoteSize != nil {
-											<code>{ humanize.Bytes(uint64(ds.RemoteSize.LogicalReferenced)) }</code>
-										} else {
-											-
-										}
-									</td>
+									<td><code>{ ds.Metrics.RemoteLogicalString() }</code></td>
 								</tr>
 								<tr>
 									<th>Staleness</th>
@@ -354,7 +305,7 @@ templ index(state *model.Model, progress progress.Value, syncStatus *sync.Status
 								</tr>
 							</table>
 
-							if ds.CurrentPlan != nil && len(ds.CurrentPlan) > 0 {
+							if ds.Plan != nil && len(ds.Plan) > 0 {
 								<h2>Sync Plan</h2>
 								<table>
 									<thead>
@@ -365,7 +316,7 @@ templ index(state *model.Model, progress progress.Value, syncStatus *sync.Status
 										</tr>
 									</thead>
 									<tbody>
-										for i, step := range ds.CurrentPlan {
+										for i, step := range ds.Plan {
 											<tr>
 												<td>{ fmt.Sprint(i + 1) }</td>
 												<td>
@@ -588,16 +539,16 @@ templ renderSyncIndicator(ds model.DatasetName, dataset *model.Dataset, syncStat
 
 templ renderDatasetSize(dataset *model.Dataset) {
 	<div class="dataset-size">
-		if dataset.LocalSize != nil {
-			Local: { humanize.Bytes(uint64(dataset.LocalSize.Used)) }
+		if dataset.Metrics.HasLocal {
+			Local: { dataset.Metrics.LocalSize.HumanizedUsed() }
 		}
-		if dataset.RemoteSize != nil {
-			if dataset.LocalSize != nil {
+		if dataset.Metrics.HasRemote {
+			if dataset.Metrics.HasLocal {
 				<br/>
 			}
-			Remote: { humanize.Bytes(uint64(dataset.RemoteSize.Used)) }
+			Remote: { dataset.Metrics.RemoteSize.HumanizedUsed() }
 		}
-		if dataset.LocalSize == nil && dataset.RemoteSize == nil {
+		if !dataset.Metrics.HasLocal && !dataset.Metrics.HasRemote {
 			No size info
 		}
 	</div>
@@ -618,24 +569,24 @@ templ renderStepStatus(status model.StepStatus) {
 
 templ snapshotRows(ds *model.Dataset) {
 	// Create a union of snapshots
-	if ds.Local != nil && ds.Remote != nil {
-		for snap := range ds.Local.Union(ds.Remote).AllDesc() {
+	if ds.Current != nil && ds.Current.Local != nil && ds.Current.Remote != nil {
+		for snap := range ds.Current.Local.Union(ds.Current.Remote).AllDesc() {
 			<tr>
 				<td>{ snap.Name }</td>
 				<td>{ snap.Time().Format(time.DateTime) }</td>
 				<td>
-					if ds.Local.Has(snap) {
+					if ds.Current.Local.Has(snap) {
 						<span class="snapshot-present">✓</span>
-					} else if ds.GoalState != nil && ds.GoalState.Local != nil && ds.GoalState.Local.Has(snap) {
+					} else if ds.Target != nil && ds.Target.Local != nil && ds.Target.Local.Has(snap) {
 						<span class="snapshot-absent">✗</span>
 					} else {
 						<span>-</span>
 					}
 				</td>
 				<td>
-					if ds.Remote.Has(snap) {
+					if ds.Current.Remote.Has(snap) {
 						<span class="snapshot-present">✓</span>
-					} else if ds.GoalState != nil && ds.GoalState.Remote != nil && ds.GoalState.Remote.Has(snap) {
+					} else if ds.Target != nil && ds.Target.Remote != nil && ds.Target.Remote.Has(snap) {
 						<span class="snapshot-absent">✗</span>
 					} else {
 						<span>-</span>
@@ -644,14 +595,14 @@ templ snapshotRows(ds *model.Dataset) {
 				<td><code>{ snap.SizeString() }</code></td>
 			</tr>
 		}
-	} else if ds.Local != nil {
-		for snap := range ds.Local.AllDesc() {
+	} else if ds.Current != nil && ds.Current.Local != nil {
+		for snap := range ds.Current.Local.AllDesc() {
 			<tr>
 				<td>{ snap.Name }</td>
 				<td>{ snap.Time().Format(time.DateTime) }</td>
 				<td><span class="snapshot-present">✓</span></td>
 				<td>
-					if ds.GoalState != nil && ds.GoalState.Remote != nil && ds.GoalState.Remote.Has(snap) {
+					if ds.Target != nil && ds.Target.Remote != nil && ds.Target.Remote.Has(snap) {
 						<span class="snapshot-absent">✗</span>
 					} else {
 						<span>-</span>
@@ -660,13 +611,13 @@ templ snapshotRows(ds *model.Dataset) {
 				<td><code>{ snap.SizeString() }</code></td>
 			</tr>
 		}
-	} else if ds.Remote != nil {
-		for snap := range ds.Remote.AllDesc() {
+	} else if ds.Current != nil && ds.Current.Remote != nil {
+		for snap := range ds.Current.Remote.AllDesc() {
 			<tr>
 				<td>{ snap.Name }</td>
 				<td>{ snap.Time().Format(time.DateTime) }</td>
 				<td>
-					if ds.GoalState != nil && ds.GoalState.Local != nil && ds.GoalState.Local.Has(snap) {
+					if ds.Target != nil && ds.Target.Local != nil && ds.Target.Local.Has(snap) {
 						<span class="snapshot-absent">✗</span>
 					} else {
 						<span>-</span>

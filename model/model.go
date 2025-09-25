@@ -56,12 +56,23 @@ func AddLocalDataset(name DatasetName, snapshots []*Snapshot, size *DatasetSize)
 		if _, has := out.Datasets[name]; !has {
 			out.Datasets[name] = &Dataset{
 				Name: name,
+				Current: &SnapshotInventory{
+					Local:  NewSnapshots(),
+					Remote: NewSnapshots(),
+				},
 			}
 		}
-		out.Datasets[name].Local = NewSnapshots(snapshots...)
-		// Only update size if the new size is not nil, preserving existing size info
+		if out.Datasets[name].Current == nil {
+			out.Datasets[name].Current = &SnapshotInventory{
+				Local:  NewSnapshots(),
+				Remote: NewSnapshots(),
+			}
+		}
+		out.Datasets[name].Current.Local = NewSnapshots(snapshots...)
+		// Update metrics if size is provided
 		if size != nil {
-			out.Datasets[name].LocalSize = size
+			out.Datasets[name].Metrics.LocalSize = *size
+			out.Datasets[name].Metrics.HasLocal = true
 		}
 
 		return out
@@ -75,12 +86,23 @@ func AddRemoteDataset(name DatasetName, snapshots []*Snapshot, size *DatasetSize
 		if _, has := out.Datasets[name]; !has {
 			out.Datasets[name] = &Dataset{
 				Name: name,
+				Current: &SnapshotInventory{
+					Local:  NewSnapshots(),
+					Remote: NewSnapshots(),
+				},
 			}
 		}
-		out.Datasets[name].Remote = NewSnapshots(snapshots...)
-		// Only update size if the new size is not nil, preserving existing size info
+		if out.Datasets[name].Current == nil {
+			out.Datasets[name].Current = &SnapshotInventory{
+				Local:  NewSnapshots(),
+				Remote: NewSnapshots(),
+			}
+		}
+		out.Datasets[name].Current.Remote = NewSnapshots(snapshots...)
+		// Update metrics if size is provided
 		if size != nil {
-			out.Datasets[name].RemoteSize = size
+			out.Datasets[name].Metrics.RemoteSize = *size
+			out.Datasets[name].Metrics.HasRemote = true
 		}
 
 		return out

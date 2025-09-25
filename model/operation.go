@@ -6,7 +6,7 @@ import (
 
 type Operation interface {
 	String() string
-	Apply(*Dataset) (*Dataset, error)
+	Apply(*SnapshotInventory) (*SnapshotInventory, error)
 }
 
 var _ Operation = &SnapshotRangeDeletion{}
@@ -22,8 +22,8 @@ func (op *SnapshotRangeDeletion) String() string {
 		op.Location, op.Start.Dataset, op.Start.Name, op.End.Name)
 }
 
-func (op *SnapshotRangeDeletion) Apply(ds *Dataset) (*Dataset, error) {
-	out := ds.Clone()
+func (op *SnapshotRangeDeletion) Apply(inv *SnapshotInventory) (*SnapshotInventory, error) {
+	out := inv.Clone()
 
 	var target *Snapshots
 	switch op.Location {
@@ -89,8 +89,8 @@ func (op *SnapshotDeletion) String() string {
 	return fmt.Sprintf("destroy %s %s@%s", op.Location, op.Snapshot.Dataset, op.Snapshot.Name)
 }
 
-func (op *SnapshotDeletion) Apply(ds *Dataset) (*Dataset, error) {
-	out := ds.Clone()
+func (op *SnapshotDeletion) Apply(inv *SnapshotInventory) (*SnapshotInventory, error) {
+	out := inv.Clone()
 
 	var target *Snapshots
 	switch op.Location {
@@ -120,13 +120,13 @@ func (op *InitialSnapshotTransfer) String() string {
 	return fmt.Sprintf("transfer initial %s", op.Snapshot)
 }
 
-func (op *InitialSnapshotTransfer) Apply(ds *Dataset) (*Dataset, error) {
-	if ds.Remote.Len() > 0 {
+func (op *InitialSnapshotTransfer) Apply(inv *SnapshotInventory) (*SnapshotInventory, error) {
+	if inv.Remote.Len() > 0 {
 		return nil, fmt.Errorf("too late for initial transfer of %s, remote already has %d snapshots, including %s",
-			op.Snapshot, ds.Remote.Len(), ds.Remote.Newest())
+			op.Snapshot, inv.Remote.Len(), inv.Remote.Newest())
 	}
 
-	out := ds.Clone()
+	out := inv.Clone()
 	if out.Remote == nil  {
 		out.Remote = NewSnapshots()
 	}
@@ -145,12 +145,12 @@ func (op *SnapshotTransfer) String() string {
 	return fmt.Sprintf("transfer %s", op.Snapshot)
 }
 
-func (op *SnapshotTransfer) Apply(ds *Dataset) (*Dataset, error) {
-	if ds.Remote.Len() > 0 {
+func (op *SnapshotTransfer) Apply(inv *SnapshotInventory) (*SnapshotInventory, error) {
+	if inv.Remote.Len() > 0 {
 		return nil, fmt.Errorf("should use range transfer: %s", op.Snapshot)
 	}
 
-	out := ds.Clone()
+	out := inv.Clone()
 	out.Remote.Add(op.Snapshot)
 
 	return out, nil
@@ -167,34 +167,34 @@ func (op *SnapshotRangeTransfer) String() string {
 	return fmt.Sprintf("transfer range from %s to %s", op.Start, op.End.Name)
 }
 
-func (op *SnapshotRangeTransfer) Apply(dataset *Dataset) (*Dataset, error) {
+func (op *SnapshotRangeTransfer) Apply(inv *SnapshotInventory) (*SnapshotInventory, error) {
 	if op.Start.Eq(op.End) {
 		return nil, fmt.Errorf("invalid range (same start and end)")
 	}
 
-	if dataset.Remote.Len() == 0 {
+	if inv.Remote.Len() == 0 {
 		return nil, fmt.Errorf("cannot range-transfer into empty dataset")
 	}
-	if !op.Start.Eq(dataset.Remote.Newest()) {
-		return nil, fmt.Errorf("too late to transfer %s: newest on remote is %s", op.Start, dataset.Remote.Newest())
+	if !op.Start.Eq(inv.Remote.Newest()) {
+		return nil, fmt.Errorf("too late to transfer %s: newest on remote is %s", op.Start, inv.Remote.Newest())
 	}
 	if op.Start.CreatedAt >= op.End.CreatedAt {
 		return nil, fmt.Errorf("invalid range %s to %s", op.Start, op.End)
 	}
-	if !dataset.Remote.Has(op.Start) {
+	if !inv.Remote.Has(op.Start) {
 		return nil, fmt.Errorf("remote doesn't have range-start %s", op.Start)
 	}
-	if dataset.Remote.Has(op.End) {
+	if inv.Remote.Has(op.End) {
 		return nil, fmt.Errorf("remote already has range-end %s", op.End)
 	}
-	if !dataset.Local.Has(op.Start) {
+	if !inv.Local.Has(op.Start) {
 		return nil, fmt.Errorf("local doesn't have range-start %s", op.Start)
 	}
-	if !dataset.Local.Has(op.End) {
+	if !inv.Local.Has(op.End) {
 		return nil, fmt.Errorf("local doesn't have range-end %s", op.End)
 	}
 
-	out := dataset.Clone()
+	out := inv.Clone()
 	out.Remote.Add(op.End)
 
 	return out, nil

@@ -2,15 +2,14 @@ package model
 
 import "log"
 
-func (state *Dataset) Goal(localPolicy, remotePolicy map[string]int) *Dataset {
-	localSnapshots := state.Local
-	remoteSnapshots := state.Remote
+func CalculateTargetInventory(current *SnapshotInventory, localPolicy, remotePolicy map[string]int) *SnapshotInventory {
+	localSnapshots := current.Local
+	remoteSnapshots := current.Remote
 
 	sharedSnapshots := localSnapshots.Intersection(remoteSnapshots)
 	allSnapshots := localSnapshots.Union(remoteSnapshots)
 
-	goal := &Dataset{
-		Name:   state.Name,
+	goal := &SnapshotInventory{
 		Local:  NewSnapshots(),
 		Remote: NewSnapshots(),
 	}

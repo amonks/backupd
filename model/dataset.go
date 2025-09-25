@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/dustin/go-humanize"
 )
 
 type DatasetName string
@@ -34,38 +32,19 @@ const (
 	Remote
 )
 
-type DatasetSize struct {
-	Used              int64  // Total on-disk space with children, including all snapshots
-	LogicalReferenced int64  // Logical size of most recent snapshot (w/o children)
-}
-
-func (ds *DatasetSize) String() string {
-	if ds == nil {
-		return "<no size>"
-	}
-	return humanize.Bytes(uint64(ds.Used))
-}
-
-func (ds *DatasetSize) Clone() *DatasetSize {
-	if ds == nil {
-		return nil
-	}
-	return &DatasetSize{
-		Used:              ds.Used,
-		LogicalReferenced: ds.LogicalReferenced,
-	}
-}
-
 type Dataset struct {
-	Name          DatasetName
-	Local, Remote *Snapshots
-	LocalSize, RemoteSize *DatasetSize
-	GoalState     *Dataset // The desired state based on policy
-	CurrentPlan   Plan     // The current plan to achieve the goal state
+	Name    DatasetName
+	Current *SnapshotInventory // Current snapshot state
+	Target  *SnapshotInventory // Target snapshot state (from policy)
+	Metrics StorageMetrics     // Physical storage metrics
+	Plan    Plan               // Plan to get from Current to Target
 }
 
 func (dataset *Dataset) Staleness() time.Duration {
-	local, remote := dataset.Local.Newest(), dataset.Remote.Newest()
+	if dataset.Current == nil {
+		return 0
+	}
+	local, remote := dataset.Current.Local.Newest(), dataset.Current.Remote.Newest()
 	if local == nil || remote == nil {
 		return 0
 	}
@@ -73,15 +52,28 @@ func (dataset *Dataset) Staleness() time.Duration {
 }
 
 func (dataset *Dataset) String() string {
+	if dataset.Current == nil {
+		return fmt.Sprintf("<%s: uninitialized>", dataset.Name)
+	}
+
+	localCount := 0
+	remoteCount := 0
+	if dataset.Current.Local != nil {
+		localCount = dataset.Current.Local.Len()
+	}
+	if dataset.Current.Remote != nil {
+		remoteCount = dataset.Current.Remote.Len()
+	}
+
 	localSize := ""
 	remoteSize := ""
-	if dataset.LocalSize != nil {
-		localSize = fmt.Sprintf(" %s", humanize.Bytes(uint64(dataset.LocalSize.Used)))
+	if dataset.Metrics.HasLocal {
+		localSize = fmt.Sprintf(" %s", dataset.Metrics.LocalSize.String())
 	}
-	if dataset.RemoteSize != nil {
-		remoteSize = fmt.Sprintf(" %s", humanize.Bytes(uint64(dataset.RemoteSize.Used)))
+	if dataset.Metrics.HasRemote {
+		remoteSize = fmt.Sprintf(" %s", dataset.Metrics.RemoteSize.String())
 	}
-	return fmt.Sprintf("<%s: %dL%s, %dR%s>", dataset.Name, dataset.Local.Len(), localSize, dataset.Remote.Len(), remoteSize)
+	return fmt.Sprintf("<%s: %dL%s, %dR%s>", dataset.Name, localCount, localSize, remoteCount, remoteSize)
 }
 
 func (dataset *Dataset) Diff(other *Dataset) string {
@@ -92,17 +84,25 @@ func (dataset *Dataset) Diff(other *Dataset) string {
 		return "from nil to non-nil"
 	}
 	if other == nil {
-		return "from non-nill to nil"
+		return "from non-nil to nil"
 	}
 
 	var out strings.Builder
 	if dataset.Name != other.Name {
 		fmt.Fprintf(&out, "  name change from '%s' to '%s'\n", dataset.Name, other.Name)
 	}
-	fmt.Fprintln(&out, "  local diff")
-	fmt.Fprint(&out, dataset.Local.Diff("    ", other.Local))
-	fmt.Fprintln(&out, "  remote diff")
-	fmt.Fprint(&out, dataset.Remote.Diff("    ", other.Remote))
+
+	if dataset.Current != nil && other.Current != nil {
+		fmt.Fprintln(&out, "  local diff")
+		fmt.Fprint(&out, dataset.Current.Local.Diff("    ", other.Current.Local))
+		fmt.Fprintln(&out, "  remote diff")
+		fmt.Fprint(&out, dataset.Current.Remote.Diff("    ", other.Current.Remote))
+	} else if dataset.Current != nil {
+		fmt.Fprintln(&out, "  current inventory removed")
+	} else if other.Current != nil {
+		fmt.Fprintln(&out, "  current inventory added")
+	}
+
 	return out.String()
 }
 
@@ -116,38 +116,29 @@ func (dataset *Dataset) Eq(other *Dataset) bool {
 	if dataset.Name != other.Name {
 		return false
 	}
-	if !dataset.Local.Eq(other.Local) {
-		return false
-	}
-	if !dataset.Remote.Eq(other.Remote) {
+	if !dataset.Current.Eq(other.Current) {
 		return false
 	}
 	return true
 }
 
 func (dataset *Dataset) Clone() *Dataset {
-	var goalState *Dataset
-	if dataset.GoalState != nil {
-		goalState = dataset.GoalState.Clone()
-	}
-	// Copy current plan (plan steps need to be cloned)
-	var currentPlan Plan
-	if dataset.CurrentPlan != nil {
-		currentPlan = make(Plan, len(dataset.CurrentPlan))
-		for i, step := range dataset.CurrentPlan {
-			currentPlan[i] = &PlanStep{
+	// Copy plan (plan steps need to be cloned)
+	var plan Plan
+	if dataset.Plan != nil {
+		plan = make(Plan, len(dataset.Plan))
+		for i, step := range dataset.Plan {
+			plan[i] = &PlanStep{
 				Operation: step.Operation,
 				Status:    step.Status,
 			}
 		}
 	}
 	return &Dataset{
-		Name:       dataset.Name,
-		Local:      dataset.Local.Clone(),
-		Remote:     dataset.Remote.Clone(),
-		LocalSize:  dataset.LocalSize.Clone(),
-		RemoteSize: dataset.RemoteSize.Clone(),
-		GoalState:  goalState,
-		CurrentPlan: currentPlan,
+		Name:    dataset.Name,
+		Current: dataset.Current.Clone(),
+		Target:  dataset.Target.Clone(),
+		Metrics: dataset.Metrics, // Value type, no need to clone
+		Plan:    plan,
 	}
 }
