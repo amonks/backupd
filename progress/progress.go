@@ -2,53 +2,10 @@ package progress
 
 import (
 	"fmt"
-	"iter"
-	"sort"
 	"time"
-
-	"monks.co/backupd/atom"
-	"monks.co/backupd/model"
 )
 
-type Progress struct {
-	*atom.Atom[Value]
-}
-
-type Value map[model.DatasetName]*Process
-
-func (v Value) All() iter.Seq2[model.DatasetName, []LogEntry] {
-	var ks []model.DatasetName
-	for k := range v {
-		ks = append(ks, k)
-	}
-	sort.Slice(ks, func(i, j int) bool {
-		if string(ks[i]) == "global" {
-			return true
-		} else if string(ks[j]) == "global" {
-			return false
-		}
-		if len(ks[i]) == len(ks[j]) {
-			return ks[i] < ks[j]
-		}
-		return len(ks[i]) < len(ks[j])
-	})
-	return func(yield func(model.DatasetName, []LogEntry) bool) {
-		for _, k := range ks {
-			if !yield(k, v[k].logs) {
-				return
-			}
-		}
-	}
-}
-
-func (v Value) Get(k model.DatasetName) []LogEntry {
-	if v[k] == nil {
-		return nil
-	}
-	return v[k].logs
-}
-
-type Process struct {
+type ProcessLogs struct {
 	logs []LogEntry
 }
 
@@ -57,49 +14,20 @@ type LogEntry struct {
 	Log   string
 }
 
-func New() *Progress {
-	return &Progress{
-		atom.New(Value{}),
+func NewProcessLogs() *ProcessLogs {
+	return &ProcessLogs{
+		logs: []LogEntry{},
 	}
 }
 
-func (pr *Progress) Deref() Value {
-	return pr.Atom.Deref()
+func (p *ProcessLogs) Log(s string, args ...any) {
+	entry := LogEntry{
+		LogAt: time.Now(),
+		Log:   fmt.Sprintf(s, args...),
+	}
+	p.logs = append(p.logs, entry)
 }
 
-const maxLogsPerDataset = 1000
-
-func (pr *Progress) Log(ds model.DatasetName, s string, args ...any) {
-	pr.Swap(func(old Value) Value {
-		entry := LogEntry{
-			LogAt: time.Now(),
-			Log:   fmt.Sprintf(s, args...),
-		}
-
-		out := make(Value, len(old))
-		seen := false
-		for k, v := range old {
-			if k != ds {
-				out[k] = v
-				continue
-			}
-
-			seen = true
-			// Append new entry and enforce max size limit
-			newLogs := append(v.logs, entry)
-			if len(newLogs) > maxLogsPerDataset {
-				// Remove oldest entries to maintain the limit
-				newLogs = newLogs[len(newLogs)-maxLogsPerDataset:]
-			}
-			out[k] = &Process{
-				logs: newLogs,
-			}
-		}
-		if !seen {
-			out[ds] = &Process{
-				logs: []LogEntry{entry},
-			}
-		}
-		return out
-	})
+func (p *ProcessLogs) GetLogs() []LogEntry {
+	return p.logs
 }

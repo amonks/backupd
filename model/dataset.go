@@ -37,7 +37,7 @@ type Dataset struct {
 	Current *SnapshotInventory // Current snapshot state
 	Target  *SnapshotInventory // Target snapshot state (from policy)
 	Metrics StorageMetrics     // Physical storage metrics
-	Plan    Plan               // Plan to get from Current to Target
+	Plan    *Plan              // Plan to get from Current to Target
 }
 
 func (dataset *Dataset) Staleness() time.Duration {
@@ -124,14 +124,21 @@ func (dataset *Dataset) Eq(other *Dataset) bool {
 
 func (dataset *Dataset) Clone() *Dataset {
 	// Copy plan (plan steps need to be cloned)
-	var plan Plan
+	var plan *Plan
 	if dataset.Plan != nil {
-		plan = make(Plan, len(dataset.Plan))
-		for i, step := range dataset.Plan {
-			plan[i] = &PlanStep{
+		steps := make([]*PlanStep, len(dataset.Plan.Steps))
+		for i, step := range dataset.Plan.Steps {
+			steps[i] = &PlanStep{
 				Operation: step.Operation,
 				Status:    step.Status,
+				StartedAt: step.StartedAt,
+				StoppedAt: step.StoppedAt,
+				Logs:      step.Logs, // ProcessLogs is a pointer, share the same logs
 			}
+		}
+		plan = &Plan{
+			Steps: steps,
+			Logs:  dataset.Plan.Logs, // Share the same plan-level logs
 		}
 	}
 	return &Dataset{

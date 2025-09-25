@@ -2,28 +2,28 @@ package progress
 
 import (
 	"monks.co/backupd/logger"
-	"monks.co/backupd/model"
 )
 
-func (pr *Progress) Logger(ds model.DatasetName) *ProgressLogger {
-	return &ProgressLogger{
-		ds:     ds,
-		logger: logger.New(ds.String()),
-		pr:     pr,
+// Logger returns a logger that writes to both standard log and ProcessLogs
+func (pl *ProcessLogs) Logger(label string) *ProcessLogger {
+	return &ProcessLogger{
+		label: label,
+		logs:  pl,
+		inner: logger.New(label),
 	}
 }
 
-type ProgressLogger struct {
-	ds     model.DatasetName
-	logger logger.Logger
-	pr     *Progress
+type ProcessLogger struct {
+	label string
+	logs  *ProcessLogs
+	inner logger.Logger
 }
 
-func (pl *ProgressLogger) Write(bs []byte) (int, error) {
-	return pl.logger.Write(bs)
+func (pl *ProcessLogger) Write(bs []byte) (int, error) {
+	return pl.inner.Write(bs)
 }
 
-func (pl *ProgressLogger) Printf(s string, args ...any) {
-	pl.logger.Printf(s, args...)
-	pl.pr.Log(pl.ds, s, args...)
+func (pl *ProcessLogger) Printf(s string, args ...any) {
+	pl.inner.Printf(s, args...)
+	pl.logs.Log(s, args...)
 }

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"monks.co/backupd/progress"
 )
 
 // StepStatus represents the execution status of a plan step
@@ -23,6 +25,7 @@ type PlanStep struct {
 	Status    StepStatus
 	StartedAt *time.Time
 	StoppedAt *time.Time
+	Logs      *progress.ProcessLogs
 }
 
 // Duration returns the duration of the step execution
@@ -46,14 +49,18 @@ func (ps *PlanStep) Apply(inv *SnapshotInventory) (*SnapshotInventory, error) {
 	return ps.Operation.Apply(inv)
 }
 
-// Plan is a sequence of plan steps
-type Plan []*PlanStep
+// Plan is a sequence of plan steps with plan-level logging
+type Plan struct {
+	Steps []*PlanStep
+	Logs  *progress.ProcessLogs // Plan-level logs (setup, pre/post operations)
+}
 
 // NewPlanStep creates a new plan step with pending status
 func NewPlanStep(op Operation) *PlanStep {
 	return &PlanStep{
 		Operation: op,
 		Status:    StepPending,
+		Logs:      progress.NewProcessLogs(),
 	}
 }
 
@@ -83,15 +90,18 @@ func (ps *PlanStep) TryExecute(updateStep func(func(*PlanStep)), work func() err
 }
 
 // PlanFromOperations converts a slice of operations to a Plan
-func PlanFromOperations(ops []Operation) Plan {
-	steps := make(Plan, len(ops))
+func PlanFromOperations(ops []Operation) *Plan {
+	steps := make([]*PlanStep, len(ops))
 	for i, op := range ops {
 		steps[i] = NewPlanStep(op)
 	}
-	return steps
+	return &Plan{
+		Steps: steps,
+		Logs:  progress.NewProcessLogs(),
+	}
 }
 
-func CalculateTransitionPlan(current, target *SnapshotInventory) (Plan, error) {
+func CalculateTransitionPlan(current, target *SnapshotInventory) (*Plan, error) {
 	var ops []Operation
 
 	localDeletions := current.Local.Difference(target.Local)
@@ -163,13 +173,13 @@ func CalculateTransitionPlan(current, target *SnapshotInventory) (Plan, error) {
 	return PlanFromOperations(ops), nil
 }
 
-func ValidatePlan(ctx context.Context, current, target *SnapshotInventory, plan Plan, isDebugging bool) error {
+func ValidatePlan(ctx context.Context, current, target *SnapshotInventory, plan *Plan, isDebugging bool) error {
 	if isDebugging {
 		fmt.Println("PLAN STEPS")
 	}
 
 	out := current.Clone()
-	for _, op := range plan {
+	for _, op := range plan.Steps {
 		if err := ctx.Err(); err != nil {
 			return err
 		}

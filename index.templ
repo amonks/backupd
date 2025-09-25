@@ -8,7 +8,7 @@ import (
 	"fmt"
 )
 
-templ index(state *model.Model, progress progress.Value, syncStatus *sync.Status, dataset string, dryrun bool) {
+templ index(state *model.Model, globalLogs []progress.LogEntry, syncStatus *sync.Status, dataset string, dryrun bool) {
 	<!DOCTYPE html>
 	<html>
 		<head>
@@ -197,6 +197,39 @@ templ index(state *model.Model, progress progress.Value, syncStatus *sync.Status
 					padding: 0.25rem 0;
 					font-family: monospace;
 				}
+				.plan-logs {
+					background-color: #f0f8ff;
+					padding: 1rem;
+					border-radius: 4px;
+					margin-bottom: 1rem;
+				}
+				.plan-logs h3 {
+					margin-top: 0;
+					font-size: 1rem;
+					color: #2196f3;
+				}
+				.plan-logs ul {
+					list-style-type: none;
+					padding: 0;
+					margin: 0;
+				}
+				.plan-logs li {
+					padding: 0.25rem 0;
+					font-family: monospace;
+				}
+				.step-log {
+					background-color: #f9f9f9;
+				}
+				.log-cell {
+					padding-left: 2rem !important;
+				}
+				.log-message {
+					font-size: 0.85rem;
+					color: #666;
+					font-family: monospace;
+					display: block;
+					padding: 0.2rem 0;
+				}
 				.snapshot-table th, .snapshot-table td {
 					text-align: center;
 				}
@@ -258,12 +291,12 @@ templ index(state *model.Model, progress progress.Value, syncStatus *sync.Status
 						</tbody>
 					</table>
 
-					// Display only global logs on the overview page
-					if logs := progress.Get(model.GlobalDataset); logs != nil && len(logs) > 0 {
+					// Display global logs on the overview page
+					if len(globalLogs) > 0 {
 						<section class="logs">
 							<h2>Global Logs</h2>
 							<ul>
-								for _, log := range logs {
+								for _, log := range globalLogs {
 									<li><code>{ log.LogAt.Format(time.DateTime) } :: { log.Log }</code></li>
 								}
 							</ul>
@@ -305,8 +338,19 @@ templ index(state *model.Model, progress progress.Value, syncStatus *sync.Status
 								</tr>
 							</table>
 
-							if ds.Plan != nil && len(ds.Plan) > 0 {
+							if ds.Plan != nil && len(ds.Plan.Steps) > 0 {
 								<h2>Sync Plan</h2>
+								// Display plan-level logs if any
+								if ds.Plan.Logs != nil && len(ds.Plan.Logs.GetLogs()) > 0 {
+									<div class="plan-logs">
+										<h3>Plan Setup</h3>
+										<ul>
+											for _, log := range ds.Plan.Logs.GetLogs() {
+												<li><code>{ log.LogAt.Format("15:04:05") } { log.Log }</code></li>
+											}
+										</ul>
+									</div>
+								}
 								<table>
 									<thead>
 										<tr>
@@ -319,7 +363,7 @@ templ index(state *model.Model, progress progress.Value, syncStatus *sync.Status
 										</tr>
 									</thead>
 									<tbody>
-										for i, step := range ds.Plan {
+										for i, step := range ds.Plan.Steps {
 											<tr>
 												<td>{ fmt.Sprint(i + 1) }</td>
 												<td>
@@ -348,6 +392,17 @@ templ index(state *model.Model, progress progress.Value, syncStatus *sync.Status
 													}
 												</td>
 											</tr>
+											// Display logs for this step if any
+											if step.Logs != nil && len(step.Logs.GetLogs()) > 0 {
+												for _, logEntry := range step.Logs.GetLogs() {
+													<tr class="step-log">
+														<td></td>
+														<td colspan="5" class="log-cell">
+															<code class="log-message">{ logEntry.LogAt.Format("15:04:05") } { logEntry.Log }</code>
+														</td>
+													</tr>
+												}
+											}
 										}
 									</tbody>
 								</table>
@@ -371,17 +426,7 @@ templ index(state *model.Model, progress progress.Value, syncStatus *sync.Status
 							</table>
 						</div>
 
-						// Get logs for this specific dataset
-						if logs := progress.Get(model.DatasetName(dataset)); logs != nil && len(logs) > 0 {
-							<section class="logs">
-								<h2>Logs</h2>
-								<ul>
-									for _, log := range logs {
-										<li><code>{ log.LogAt.Format(time.DateTime) } :: { log.Log }</code></li>
-									}
-								</ul>
-							</section>
-						}
+						// Logs are now displayed inline with the plan and steps
 					} else {
 						<p>Dataset not found.</p>
 					}

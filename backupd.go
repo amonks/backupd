@@ -23,28 +23,28 @@ import (
 )
 
 type Backupd struct {
-	config     *config.Config
-	state      *atom.Atom[*model.Model]
-	progress   *progress.Progress
-	syncStatus *sync.Status
-	env        *env.Env
-	addr       string
-	dryrun     bool
-	version    *atom.Atom[int64]
-	versionCh  chan struct{}
+	config      *config.Config
+	state       *atom.Atom[*model.Model]
+	globalLogs  *progress.ProcessLogs
+	syncStatus  *sync.Status
+	env         *env.Env
+	addr        string
+	dryrun      bool
+	version     *atom.Atom[int64]
+	versionCh   chan struct{}
 }
 
 func New(config *config.Config, addr string, dryrun bool) *Backupd {
 	return &Backupd{
-		config:     config,
-		state:      atom.New[*model.Model](nil),
-		progress:   progress.New(),
-		syncStatus: sync.New(),
-		env:        env.New(config),
-		addr:       addr,
-		dryrun:     dryrun,
-		version:    atom.New[int64](0),
-		versionCh:  make(chan struct{}, 1),
+		config:      config,
+		state:       atom.New[*model.Model](nil),
+		globalLogs:  progress.NewProcessLogs(),
+		syncStatus:  sync.New(),
+		env:         env.New(config),
+		addr:        addr,
+		dryrun:      dryrun,
+		version:     atom.New[int64](0),
+		versionCh:   make(chan struct{}, 1),
 	}
 }
 
@@ -60,10 +60,10 @@ func (b *Backupd) notifyStateChange() {
 func (b *Backupd) updateStep(dataset model.DatasetName, stepIndex int, update func(*model.PlanStep)) {
 	b.state.Swap(func(state *model.Model) *model.Model {
 		currentDS := state.GetDataset(dataset)
-		if currentDS == nil || currentDS.Plan == nil || stepIndex >= len(currentDS.Plan) {
+		if currentDS == nil || currentDS.Plan == nil || stepIndex >= len(currentDS.Plan.Steps) {
 			return state
 		}
-		update(currentDS.Plan[stepIndex])
+		update(currentDS.Plan.Steps[stepIndex])
 		return model.ReplaceDataset(dataset, currentDS)(state)
 	})
 	b.notifyStateChange()
@@ -112,7 +112,7 @@ func (b *Backupd) Serve(ctx context.Context) error {
 			return
 		}
 
-		b.progress.Log(model.GlobalDataset, "Created %s snapshot for root %s", periodicity, root)
+		b.globalLogs.Log("Created %s snapshot for root %s", periodicity, root)
 		b.notifyStateChange()
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintf(w, "Created %s snapshot for root %s\n", periodicity, root)
@@ -145,7 +145,7 @@ func (b *Backupd) Serve(ctx context.Context) error {
 		}
 
 		state := b.state.Deref()
-		progress := b.progress.Deref()
+		globalLogs := b.globalLogs.GetLogs()
 		syncStatus := b.syncStatus
 
 		// Get the path without the leading slash
@@ -161,7 +161,7 @@ func (b *Backupd) Serve(ctx context.Context) error {
 
 		// Handle special cases first
 		if trimmedPath == "global" {
-			templ.Handler(index(state, progress, syncStatus, "global", b.dryrun)).ServeHTTP(w, req)
+			templ.Handler(index(state, globalLogs, syncStatus, "global", b.dryrun)).ServeHTTP(w, req)
 			return
 		} else if trimmedPath == "root" {
 			// The empty string is used as the dataset name for the root dataset
@@ -171,7 +171,7 @@ func (b *Backupd) Serve(ctx context.Context) error {
 				http.Error(w, "Root dataset not found", http.StatusNotFound)
 				return
 			}
-			templ.Handler(index(state, progress, syncStatus, "", b.dryrun)).ServeHTTP(w, req)
+			templ.Handler(index(state, globalLogs, syncStatus, "", b.dryrun)).ServeHTTP(w, req)
 			return
 		}
 
@@ -179,7 +179,7 @@ func (b *Backupd) Serve(ctx context.Context) error {
 		// Add leading slash for the dataset model
 		datasetForModel := "/" + trimmedPath
 
-		templ.Handler(index(state, progress, syncStatus, datasetForModel, b.dryrun)).ServeHTTP(w, req)
+		templ.Handler(index(state, globalLogs, syncStatus, datasetForModel, b.dryrun)).ServeHTTP(w, req)
 	})
 
 	return listenAndServe(ctx, b.addr, mux)
@@ -187,7 +187,7 @@ func (b *Backupd) Serve(ctx context.Context) error {
 
 func (b *Backupd) Sync(ctx context.Context) error {
 	for {
-		b.progress.Log(model.GlobalDataset, "start")
+		b.globalLogs.Log("start")
 		inAnHour := time.After(time.Hour)
 		allOK := true
 
@@ -202,50 +202,50 @@ func (b *Backupd) Sync(ctx context.Context) error {
 				return err
 			}
 
-			b.progress.Log(model.GlobalDataset, "processing dataset '%s'", ds)
+			b.globalLogs.Log("processing dataset '%s'", ds)
 
 			// Refresh this specific dataset
-			logger := b.progress.Logger("refresh")
+			logger := logger.New("refresh")
 			if err := b.refreshDataset(ctx, logger, ds); err != nil {
-				b.progress.Log(model.GlobalDataset, "refresh error for '%s': %s", ds, err)
+				b.globalLogs.Log("refresh error for '%s': %s", ds, err)
 				continue
 			}
 
 			// Replan after refresh
 			if err := b.replanDataset(ctx, ds); err != nil {
-				b.progress.Log(model.GlobalDataset, "replan error for '%s': %s", ds, err)
+				b.globalLogs.Log("replan error for '%s': %s", ds, err)
 				continue
 			}
 
 			// Resync with the updated plan
-			b.progress.Log(model.GlobalDataset, "syncing '%s'", ds)
+			b.globalLogs.Log("syncing '%s'", ds)
 			if err := b.syncDataset(ctx, ds); err != nil {
 				allOK = false
 				err := fmt.Errorf("syncing '%s': %w", ds, err)
 				// Log to both global and dataset-specific logs
-				b.progress.Log(model.GlobalDataset, "sync error; skipping dataset: %s", err)
-				b.progress.Log(ds, "sync error: %s", err)
+				b.globalLogs.Log("sync error; skipping dataset: %s", err)
+				// Also log to dataset-specific location if needed
 			}
 		}
 
-		b.progress.Log(model.GlobalDataset, "synced all datasets")
+		b.globalLogs.Log("synced all datasets")
 		if allOK {
 			if b.config.SnitchID != "" {
-				b.progress.Log(model.GlobalDataset, "alerting deadmanssnitch")
+				b.globalLogs.Log("alerting deadmanssnitch")
 				if err := snitch.OK(b.config.SnitchID); err != nil {
-					b.progress.Log(model.GlobalDataset, "snitch error: %v", err)
+					b.globalLogs.Log("snitch error: %v", err)
 				} else {
-					b.progress.Log(model.GlobalDataset, "snitched success")
+					b.globalLogs.Log("snitched success")
 				}
 			}
-			b.progress.Log(model.GlobalDataset, "waiting to restart")
+			b.globalLogs.Log("waiting to restart")
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-inAnHour:
 			}
 		} else {
-			b.progress.Log(model.GlobalDataset, "back to top")
+			b.globalLogs.Log("back to top")
 		}
 	}
 }
@@ -253,7 +253,7 @@ func (b *Backupd) Sync(ctx context.Context) error {
 func (b *Backupd) refreshAllDatasetsAndPlans(ctx context.Context) error {
 	b.state.Reset(model.New())
 
-	logger := b.progress.Logger("refresh-all")
+	logger := logger.New("refresh-all")
 
 	// First, discover and refresh all datasets
 	localDatasets, err := b.env.Local.GetDatasets(logger)
@@ -317,7 +317,7 @@ func (b *Backupd) generatePlansForAllDatasets(ctx context.Context) {
 		plan, err := model.CalculateTransitionPlan(ds.Current, target)
 		if err != nil {
 			// Log error but continue with other datasets
-			b.progress.Log(model.GlobalDataset, "error generating plan for '%s': %s", dsName, err)
+			b.globalLogs.Log("error generating plan for '%s': %s", dsName, err)
 			continue
 		}
 
@@ -391,12 +391,6 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 	b.syncStatus.SetSyncing(dataset, true)
 	defer b.syncStatus.SetSyncing(dataset, false)
 
-	logger := b.progress.Logger(dataset)
-
-	if err := b.handleIncompleteTransfer(ctx, logger, dataset); err != nil {
-		return fmt.Errorf("handling incomplete transfer of '%s': %w", dataset, err)
-	}
-
 	// Get the dataset with its pre-generated plan
 	ds := b.state.Deref().GetDataset(dataset)
 	if ds == nil {
@@ -410,6 +404,13 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 	plan := ds.Plan
 	target := ds.Target
 
+	// Use the plan's logger for pre-plan operations
+	planLogger := plan.Logs.Logger(dataset.String())
+
+	if err := b.handleIncompleteTransfer(ctx, planLogger, dataset); err != nil {
+		return fmt.Errorf("handling incomplete transfer of '%s': %w", dataset, err)
+	}
+
 	if target == nil {
 		return fmt.Errorf("no target state available for dataset '%s'", dataset)
 	}
@@ -419,17 +420,17 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 		return fmt.Errorf("validating plan for '%s': %w", dataset, err)
 	}
 
-	logger.Printf("Plan has %d steps", len(plan))
-
 	// Store initial state for validation during execution
 	initialState := b.state.Deref()
 
-	for i, step := range plan {
+	for i, step := range plan.Steps {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 
-		logger.Printf("Applying op '%s'", step.Operation)
+		// Get logger from the step's ProcessLogs
+		stepLogger := step.Logs.Logger(dataset.String())
+		stepLogger.Printf("Applying op '%s'", step.Operation)
 
 		// Use TryExecute to manage status and timing
 		err := step.TryExecute(
@@ -437,7 +438,7 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 				b.updateStep(dataset, i, updateFunc)
 			},
 			func() error {
-				logger.Printf("-- Ensuring in-memory state supports this update...")
+				stepLogger.Printf("-- Ensuring in-memory state supports this update...")
 				initialDS := initialState.GetDataset(dataset)
 				if initialDS == nil || initialDS.Current == nil {
 					return fmt.Errorf("dataset '%s' has no current inventory", dataset)
@@ -450,8 +451,8 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 				// In dryrun mode, we don't actually apply the operations to the ZFS environment
 				// We just update the in-memory state for display purposes
 				if b.dryrun {
-					logger.Printf("-- [DRYRUN] Would update zfs environment with op '%s'", step)
-					logger.Printf("-- [DRYRUN] Updating in-memory state only...")
+					stepLogger.Printf("-- [DRYRUN] Would update zfs environment with op '%s'", step)
+					stepLogger.Printf("-- [DRYRUN] Updating in-memory state only...")
 					b.state.Swap(func(state *model.Model) *model.Model {
 						currentDS := state.GetDataset(dataset)
 						if currentDS == nil || currentDS.Current == nil {
@@ -459,7 +460,7 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 						}
 						newInventory, err := step.Apply(currentDS.Current)
 						if err != nil {
-							logger.Printf("-- [DRYRUN] Error applying op to current state: %v", err)
+							stepLogger.Printf("-- [DRYRUN] Error applying op to current state: %v", err)
 							return state
 						}
 						// Update inventory
@@ -468,7 +469,7 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 						return model.ReplaceDataset(dataset, updatedDS)(state)
 					})
 					b.notifyStateChange()
-					logger.Printf("-- [DRYRUN] Done.")
+					stepLogger.Printf("-- [DRYRUN] Done.")
 					return nil
 				}
 
@@ -481,10 +482,10 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 					return err
 				}
 
-				logger.Printf("-- Updating zfs environment...")
-				if err := b.env.Apply(ctx, logger, step); err != nil {
+				stepLogger.Printf("-- Updating zfs environment...")
+				if err := b.env.Apply(ctx, stepLogger, step); err != nil {
 					if allowRetry && strings.Contains(err.Error(), "exit status 255") && attempts < 5 {
-						logger.Printf("-- Got status code 255 on attempt %d; retrying", attempts)
+						stepLogger.Printf("-- Got status code 255 on attempt %d; retrying", attempts)
 						time.Sleep(time.Minute * time.Duration(attempts))
 						goto retry
 					} else {
@@ -492,7 +493,7 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 					}
 				}
 
-				logger.Printf("-- Updating in-memory state...")
+				stepLogger.Printf("-- Updating in-memory state...")
 				b.state.Swap(func(state *model.Model) *model.Model {
 					currentDS := state.GetDataset(dataset)
 					if currentDS == nil || currentDS.Current == nil {
@@ -500,7 +501,7 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 					}
 					newInventory, err := step.Apply(currentDS.Current)
 					if err != nil {
-						logger.Printf("-- Error applying op to current state: %v", err)
+						stepLogger.Printf("-- Error applying op to current state: %v", err)
 						return state
 					}
 					// Update inventory
@@ -510,7 +511,7 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 				})
 				b.notifyStateChange()
 
-				logger.Printf("-- Done.")
+				stepLogger.Printf("-- Done.")
 				return nil
 			})
 
@@ -519,8 +520,6 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 			return err
 		}
 	}
-
-	logger.Printf("sync complete")
 
 	return nil
 }
@@ -613,7 +612,7 @@ func (b *Backupd) Plan(ctx context.Context, dataset model.DatasetName) error {
 	fmt.Println("ACHIEVING CHANGE")
 	fmt.Print(ds.Current.Diff(target))
 	fmt.Println("VIA PLAN")
-	for _, op := range plan {
+	for _, op := range plan.Steps {
 		fmt.Printf("- %s\n", op)
 	}
 
