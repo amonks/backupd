@@ -492,6 +492,29 @@ templ index(state *model.Model, progress progress.Value, syncStatus *sync.Status
 			document.addEventListener('DOMContentLoaded', function() {
 				document.querySelectorAll('table').forEach(makeSortable);
 			});
+
+			// Long-polling for state changes
+			async function poll() {
+				while (true) {
+					try {
+						const response = await fetch('/poll');
+						if (response.ok) {
+							// State changed, refresh the page
+							window.location.reload();
+							return;
+						}
+						// Timeout, poll again immediately
+					} catch (error) {
+						// Connection error, retry after a delay
+						await new Promise(resolve => setTimeout(resolve, 5000));
+					}
+				}
+			}
+
+			// Start polling when the page loads
+			document.addEventListener('DOMContentLoaded', function() {
+				poll();
+			});
 		</script>
 		</body>
 	</html>

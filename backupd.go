@@ -30,6 +30,8 @@ type Backupd struct {
 	env        *env.Env
 	addr       string
 	dryrun     bool
+	version    *atom.Atom[int64]
+	versionCh  chan struct{}
 }
 
 func New(config *config.Config, addr string, dryrun bool) *Backupd {
@@ -41,6 +43,16 @@ func New(config *config.Config, addr string, dryrun bool) *Backupd {
 		env:        env.New(config),
 		addr:       addr,
 		dryrun:     dryrun,
+		version:    atom.New[int64](0),
+		versionCh:  make(chan struct{}, 1),
+	}
+}
+
+func (b *Backupd) notifyStateChange() {
+	b.version.Swap(func(v int64) int64 { return v + 1 })
+	select {
+	case b.versionCh <- struct{}{}:
+	default:
 	}
 }
 
@@ -88,8 +100,27 @@ func (b *Backupd) Serve(ctx context.Context) error {
 		}
 
 		b.progress.Log(model.GlobalDataset, "Created %s snapshot for root %s", periodicity, root)
+		b.notifyStateChange()
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintf(w, "Created %s snapshot for root %s\n", periodicity, root)
+	})
+
+	// Long-polling endpoint for state changes
+	mux.HandleFunc("/poll", func(w http.ResponseWriter, req *http.Request) {
+		if req.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		select {
+		case <-b.versionCh:
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, "refresh")
+		case <-time.After(5 * time.Minute):
+			w.WriteHeader(http.StatusNoContent)
+		case <-req.Context().Done():
+			w.WriteHeader(http.StatusNoContent)
+		}
 	})
 
 	// Handle all routes with the generic handler and implement our own routing logic
@@ -252,6 +283,7 @@ func (b *Backupd) refreshAllDatasetsAndPlans(ctx context.Context) error {
 	// Then generate plans for all datasets to show in UI
 	b.generatePlansForAllDatasets(ctx)
 
+	b.notifyStateChange()
 	return nil
 }
 
@@ -399,6 +431,7 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 			currentDS.Plan[i].Status = model.StepInProgress
 			return model.ReplaceDataset(dataset, currentDS)(state)
 		})
+		b.notifyStateChange()
 
 		logger.Printf("-- Ensuring in-memory state supports this update...")
 		initialDS := initialState.GetDataset(dataset)
@@ -437,6 +470,7 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 				}
 				return model.ReplaceDataset(dataset, updatedDS)(state)
 			})
+			b.notifyStateChange()
 			logger.Printf("-- [DRYRUN] Done.")
 			continue
 		}
@@ -465,6 +499,7 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 					}
 					return model.ReplaceDataset(dataset, currentDS)(state)
 				})
+				b.notifyStateChange()
 				return fmt.Errorf("applying op '%s' to zfs env (attempt %d) of '%s': %w", step, attempts, dataset, err)
 			}
 		}
@@ -492,6 +527,7 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 			}
 			return model.ReplaceDataset(dataset, updatedDS)(state)
 		})
+		b.notifyStateChange()
 
 		logger.Printf("-- Done.")
 	}

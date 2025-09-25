@@ -499,7 +499,7 @@ func index(state *model.Model, progress progress.Value, syncStatus *sync.Status,
 				}
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "</div><script>\n\t\t\t// Table sorting functionality\n\t\t\tfunction makeSortable(table) {\n\t\t\t\tconst headers = table.querySelectorAll('th.sortable');\n\t\t\t\tconsole.log('Found sortable headers:', headers.length);\n\t\t\t\theaders.forEach((header, index) => {\n\t\t\t\t\tconst actualColumnIndex = Array.from(table.querySelectorAll('th')).indexOf(header);\n\t\t\t\t\tconsole.log(`Header ${index} (${header.textContent.trim()}) is at column ${actualColumnIndex}`);\n\t\t\t\t\theader.addEventListener('click', () => sortTable(table, actualColumnIndex));\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction sortTable(table, column) {\n\t\t\t\tconst tbody = table.querySelector('tbody');\n\t\t\t\tconst rows = Array.from(tbody.querySelectorAll('tr'));\n\t\t\t\tconst header = table.querySelectorAll('th')[column];\n\t\t\t\tconst headerText = header.textContent.trim().toLowerCase();\n\n\t\t\t\t// Special handling for dataset column only in the main overview table\n\t\t\t\t// (not in the snapshot table)\n\t\t\t\tif (column === 0 && headerText === 'dataset') {\n\t\t\t\t\t// Dataset column: toggle between name-length and lexical\n\t\t\t\t\tconst isLexical = header.classList.contains('sort-asc');\n\n\t\t\t\t\t// Remove previous sort classes\n\t\t\t\t\ttable.querySelectorAll('th').forEach(th => {\n\t\t\t\t\t\tth.classList.remove('sort-asc', 'sort-desc');\n\t\t\t\t\t});\n\n\t\t\t\t\tif (isLexical) {\n\t\t\t\t\t\t// Switch to name-length sort (default state, no indicator)\n\t\t\t\t\t\trows.sort((a, b) => {\n\t\t\t\t\t\t\tconst aVal = a.cells[0].textContent.trim();\n\t\t\t\t\t\t\tconst bVal = b.cells[0].textContent.trim();\n\n\t\t\t\t\t\t\t// Always keep <root> at the top\n\t\t\t\t\t\t\tif (aVal === '<root>') return -1;\n\t\t\t\t\t\t\tif (bVal === '<root>') return 1;\n\n\t\t\t\t\t\t\tif (aVal.length === bVal.length) {\n\t\t\t\t\t\t\t\treturn aVal.localeCompare(bVal);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\treturn aVal.length - bVal.length;\n\t\t\t\t\t\t});\n\t\t\t\t\t} else {\n\t\t\t\t\t\t// Switch to lexical sort (show ascending indicator)\n\t\t\t\t\t\theader.classList.add('sort-asc');\n\t\t\t\t\t\trows.sort((a, b) => {\n\t\t\t\t\t\t\tconst aVal = a.cells[0].textContent.trim();\n\t\t\t\t\t\t\tconst bVal = b.cells[0].textContent.trim();\n\n\t\t\t\t\t\t\t// Always keep <root> at the top\n\t\t\t\t\t\t\tif (aVal === '<root>') return -1;\n\t\t\t\t\t\t\tif (bVal === '<root>') return 1;\n\n\t\t\t\t\t\t\treturn aVal.localeCompare(bVal);\n\t\t\t\t\t\t});\n\t\t\t\t\t}\n\t\t\t\t} else {\n\t\t\t\t\t// Other columns: normal asc/desc toggle\n\t\t\t\t\tconst isAsc = !header.classList.contains('sort-asc');\n\n\t\t\t\t\t// Remove previous sort classes\n\t\t\t\t\ttable.querySelectorAll('th').forEach(th => {\n\t\t\t\t\t\tth.classList.remove('sort-asc', 'sort-desc');\n\t\t\t\t\t});\n\n\t\t\t\t\t// Add current sort class\n\t\t\t\t\theader.classList.add(isAsc ? 'sort-asc' : 'sort-desc');\n\n\t\t\t\t\t// Sort rows\n\t\t\t\t\trows.sort((a, b) => {\n\t\t\t\t\t\tlet aVal = a.cells[column].textContent.trim();\n\t\t\t\t\t\tlet bVal = b.cells[column].textContent.trim();\n\n\t\t\t\t\t\t// Debug: log values for problematic columns\n\t\t\t\t\t\tif (column === 4 || column === 5) {\n\t\t\t\t\t\t\tconsole.log(`Column ${column}: \"${aVal}\" vs \"${bVal}\"`);\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\t// Handle dashes (no data)\n\t\t\t\t\t\tif (aVal === '-' && bVal === '-') return 0;\n\t\t\t\t\t\tif (aVal === '-') return isAsc ? 1 : -1;\n\t\t\t\t\t\tif (bVal === '-') return isAsc ? -1 : 1;\n\n\t\t\t\t\t\t// Check if values are sizes (contain 'B', 'KB', 'MB', etc.)\n\t\t\t\t\t\t// More flexible regex to handle whitespace and formatting\n\t\t\t\t\t\tif ((aVal.match(/\\d+(\\.\\d+)?\\s*[KMGTPE]?B/i) || aVal === '-') &&\n\t\t\t\t\t\t    (bVal.match(/\\d+(\\.\\d+)?\\s*[KMGTPE]?B/i) || bVal === '-')) {\n\t\t\t\t\t\t\treturn compareSize(aVal, bVal) * (isAsc ? 1 : -1);\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\t// Check if values are dates\n\t\t\t\t\t\tif (aVal.match(/\\d{4}-\\d{2}-\\d{2}/) && bVal.match(/\\d{4}-\\d{2}-\\d{2}/)) {\n\t\t\t\t\t\t\treturn (new Date(aVal) - new Date(bVal)) * (isAsc ? 1 : -1);\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\t// Check if values are numbers\n\t\t\t\t\t\tconst aNum = parseFloat(aVal.replace(/[^0-9.-]/g, ''));\n\t\t\t\t\t\tconst bNum = parseFloat(bVal.replace(/[^0-9.-]/g, ''));\n\t\t\t\t\t\tif (!isNaN(aNum) && !isNaN(bNum)) {\n\t\t\t\t\t\t\treturn (aNum - bNum) * (isAsc ? 1 : -1);\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\t// Default string comparison\n\t\t\t\t\t\treturn aVal.localeCompare(bVal) * (isAsc ? 1 : -1);\n\t\t\t\t\t});\n\t\t\t\t}\n\n\t\t\t\t// Append sorted rows\n\t\t\t\trows.forEach(row => tbody.appendChild(row));\n\t\t\t}\n\n\t\t\tfunction compareSize(a, b) {\n\t\t\t\tconst units = { 'B': 1, 'KB': 1024, 'MB': 1024**2, 'GB': 1024**3, 'TB': 1024**4, 'PB': 1024**5, 'EB': 1024**6 };\n\n\t\t\t\tfunction parseSize(str) {\n\t\t\t\t\tconst match = str.match(/([\\d.]+)\\s*([KMGTPE]?B)/);\n\t\t\t\t\tif (!match) return 0;\n\t\t\t\t\treturn parseFloat(match[1]) * (units[match[2]] || 1);\n\t\t\t\t}\n\n\t\t\t\treturn parseSize(a) - parseSize(b);\n\t\t\t}\n\n\t\t\t// Initialize sortable tables\n\t\t\tdocument.addEventListener('DOMContentLoaded', function() {\n\t\t\t\tdocument.querySelectorAll('table').forEach(makeSortable);\n\t\t\t});\n\t\t</script></body></html>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "</div><script>\n\t\t\t// Table sorting functionality\n\t\t\tfunction makeSortable(table) {\n\t\t\t\tconst headers = table.querySelectorAll('th.sortable');\n\t\t\t\tconsole.log('Found sortable headers:', headers.length);\n\t\t\t\theaders.forEach((header, index) => {\n\t\t\t\t\tconst actualColumnIndex = Array.from(table.querySelectorAll('th')).indexOf(header);\n\t\t\t\t\tconsole.log(`Header ${index} (${header.textContent.trim()}) is at column ${actualColumnIndex}`);\n\t\t\t\t\theader.addEventListener('click', () => sortTable(table, actualColumnIndex));\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction sortTable(table, column) {\n\t\t\t\tconst tbody = table.querySelector('tbody');\n\t\t\t\tconst rows = Array.from(tbody.querySelectorAll('tr'));\n\t\t\t\tconst header = table.querySelectorAll('th')[column];\n\t\t\t\tconst headerText = header.textContent.trim().toLowerCase();\n\n\t\t\t\t// Special handling for dataset column only in the main overview table\n\t\t\t\t// (not in the snapshot table)\n\t\t\t\tif (column === 0 && headerText === 'dataset') {\n\t\t\t\t\t// Dataset column: toggle between name-length and lexical\n\t\t\t\t\tconst isLexical = header.classList.contains('sort-asc');\n\n\t\t\t\t\t// Remove previous sort classes\n\t\t\t\t\ttable.querySelectorAll('th').forEach(th => {\n\t\t\t\t\t\tth.classList.remove('sort-asc', 'sort-desc');\n\t\t\t\t\t});\n\n\t\t\t\t\tif (isLexical) {\n\t\t\t\t\t\t// Switch to name-length sort (default state, no indicator)\n\t\t\t\t\t\trows.sort((a, b) => {\n\t\t\t\t\t\t\tconst aVal = a.cells[0].textContent.trim();\n\t\t\t\t\t\t\tconst bVal = b.cells[0].textContent.trim();\n\n\t\t\t\t\t\t\t// Always keep <root> at the top\n\t\t\t\t\t\t\tif (aVal === '<root>') return -1;\n\t\t\t\t\t\t\tif (bVal === '<root>') return 1;\n\n\t\t\t\t\t\t\tif (aVal.length === bVal.length) {\n\t\t\t\t\t\t\t\treturn aVal.localeCompare(bVal);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\treturn aVal.length - bVal.length;\n\t\t\t\t\t\t});\n\t\t\t\t\t} else {\n\t\t\t\t\t\t// Switch to lexical sort (show ascending indicator)\n\t\t\t\t\t\theader.classList.add('sort-asc');\n\t\t\t\t\t\trows.sort((a, b) => {\n\t\t\t\t\t\t\tconst aVal = a.cells[0].textContent.trim();\n\t\t\t\t\t\t\tconst bVal = b.cells[0].textContent.trim();\n\n\t\t\t\t\t\t\t// Always keep <root> at the top\n\t\t\t\t\t\t\tif (aVal === '<root>') return -1;\n\t\t\t\t\t\t\tif (bVal === '<root>') return 1;\n\n\t\t\t\t\t\t\treturn aVal.localeCompare(bVal);\n\t\t\t\t\t\t});\n\t\t\t\t\t}\n\t\t\t\t} else {\n\t\t\t\t\t// Other columns: normal asc/desc toggle\n\t\t\t\t\tconst isAsc = !header.classList.contains('sort-asc');\n\n\t\t\t\t\t// Remove previous sort classes\n\t\t\t\t\ttable.querySelectorAll('th').forEach(th => {\n\t\t\t\t\t\tth.classList.remove('sort-asc', 'sort-desc');\n\t\t\t\t\t});\n\n\t\t\t\t\t// Add current sort class\n\t\t\t\t\theader.classList.add(isAsc ? 'sort-asc' : 'sort-desc');\n\n\t\t\t\t\t// Sort rows\n\t\t\t\t\trows.sort((a, b) => {\n\t\t\t\t\t\tlet aVal = a.cells[column].textContent.trim();\n\t\t\t\t\t\tlet bVal = b.cells[column].textContent.trim();\n\n\t\t\t\t\t\t// Debug: log values for problematic columns\n\t\t\t\t\t\tif (column === 4 || column === 5) {\n\t\t\t\t\t\t\tconsole.log(`Column ${column}: \"${aVal}\" vs \"${bVal}\"`);\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\t// Handle dashes (no data)\n\t\t\t\t\t\tif (aVal === '-' && bVal === '-') return 0;\n\t\t\t\t\t\tif (aVal === '-') return isAsc ? 1 : -1;\n\t\t\t\t\t\tif (bVal === '-') return isAsc ? -1 : 1;\n\n\t\t\t\t\t\t// Check if values are sizes (contain 'B', 'KB', 'MB', etc.)\n\t\t\t\t\t\t// More flexible regex to handle whitespace and formatting\n\t\t\t\t\t\tif ((aVal.match(/\\d+(\\.\\d+)?\\s*[KMGTPE]?B/i) || aVal === '-') &&\n\t\t\t\t\t\t    (bVal.match(/\\d+(\\.\\d+)?\\s*[KMGTPE]?B/i) || bVal === '-')) {\n\t\t\t\t\t\t\treturn compareSize(aVal, bVal) * (isAsc ? 1 : -1);\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\t// Check if values are dates\n\t\t\t\t\t\tif (aVal.match(/\\d{4}-\\d{2}-\\d{2}/) && bVal.match(/\\d{4}-\\d{2}-\\d{2}/)) {\n\t\t\t\t\t\t\treturn (new Date(aVal) - new Date(bVal)) * (isAsc ? 1 : -1);\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\t// Check if values are numbers\n\t\t\t\t\t\tconst aNum = parseFloat(aVal.replace(/[^0-9.-]/g, ''));\n\t\t\t\t\t\tconst bNum = parseFloat(bVal.replace(/[^0-9.-]/g, ''));\n\t\t\t\t\t\tif (!isNaN(aNum) && !isNaN(bNum)) {\n\t\t\t\t\t\t\treturn (aNum - bNum) * (isAsc ? 1 : -1);\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\t// Default string comparison\n\t\t\t\t\t\treturn aVal.localeCompare(bVal) * (isAsc ? 1 : -1);\n\t\t\t\t\t});\n\t\t\t\t}\n\n\t\t\t\t// Append sorted rows\n\t\t\t\trows.forEach(row => tbody.appendChild(row));\n\t\t\t}\n\n\t\t\tfunction compareSize(a, b) {\n\t\t\t\tconst units = { 'B': 1, 'KB': 1024, 'MB': 1024**2, 'GB': 1024**3, 'TB': 1024**4, 'PB': 1024**5, 'EB': 1024**6 };\n\n\t\t\t\tfunction parseSize(str) {\n\t\t\t\t\tconst match = str.match(/([\\d.]+)\\s*([KMGTPE]?B)/);\n\t\t\t\t\tif (!match) return 0;\n\t\t\t\t\treturn parseFloat(match[1]) * (units[match[2]] || 1);\n\t\t\t\t}\n\n\t\t\t\treturn parseSize(a) - parseSize(b);\n\t\t\t}\n\n\t\t\t// Initialize sortable tables\n\t\t\tdocument.addEventListener('DOMContentLoaded', function() {\n\t\t\t\tdocument.querySelectorAll('table').forEach(makeSortable);\n\t\t\t});\n\n\t\t\t// Long-polling for state changes\n\t\t\tasync function poll() {\n\t\t\t\twhile (true) {\n\t\t\t\t\ttry {\n\t\t\t\t\t\tconst response = await fetch('/poll');\n\t\t\t\t\t\tif (response.ok) {\n\t\t\t\t\t\t\t// State changed, refresh the page\n\t\t\t\t\t\t\twindow.location.reload();\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\t// Timeout, poll again immediately\n\t\t\t\t\t} catch (error) {\n\t\t\t\t\t\t// Connection error, retry after a delay\n\t\t\t\t\t\tawait new Promise(resolve => setTimeout(resolve, 5000));\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t}\n\n\t\t\t// Start polling when the page loads\n\t\t\tdocument.addEventListener('DOMContentLoaded', function() {\n\t\t\t\tpoll();\n\t\t\t});\n\t\t</script></body></html>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -541,7 +541,7 @@ func renderDatasetLink(ds model.DatasetName, dataset *model.Dataset, syncStatus 
 			var templ_7745c5c3_Var30 templ.SafeURL
 			templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/root"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 504, Col: 34}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 527, Col: 34}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var30))
 			if templ_7745c5c3_Err != nil {
@@ -575,7 +575,7 @@ func renderDatasetLink(ds model.DatasetName, dataset *model.Dataset, syncStatus 
 			var templ_7745c5c3_Var32 string
 			templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.JoinStringErrs(ds.String())
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 507, Col: 43}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 530, Col: 43}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var32))
 			if templ_7745c5c3_Err != nil {
@@ -618,7 +618,7 @@ func renderDatasetLink(ds model.DatasetName, dataset *model.Dataset, syncStatus 
 			var templ_7745c5c3_Var35 string
 			templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.JoinStringErrs(dataset.Staleness().Truncate(time.Minute).String())
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 511, Col: 56}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 534, Col: 56}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var35))
 			if templ_7745c5c3_Err != nil {
@@ -645,7 +645,7 @@ func renderDatasetLink(ds model.DatasetName, dataset *model.Dataset, syncStatus 
 			var templ_7745c5c3_Var37 templ.SafeURL
 			templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/" + ds.String()[1:]))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 517, Col: 48}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 540, Col: 48}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var37))
 			if templ_7745c5c3_Err != nil {
@@ -679,7 +679,7 @@ func renderDatasetLink(ds model.DatasetName, dataset *model.Dataset, syncStatus 
 			var templ_7745c5c3_Var39 string
 			templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.JoinStringErrs(ds.String())
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 520, Col: 43}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 543, Col: 43}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var39))
 			if templ_7745c5c3_Err != nil {
@@ -722,7 +722,7 @@ func renderDatasetLink(ds model.DatasetName, dataset *model.Dataset, syncStatus 
 			var templ_7745c5c3_Var42 string
 			templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.JoinStringErrs(dataset.Staleness().Truncate(time.Minute).String())
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 524, Col: 56}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 547, Col: 56}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var42))
 			if templ_7745c5c3_Err != nil {
@@ -811,7 +811,7 @@ func renderDatasetSize(dataset *model.Dataset) templ.Component {
 			var templ_7745c5c3_Var45 string
 			templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.JoinStringErrs(dataset.Metrics.LocalSize.HumanizedUsed())
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 543, Col: 53}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 566, Col: 53}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var45))
 			if templ_7745c5c3_Err != nil {
@@ -836,7 +836,7 @@ func renderDatasetSize(dataset *model.Dataset) templ.Component {
 			var templ_7745c5c3_Var46 string
 			templ_7745c5c3_Var46, templ_7745c5c3_Err = templ.JoinStringErrs(dataset.Metrics.RemoteSize.HumanizedUsed())
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 549, Col: 55}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 572, Col: 55}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var46))
 			if templ_7745c5c3_Err != nil {
@@ -938,7 +938,7 @@ func snapshotRows(ds *model.Dataset) templ.Component {
 				var templ_7745c5c3_Var49 string
 				templ_7745c5c3_Var49, templ_7745c5c3_Err = templ.JoinStringErrs(snap.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 575, Col: 19}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 598, Col: 19}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var49))
 				if templ_7745c5c3_Err != nil {
@@ -951,7 +951,7 @@ func snapshotRows(ds *model.Dataset) templ.Component {
 				var templ_7745c5c3_Var50 string
 				templ_7745c5c3_Var50, templ_7745c5c3_Err = templ.JoinStringErrs(snap.Time().Format(time.DateTime))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 576, Col: 43}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 599, Col: 43}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var50))
 				if templ_7745c5c3_Err != nil {
@@ -1004,7 +1004,7 @@ func snapshotRows(ds *model.Dataset) templ.Component {
 				var templ_7745c5c3_Var51 string
 				templ_7745c5c3_Var51, templ_7745c5c3_Err = templ.JoinStringErrs(snap.SizeString())
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 595, Col: 33}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 618, Col: 33}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var51))
 				if templ_7745c5c3_Err != nil {
@@ -1024,7 +1024,7 @@ func snapshotRows(ds *model.Dataset) templ.Component {
 				var templ_7745c5c3_Var52 string
 				templ_7745c5c3_Var52, templ_7745c5c3_Err = templ.JoinStringErrs(snap.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 601, Col: 19}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 624, Col: 19}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var52))
 				if templ_7745c5c3_Err != nil {
@@ -1037,7 +1037,7 @@ func snapshotRows(ds *model.Dataset) templ.Component {
 				var templ_7745c5c3_Var53 string
 				templ_7745c5c3_Var53, templ_7745c5c3_Err = templ.JoinStringErrs(snap.Time().Format(time.DateTime))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 602, Col: 43}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 625, Col: 43}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var53))
 				if templ_7745c5c3_Err != nil {
@@ -1065,7 +1065,7 @@ func snapshotRows(ds *model.Dataset) templ.Component {
 				var templ_7745c5c3_Var54 string
 				templ_7745c5c3_Var54, templ_7745c5c3_Err = templ.JoinStringErrs(snap.SizeString())
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 611, Col: 33}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 634, Col: 33}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var54))
 				if templ_7745c5c3_Err != nil {
@@ -1085,7 +1085,7 @@ func snapshotRows(ds *model.Dataset) templ.Component {
 				var templ_7745c5c3_Var55 string
 				templ_7745c5c3_Var55, templ_7745c5c3_Err = templ.JoinStringErrs(snap.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 617, Col: 19}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 640, Col: 19}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var55))
 				if templ_7745c5c3_Err != nil {
@@ -1098,7 +1098,7 @@ func snapshotRows(ds *model.Dataset) templ.Component {
 				var templ_7745c5c3_Var56 string
 				templ_7745c5c3_Var56, templ_7745c5c3_Err = templ.JoinStringErrs(snap.Time().Format(time.DateTime))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 618, Col: 43}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 641, Col: 43}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var56))
 				if templ_7745c5c3_Err != nil {
@@ -1126,7 +1126,7 @@ func snapshotRows(ds *model.Dataset) templ.Component {
 				var templ_7745c5c3_Var57 string
 				templ_7745c5c3_Var57, templ_7745c5c3_Err = templ.JoinStringErrs(snap.SizeString())
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 627, Col: 33}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 650, Col: 33}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var57))
 				if templ_7745c5c3_Err != nil {
