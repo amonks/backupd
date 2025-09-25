@@ -147,24 +147,36 @@ func (b *Backupd) Sync(ctx context.Context) error {
 		inAnHour := time.After(time.Hour)
 		allOK := true
 
-		if err := b.refreshState(ctx); err != nil {
-			return fmt.Errorf("refreshing state: %w", err)
+		// At launch: refresh all datasets and generate plans
+		if err := b.refreshAllDatasetsAndPlans(ctx); err != nil {
+			return fmt.Errorf("refreshing all datasets and plans: %w", err)
 		}
 
+		// Then, for each dataset: refresh, replan, resync
 		for _, ds := range b.state.Deref().ListDatasets() {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
 
-			b.progress.Log(model.GlobalDataset, "refreshing dataset '%s'", ds)
+			b.progress.Log(model.GlobalDataset, "processing dataset '%s'", ds)
+
+			// Refresh this specific dataset
 			logger := b.progress.Logger("refresh")
 			if err := b.refreshDataset(ctx, logger, ds); err != nil {
 				b.progress.Log(model.GlobalDataset, "refresh error for '%s': %s", ds, err)
+				logger.Done()
+				continue
 			}
 			logger.Done()
 
-			b.progress.Log(model.GlobalDataset, "syncing '%s'", ds)
+			// Replan after refresh
+			if err := b.replanDataset(ctx, ds); err != nil {
+				b.progress.Log(model.GlobalDataset, "replan error for '%s': %s", ds, err)
+				continue
+			}
 
+			// Resync with the updated plan
+			b.progress.Log(model.GlobalDataset, "syncing '%s'", ds)
 			if err := b.syncDataset(ctx, ds); err != nil {
 				allOK = false
 				err := fmt.Errorf("syncing '%s': %w", ds, err)
@@ -196,12 +208,13 @@ func (b *Backupd) Sync(ctx context.Context) error {
 	}
 }
 
-func (b *Backupd) refreshState(ctx context.Context) error {
+func (b *Backupd) refreshAllDatasetsAndPlans(ctx context.Context) error {
 	b.state.Reset(model.New())
 
-	logger := b.progress.Logger("refresh-state")
+	logger := b.progress.Logger("refresh-all")
 	defer logger.Done()
 
+	// First, discover and refresh all datasets
 	localDatasets, err := b.env.Local.GetDatasets(logger)
 	if err != nil {
 		return fmt.Errorf("getting local datasets: %s", err)
@@ -236,29 +249,89 @@ func (b *Backupd) refreshState(ctx context.Context) error {
 		b.state.Swap(model.AddRemoteDataset(datasetInfo.Name, snapshots, datasetInfo.Size))
 	}
 
+	// Then generate plans for all datasets to show in UI
+	b.generatePlansForAllDatasets(ctx)
+
 	return nil
 }
 
+func (b *Backupd) generatePlansForAllDatasets(ctx context.Context) {
+	state := b.state.Deref()
+	for _, dsName := range state.ListDatasets() {
+		if err := ctx.Err(); err != nil {
+			return
+		}
+
+		ds := state.GetDataset(dsName)
+		if ds == nil {
+			continue
+		}
+
+		// Generate goal and plan for this dataset
+		goal := ds.Goal(b.config.Local.Policy, b.config.Remote.Policy)
+		plan, err := ds.Plan(goal)
+		if err != nil {
+			// Log error but continue with other datasets
+			b.progress.Log(model.GlobalDataset, "error generating plan for '%s': %s", dsName, err)
+			continue
+		}
+
+		// Update the dataset with goal and plan
+		b.state.Swap(func(state *model.Model) *model.Model {
+			currentDS := state.GetDataset(dsName)
+			if currentDS == nil {
+				return state
+			}
+			updatedDS := currentDS.Clone()
+			updatedDS.GoalState = goal
+			updatedDS.CurrentPlan = plan
+			return model.ReplaceDataset(dsName, updatedDS)(state)
+		})
+	}
+}
+
 func (b *Backupd) refreshDataset(ctx context.Context, logger logger.Logger, dataset model.DatasetName) error {
-	{
-		snapshots, err := b.env.Local.GetSnapshots(logger, dataset)
-		if err != nil {
-			return fmt.Errorf("getting snapshots for '%s': %w", dataset, err)
-		}
+	// Refresh local snapshots
+	localSnapshots, err := b.env.Local.GetSnapshots(logger, dataset)
+	if err != nil {
+		return fmt.Errorf("getting local snapshots for '%s': %w", dataset, err)
+	}
+	b.state.Swap(model.AddLocalDataset(dataset, localSnapshots, nil))
 
-		// For individual dataset refresh, we don't have size info readily available
-		// This could be optimized later by caching or fetching size info
-		b.state.Swap(model.AddLocalDataset(dataset, snapshots, nil))
+	// Refresh remote snapshots
+	remoteSnapshots, err := b.env.Remote.GetSnapshots(logger, dataset)
+	if err != nil {
+		return fmt.Errorf("getting remote snapshots for '%s': %w", dataset, err)
+	}
+	b.state.Swap(model.AddRemoteDataset(dataset, remoteSnapshots, nil))
+
+	return nil
+}
+
+func (b *Backupd) replanDataset(ctx context.Context, dataset model.DatasetName) error {
+	ds := b.state.Deref().GetDataset(dataset)
+	if ds == nil {
+		return fmt.Errorf("dataset '%s' not found", dataset)
 	}
 
-	{
-		snapshots, err := b.env.Remote.GetSnapshots(logger, dataset)
-		if err != nil {
-			return fmt.Errorf("getting remote snapshots for '%s': %w", dataset, err)
-		}
-
-		b.state.Swap(model.AddRemoteDataset(dataset, snapshots, nil))
+	// Generate goal and plan
+	goal := ds.Goal(b.config.Local.Policy, b.config.Remote.Policy)
+	plan, err := ds.Plan(goal)
+	if err != nil {
+		return fmt.Errorf("generating plan for '%s': %w", dataset, err)
 	}
+
+	// Update the dataset with goal and plan
+	b.state.Swap(func(state *model.Model) *model.Model {
+		currentDS := state.GetDataset(dataset)
+		if currentDS == nil {
+			return state
+		}
+		updatedDS := currentDS.Clone()
+		updatedDS.GoalState = goal
+		updatedDS.CurrentPlan = plan
+		return model.ReplaceDataset(dataset, updatedDS)(state)
+	})
 
 	return nil
 }
@@ -276,61 +349,78 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 		return fmt.Errorf("handling incomplete transfer of '%s': %w", dataset, err)
 	}
 
-	initialState := b.state.Deref()
-	ds := initialState.GetDataset(dataset)
-
-	goal := ds.Goal(b.config.Local.Policy, b.config.Remote.Policy)
-
-	plan, err := ds.Plan(goal)
-	if err != nil {
-		return fmt.Errorf("constructing plan for '%s': %w", dataset, err)
+	// Get the dataset with its pre-generated plan
+	ds := b.state.Deref().GetDataset(dataset)
+	if ds == nil {
+		return fmt.Errorf("dataset '%s' not found", dataset)
 	}
 
-	// Store both the goal and plan in the dataset for display purposes
-	b.state.Swap(func(state *model.Model) *model.Model {
-		currentDS := state.GetDataset(dataset)
-		if currentDS == nil {
-			return state
-		}
-		updatedDS := currentDS.Clone()
-		updatedDS.GoalState = goal
-		updatedDS.CurrentPlan = plan
-		return model.ReplaceDataset(dataset, updatedDS)(state)
-	})
+	if ds.CurrentPlan == nil {
+		return fmt.Errorf("no plan available for dataset '%s'", dataset)
+	}
 
+	plan := ds.CurrentPlan
+	goal := ds.GoalState
+
+	if goal == nil {
+		return fmt.Errorf("no goal state available for dataset '%s'", dataset)
+	}
+
+	// Validate the plan before execution
 	if err := ds.ValidatePlan(ctx, goal, plan, false); err != nil {
 		return fmt.Errorf("validating plan for '%s': %w", dataset, err)
 	}
 
 	logger.Printf("Plan has %d steps", len(plan))
 
-	for _, op := range plan {
+	// Store initial state for validation during execution
+	initialState := b.state.Deref()
+
+	for i, step := range plan {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 
-		logger.Printf("Applying op '%s'", op)
+		logger.Printf("Applying op '%s'", step.Operation)
+
+		// Mark step as in progress
+		b.state.Swap(func(state *model.Model) *model.Model {
+			currentDS := state.GetDataset(dataset)
+			if currentDS == nil || currentDS.CurrentPlan == nil || i >= len(currentDS.CurrentPlan) {
+				return state
+			}
+			currentDS.CurrentPlan[i].Status = model.StepInProgress
+			return model.ReplaceDataset(dataset, currentDS)(state)
+		})
 
 		logger.Printf("-- Ensuring in-memory state supports this update...")
-		_, err := op.Apply(initialState.GetDataset(dataset))
+		_, err := step.Apply(initialState.GetDataset(dataset))
 		if err != nil {
-			return fmt.Errorf("applying op '%s' to in-memory state of '%s': %w", op, dataset, err)
+			return fmt.Errorf("applying op '%s' to in-memory state of '%s': %w", step, dataset, err)
 		}
 
 		// In dryrun mode, we don't actually apply the operations to the ZFS environment
 		// We just update the in-memory state for display purposes
 		if b.dryrun {
-			logger.Printf("-- [DRYRUN] Would update zfs environment with op '%s'", op)
+			logger.Printf("-- [DRYRUN] Would update zfs environment with op '%s'", step)
 			logger.Printf("-- [DRYRUN] Updating in-memory state only...")
 			b.state.Swap(func(state *model.Model) *model.Model {
 				currentDS := state.GetDataset(dataset)
 				if currentDS == nil {
 					return state
 				}
-				newState, err := op.Apply(currentDS)
+				newState, err := step.Apply(currentDS)
 				if err != nil {
 					logger.Printf("-- [DRYRUN] Error applying op to current state: %v", err)
+					// Mark step as failed
+					if currentDS.CurrentPlan != nil && i < len(currentDS.CurrentPlan) {
+						currentDS.CurrentPlan[i].Status = model.StepFailed
+					}
 					return state
+				}
+				// Mark step as completed
+				if currentDS.CurrentPlan != nil && i < len(currentDS.CurrentPlan) {
+					currentDS.CurrentPlan[i].Status = model.StepCompleted
 				}
 				return model.ReplaceDataset(dataset, newState)(state)
 			})
@@ -348,13 +438,21 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 		}
 
 		logger.Printf("-- Updating zfs environment...")
-		if err := b.env.Apply(ctx, logger, op); err != nil {
+		if err := b.env.Apply(ctx, logger, step); err != nil {
 			if allowRetry && strings.Contains(err.Error(), "exit status 255") && attempts < 5 {
 				logger.Printf("-- Got status code 255 on attempt %d; retrying", attempts)
 				time.Sleep(time.Minute * time.Duration(attempts))
 				goto retry
 			} else {
-				return fmt.Errorf("applying op '%s' to zfs env (attempt %d) of '%s': %w", op, attempts, dataset, err)
+				// Mark step as failed
+				b.state.Swap(func(state *model.Model) *model.Model {
+					currentDS := state.GetDataset(dataset)
+					if currentDS != nil && currentDS.CurrentPlan != nil && i < len(currentDS.CurrentPlan) {
+						currentDS.CurrentPlan[i].Status = model.StepFailed
+					}
+					return model.ReplaceDataset(dataset, currentDS)(state)
+				})
+				return fmt.Errorf("applying op '%s' to zfs env (attempt %d) of '%s': %w", step, attempts, dataset, err)
 			}
 		}
 
@@ -364,10 +462,18 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 			if currentDS == nil {
 				return state
 			}
-			newState, err := op.Apply(currentDS)
+			newState, err := step.Apply(currentDS)
 			if err != nil {
 				logger.Printf("-- Error applying op to current state: %v", err)
+				// Mark step as failed
+				if currentDS.CurrentPlan != nil && i < len(currentDS.CurrentPlan) {
+					currentDS.CurrentPlan[i].Status = model.StepFailed
+				}
 				return state
+			}
+			// Mark step as completed
+			if newState.CurrentPlan != nil && i < len(newState.CurrentPlan) {
+				newState.CurrentPlan[i].Status = model.StepCompleted
 			}
 			return model.ReplaceDataset(dataset, newState)(state)
 		})

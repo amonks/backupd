@@ -110,6 +110,37 @@ templ index(state *model.Model, progress progress.Value, syncStatus *sync.Status
 					from { opacity: 0.6; }
 					to { opacity: 1; }
 				}
+				@keyframes spin {
+					from { transform: rotate(0deg); }
+					to { transform: rotate(360deg); }
+				}
+				.step-status {
+					display: inline-block;
+					width: 16px;
+					height: 16px;
+					margin-right: 8px;
+					vertical-align: middle;
+				}
+				.step-status.pending {
+					border: 2px solid #ccc;
+					border-radius: 50%;
+				}
+				.step-status.in-progress {
+					border: 2px solid #2196f3;
+					border-top: 2px solid transparent;
+					border-radius: 50%;
+					animation: spin 1s linear infinite;
+				}
+				.step-status.completed::before {
+					content: '✓';
+					color: #4caf50;
+					font-weight: bold;
+				}
+				.step-status.failed::before {
+					content: '✗';
+					color: #f44336;
+					font-weight: bold;
+				}
 				table {
 					width: 100%;
 					border-collapse: collapse;
@@ -329,14 +360,18 @@ templ index(state *model.Model, progress progress.Value, syncStatus *sync.Status
 									<thead>
 										<tr>
 											<th>#</th>
+											<th>Status</th>
 											<th>Operation</th>
 										</tr>
 									</thead>
 									<tbody>
-										for i, op := range ds.CurrentPlan {
+										for i, step := range ds.CurrentPlan {
 											<tr>
 												<td>{ fmt.Sprint(i + 1) }</td>
-												<td><code>{ op.String() }</code></td>
+												<td>
+													@renderStepStatus(step.Status)
+												</td>
+												<td><code>{ step.String() }</code></td>
 											</tr>
 										}
 									</tbody>
@@ -566,6 +601,19 @@ templ renderDatasetSize(dataset *model.Dataset) {
 			No size info
 		}
 	</div>
+}
+
+templ renderStepStatus(status model.StepStatus) {
+	switch status {
+	case model.StepPending:
+		<span class="step-status pending" title="Pending"></span>
+	case model.StepInProgress:
+		<span class="step-status in-progress" title="In Progress"></span>
+	case model.StepCompleted:
+		<span class="step-status completed" title="Completed"></span>
+	case model.StepFailed:
+		<span class="step-status failed" title="Failed"></span>
+	}
 }
 
 templ snapshotRows(ds *model.Dataset) {

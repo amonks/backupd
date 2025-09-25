@@ -6,8 +6,57 @@ import (
 	"strings"
 )
 
-func (dataset *Dataset) Plan(goal *Dataset) ([]Operation, error) {
-	var plan []Operation
+// StepStatus represents the execution status of a plan step
+type StepStatus int
+
+const (
+	StepPending StepStatus = iota
+	StepInProgress
+	StepCompleted
+	StepFailed
+)
+
+// PlanStep wraps an Operation with its execution status
+type PlanStep struct {
+	Operation
+	Status StepStatus
+}
+
+// Verify PlanStep implements Operation
+var _ Operation = &PlanStep{}
+
+// String delegates to the wrapped operation
+func (ps *PlanStep) String() string {
+	return ps.Operation.String()
+}
+
+// Apply delegates to the wrapped operation
+func (ps *PlanStep) Apply(ds *Dataset) (*Dataset, error) {
+	return ps.Operation.Apply(ds)
+}
+
+// Plan is a sequence of plan steps
+type Plan []*PlanStep
+
+// NewPlanStep creates a new plan step with pending status
+func NewPlanStep(op Operation) *PlanStep {
+	return &PlanStep{
+		Operation: op,
+		Status:    StepPending,
+	}
+}
+
+// PlanFromOperations converts a slice of operations to a Plan
+func PlanFromOperations(ops []Operation) Plan {
+	steps := make(Plan, len(ops))
+	for i, op := range ops {
+		steps[i] = NewPlanStep(op)
+	}
+	return steps
+}
+
+func (dataset *Dataset) Plan(goal *Dataset) (Plan, error) {
+	var ops []Operation
 
 	localDeletions := dataset.Local.Difference(goal.Local)
 	remoteDeletions := dataset.Remote.Difference(goal.Remote)
@@ -17,12 +66,12 @@ func (dataset *Dataset) Plan(goal *Dataset) ([]Operation, error) {
 
 	for _, del := range localDeletionRanges {
 		if del.Len() == 1 {
-			plan = append(plan, &SnapshotDeletion{
+			ops = append(ops, &SnapshotDeletion{
 				Location: Local,
 				Snapshot: del.Oldest(),
 			})
 		} else {
-			plan = append(plan, &SnapshotRangeDeletion{
+			ops = append(ops, &SnapshotRangeDeletion{
 				Location: Local,
 				Start:    del.Oldest(),
 				End:      del.Newest(),
@@ -32,12 +81,12 @@ func (dataset *Dataset) Plan(goal *Dataset) ([]Operation, error) {
 
 	for _, del := range remoteDeletionRanges {
 		if del.Len() == 1 {
-			plan = append(plan, &SnapshotDeletion{
+			ops = append(ops, &SnapshotDeletion{
 				Location: Remote,
 				Snapshot: del.Oldest(),
 			})
 		} else {
-			plan = append(plan, &SnapshotRangeDeletion{
+			ops = append(ops, &SnapshotRangeDeletion{
 				Location: Remote,
 				Start:    del.Oldest(),
 				End:      del.Newest(),
@@ -47,7 +96,7 @@ func (dataset *Dataset) Plan(goal *Dataset) ([]Operation, error) {
 
 	transfers := goal.Remote.Difference(dataset.Remote)
 	if transfers.Len() == 0 {
-		return plan, nil
+		return PlanFromOperations(ops), nil
 	}
 
 	sharedSnapshots := dataset.Remote.Intersection(dataset.Local)
@@ -58,7 +107,7 @@ func (dataset *Dataset) Plan(goal *Dataset) ([]Operation, error) {
 		return nil, fmt.Errorf("remote has data, but none is shared with local")
 	}
 	if dataset.Remote.Len() == 0 {
-		plan = append(plan, &InitialSnapshotTransfer{
+		ops = append(ops, &InitialSnapshotTransfer{
 			Snapshot: transfers.Oldest(),
 		})
 		last = transfers.Oldest()
@@ -68,17 +117,17 @@ func (dataset *Dataset) Plan(goal *Dataset) ([]Operation, error) {
 		return nil, fmt.Errorf("local doesn't have transfer base snapshot %s", last)
 	}
 	for snapshot := range transfers.All() {
-		plan = append(plan, &SnapshotRangeTransfer{
+		ops = append(ops, &SnapshotRangeTransfer{
 			Start: last,
 			End:   snapshot,
 		})
 		last = snapshot
 	}
 
-	return plan, nil
+	return PlanFromOperations(ops), nil
 }
 
-func (dataset *Dataset) ValidatePlan(ctx context.Context, goal *Dataset, plan []Operation, isDebugging bool) error {
+func (dataset *Dataset) ValidatePlan(ctx context.Context, goal *Dataset, plan Plan, isDebugging bool) error {
 	if isDebugging {
 		fmt.Println("PLAN STEPS")
 	}
