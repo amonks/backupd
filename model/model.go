@@ -1,6 +1,10 @@
 package model
 
-import "sort"
+import (
+	"sort"
+
+	"monks.co/backupd/logger"
+)
 
 type Model struct {
 	Datasets map[DatasetName]*Dataset
@@ -41,6 +45,14 @@ func (model *Model) ListDatasets() []DatasetName {
 	return names
 }
 
+func (model *Model) SetPlan(dataset DatasetName, plan *Plan) {
+	ds := model.GetDataset(dataset)
+	if ds == nil {
+		panic("no such dataset")
+	}
+	ds.Plan = plan
+}
+
 func ReplaceDataset(name DatasetName, dataset *Dataset) func(*Model) *Model {
 	return func(old *Model) *Model {
 		out := old.Clone()
@@ -60,6 +72,7 @@ func AddLocalDataset(name DatasetName, snapshots []*Snapshot, size *DatasetSize)
 					Local:  NewSnapshots(),
 					Remote: NewSnapshots(),
 				},
+				Logs: logger.New(name.String()),
 			}
 		}
 		if out.Datasets[name].Current == nil {
@@ -90,6 +103,7 @@ func AddRemoteDataset(name DatasetName, snapshots []*Snapshot, size *DatasetSize
 					Local:  NewSnapshots(),
 					Remote: NewSnapshots(),
 				},
+				Logs: logger.New(name.String()),
 			}
 		}
 		if out.Datasets[name].Current == nil {

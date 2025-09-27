@@ -340,11 +340,11 @@ templ index(state *model.Model, globalLogs []logger.LogEntry, syncStatus *sync.S
 							if ds.Plan != nil && len(ds.Plan.Steps) > 0 {
 								<h2>Sync Plan</h2>
 								// Display plan-level logs if any
-								if ds.Plan.Logs != nil && len(ds.Plan.Logs.GetLogs()) > 0 {
+								if ds.Logs != nil && len(ds.Logs.GetLogs()) > 0 {
 									<div class="plan-logs">
 										<h3>Plan Setup</h3>
 										<ul>
-											for _, log := range ds.Plan.Logs.GetLogs() {
+											for _, log := range ds.Logs.GetLogs() {
 												<li><code>{ log.LogAt.Format("15:04:05") } { log.Log }</code></li>
 											}
 										</ul>

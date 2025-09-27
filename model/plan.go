@@ -52,7 +52,6 @@ func (ps *PlanStep) Apply(inv *SnapshotInventory) (*SnapshotInventory, error) {
 // Plan is a sequence of plan steps with plan-level logging
 type Plan struct {
 	Steps []*PlanStep
-	Logs  *logger.Logger // Plan-level logs (setup, pre/post operations)
 }
 
 // NewPlanStep creates a new plan step with pending status
@@ -97,7 +96,6 @@ func PlanFromOperations(ops []Operation) *Plan {
 	}
 	return &Plan{
 		Steps: steps,
-		Logs:  logger.New("plan"),
 	}
 }
 

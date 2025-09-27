@@ -202,18 +202,6 @@ func (b *Backupd) Sync(ctx context.Context) error {
 
 			b.globalLogs.Printf("processing dataset '%s'", ds)
 
-			// Refresh this specific dataset
-			if err := b.refreshDataset(ctx, b.globalLogs, ds); err != nil {
-				b.globalLogs.Printf("refresh error for '%s': %s", ds, err)
-				continue
-			}
-
-			// Replan after refresh
-			if err := b.replanDataset(ctx, ds); err != nil {
-				b.globalLogs.Printf("replan error for '%s': %s", ds, err)
-				continue
-			}
-
 			// Resync with the updated plan
 			b.globalLogs.Printf("syncing '%s'", ds)
 			if err := b.syncDataset(ctx, ds); err != nil {
@@ -348,64 +336,41 @@ func (b *Backupd) refreshDataset(ctx context.Context, logger *logger.Logger, dat
 	return nil
 }
 
-func (b *Backupd) replanDataset(ctx context.Context, dataset model.DatasetName) error {
-	ds := b.state.Deref().GetDataset(dataset)
-	if ds == nil {
-		return fmt.Errorf("dataset '%s' not found", dataset)
-	}
-
-	if ds.Current == nil {
-		return fmt.Errorf("dataset '%s' has no current inventory", dataset)
-	}
-
-	// Generate goal and plan
-	target := model.CalculateTargetInventory(ds.Current, b.config.Local.Policy, b.config.Remote.Policy)
-	plan, err := model.CalculateTransitionPlan(ds.Current, target)
-	if err != nil {
-		return fmt.Errorf("generating plan for '%s': %w", dataset, err)
-	}
-
-	// Update the dataset with goal and plan
-	b.state.Swap(func(state *model.Model) *model.Model {
-		currentDS := state.GetDataset(dataset)
-		if currentDS == nil {
-			return state
-		}
-		updatedDS := currentDS.Clone()
-		updatedDS.Target = target
-		updatedDS.Plan = plan
-		return model.ReplaceDataset(dataset, updatedDS)(state)
-	})
-
-	return nil
-}
-
 // syncDataset executes the plan for the given dataset.
 func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) error {
 	// Mark dataset as syncing
 	b.syncStatus.SetSyncing(dataset, true)
 	defer b.syncStatus.SetSyncing(dataset, false)
 
-	// Get the dataset with its pre-generated plan
 	ds := b.state.Deref().GetDataset(dataset)
 	if ds == nil {
 		return fmt.Errorf("dataset '%s' not found", dataset)
 	}
 
-	if ds.Plan == nil {
-		return fmt.Errorf("no plan available for dataset '%s'", dataset)
-	}
-
-	plan := ds.Plan
-	target := ds.Target
-
-	if err := b.handleIncompleteTransfer(ctx, plan.Logs, dataset); err != nil {
+	// Handle incomplete transfer
+	if err := b.handleIncompleteTransfer(ctx, ds.Logs, dataset); err != nil {
 		return fmt.Errorf("handling incomplete transfer of '%s': %w", dataset, err)
 	}
 
-	if target == nil {
-		return fmt.Errorf("no target state available for dataset '%s'", dataset)
+	// Refresh this specific dataset
+	if err := b.refreshDataset(ctx, ds.Logs, dataset); err != nil {
+		b.globalLogs.Printf("refresh error for '%s': %s", dataset, err)
+		return err
 	}
+
+	// Generate plan
+	target := model.CalculateTargetInventory(ds.Current, b.config.Local.Policy, b.config.Remote.Policy)
+	plan, err := model.CalculateTransitionPlan(ds.Current, target)
+	if err != nil {
+		return fmt.Errorf("generating plan for '%s': %w", dataset, err)
+	}
+
+	// Sync new plan
+	b.state.Swap(func(state *model.Model) *model.Model {
+		state = state.Clone()
+		state.SetPlan(dataset, plan)
+		return state
+	})
 
 	// Validate the plan before execution
 	if err := model.ValidatePlan(ctx, ds.Current, target, plan, false); err != nil {
@@ -552,10 +517,6 @@ resume:
 	}
 
 	logger.Printf("resume complete")
-
-	if err := b.refreshDataset(ctx, logger, dataset); err != nil {
-		return fmt.Errorf("refreshing dataset '%s': %w", dataset, err)
-	}
 
 	return nil
 }

@@ -393,12 +393,12 @@ func index(state *model.Model, globalLogs []logger.LogEntry, syncStatus *sync.St
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					if ds.Plan.Logs != nil && len(ds.Plan.Logs.GetLogs()) > 0 {
+					if ds.Logs != nil && len(ds.Logs.GetLogs()) > 0 {
 						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "<div class=\"plan-logs\"><h3>Plan Setup</h3><ul>")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						for _, log := range ds.Plan.Logs.GetLogs() {
+						for _, log := range ds.Logs.GetLogs() {
 							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "<li><code>")
 							if templ_7745c5c3_Err != nil {
 								return templ_7745c5c3_Err

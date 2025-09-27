@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"monks.co/backupd/logger"
 )
 
 type DatasetName string
@@ -38,6 +40,7 @@ type Dataset struct {
 	Target  *SnapshotInventory // Target snapshot state (from policy)
 	Metrics StorageMetrics     // Physical storage metrics
 	Plan    *Plan              // Plan to get from Current to Target
+	Logs    *logger.Logger
 }
 
 func (dataset *Dataset) Staleness() time.Duration {
@@ -138,7 +141,6 @@ func (dataset *Dataset) Clone() *Dataset {
 		}
 		plan = &Plan{
 			Steps: steps,
-			Logs:  dataset.Plan.Logs, // Share the same plan-level logs
 		}
 	}
 	return &Dataset{
@@ -147,5 +149,6 @@ func (dataset *Dataset) Clone() *Dataset {
 		Target:  dataset.Target.Clone(),
 		Metrics: dataset.Metrics, // Value type, no need to clone
 		Plan:    plan,
+		Logs:    dataset.Logs,
 	}
 }
