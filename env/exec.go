@@ -31,19 +31,19 @@ var Local = &LocalExecutor{}
 
 // Exec runs the given command, returning its stdout and stderr as a combined
 // slice of lines.
-func (*LocalExecutor) Exec(logger logger.Logger, args ...string) ([]string, error) {
+func (*LocalExecutor) Exec(logger *logger.Logger, args ...string) ([]string, error) {
 	return Exec(logger, args...)
 }
 
 // Execf runs the given command, returning its stdout and stderr as a combined
 // slice of lines.
-func (*LocalExecutor) Execf(logger logger.Logger, s string, args ...any) ([]string, error) {
+func (*LocalExecutor) Execf(logger *logger.Logger, s string, args ...any) ([]string, error) {
 	return Execf(logger, s, args...)
 }
 
 // Exec runs the given command, returning its stdout and stderr as a combined
 // slice of lines.
-func Exec(logger logger.Logger, args ...string) ([]string, error) {
+func Exec(logger *logger.Logger, args ...string) ([]string, error) {
 	name, args := args[0], args[1:]
 	var arglog []string
 	for _, arg := range args {
@@ -68,12 +68,12 @@ func Exec(logger logger.Logger, args ...string) ([]string, error) {
 
 // Execf runs the given command, returning its stdout and stderr as a combined
 // slice of lines.
-func Execf(logger logger.Logger, s string, args ...any) ([]string, error) {
+func Execf(logger *logger.Logger, s string, args ...any) ([]string, error) {
 	return Exec(logger, strings.Fields(fmt.Sprintf(s, args...))...)
 }
 
 type outputCollector struct {
-	logger logger.Logger
+	logger *logger.Logger
 	buf    *bytes.Buffer
 }
 
@@ -88,7 +88,7 @@ func (oc *outputCollector) Write(bs []byte) (int, error) {
 // The process can be canceled gracefully using the passed-in context.
 // While the process runs, we log details each minute about the throughput of
 // the pipe.
-func Pipe(ctx context.Context, logger logger.Logger, size int64, from, to *exec.Cmd) error {
+func Pipe(ctx context.Context, logger *logger.Logger, size int64, from, to *exec.Cmd) error {
 	logger.Printf("%s | %s", strings.Join(from.Args, " "), strings.Join(to.Args, " "))
 
 	throughputStat := NewThroughputStat(logger, size)
@@ -204,7 +204,7 @@ func Pipe(ctx context.Context, logger logger.Logger, size int64, from, to *exec.
 // ThroughputStat stores throughput statistics over various intervals.
 type ThroughputStat struct {
 	mu               sync.Mutex
-	logger           logger.Logger
+	logger           *logger.Logger
 	startedAt        time.Time
 	bytesTransferred int64
 	size             int64
@@ -218,7 +218,7 @@ type dataPoint struct {
 }
 
 // NewThroughputStat initializes a new ThroughputStat.
-func NewThroughputStat(logger logger.Logger, size int64) *ThroughputStat {
+func NewThroughputStat(logger *logger.Logger, size int64) *ThroughputStat {
 	return &ThroughputStat{
 		startedAt: time.Now(),
 		logger:    logger,

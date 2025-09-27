@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"monks.co/backupd/progress"
+	"monks.co/backupd/logger"
 )
 
 // StepStatus represents the execution status of a plan step
@@ -25,7 +25,7 @@ type PlanStep struct {
 	Status    StepStatus
 	StartedAt *time.Time
 	StoppedAt *time.Time
-	Logs      *progress.ProcessLogs
+	Logs      *logger.Logger
 }
 
 // Duration returns the duration of the step execution
@@ -52,7 +52,7 @@ func (ps *PlanStep) Apply(inv *SnapshotInventory) (*SnapshotInventory, error) {
 // Plan is a sequence of plan steps with plan-level logging
 type Plan struct {
 	Steps []*PlanStep
-	Logs  *progress.ProcessLogs // Plan-level logs (setup, pre/post operations)
+	Logs  *logger.Logger // Plan-level logs (setup, pre/post operations)
 }
 
 // NewPlanStep creates a new plan step with pending status
@@ -60,7 +60,7 @@ func NewPlanStep(op Operation) *PlanStep {
 	return &PlanStep{
 		Operation: op,
 		Status:    StepPending,
-		Logs:      progress.NewProcessLogs(),
+		Logs:      logger.New(op.String()),
 	}
 }
 
@@ -97,7 +97,7 @@ func PlanFromOperations(ops []Operation) *Plan {
 	}
 	return &Plan{
 		Steps: steps,
-		Logs:  progress.NewProcessLogs(),
+		Logs:  logger.New("plan"),
 	}
 }
 

@@ -17,34 +17,33 @@ import (
 	"monks.co/backupd/env"
 	"monks.co/backupd/logger"
 	"monks.co/backupd/model"
-	"monks.co/backupd/progress"
 	"monks.co/backupd/snitch"
 	"monks.co/backupd/sync"
 )
 
 type Backupd struct {
-	config      *config.Config
-	state       *atom.Atom[*model.Model]
-	globalLogs  *progress.ProcessLogs
-	syncStatus  *sync.Status
-	env         *env.Env
-	addr        string
-	dryrun      bool
-	version     *atom.Atom[int64]
-	versionCh   chan struct{}
+	config     *config.Config
+	state      *atom.Atom[*model.Model]
+	globalLogs *logger.Logger
+	syncStatus *sync.Status
+	env        *env.Env
+	addr       string
+	dryrun     bool
+	version    *atom.Atom[int64]
+	versionCh  chan struct{}
 }
 
 func New(config *config.Config, addr string, dryrun bool) *Backupd {
 	return &Backupd{
-		config:      config,
-		state:       atom.New[*model.Model](nil),
-		globalLogs:  progress.NewProcessLogs(),
-		syncStatus:  sync.New(),
-		env:         env.New(config),
-		addr:        addr,
-		dryrun:      dryrun,
-		version:     atom.New[int64](0),
-		versionCh:   make(chan struct{}, 1),
+		config:     config,
+		state:      atom.New[*model.Model](nil),
+		globalLogs: logger.New("global"),
+		syncStatus: sync.New(),
+		env:        env.New(config),
+		addr:       addr,
+		dryrun:     dryrun,
+		version:    atom.New[int64](0),
+		versionCh:  make(chan struct{}, 1),
 	}
 }
 
@@ -99,20 +98,19 @@ func (b *Backupd) Serve(ctx context.Context) error {
 			return
 		}
 
-		logger := logger.New("snapshot")
 		root := b.config.Local.Root
 
-		if err := b.env.CreateSnapshotRecursively(ctx, logger, root, periodicity); err != nil {
+		if err := b.env.CreateSnapshotRecursively(ctx, b.globalLogs, root, periodicity); err != nil {
 			http.Error(w, fmt.Sprintf("Error creating snapshot: %v", err), http.StatusInternalServerError)
 			return
 		}
 
-		if err := b.RefreshLocalSnapshots(ctx, logger); err != nil {
+		if err := b.RefreshLocalSnapshots(ctx, b.globalLogs); err != nil {
 			http.Error(w, fmt.Sprintf("Error refreshing state: %v", err), http.StatusInternalServerError)
 			return
 		}
 
-		b.globalLogs.Log("Created %s snapshot for root %s", periodicity, root)
+		b.globalLogs.Printf("Created %s snapshot for root %s", periodicity, root)
 		b.notifyStateChange()
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintf(w, "Created %s snapshot for root %s\n", periodicity, root)
@@ -187,7 +185,7 @@ func (b *Backupd) Serve(ctx context.Context) error {
 
 func (b *Backupd) Sync(ctx context.Context) error {
 	for {
-		b.globalLogs.Log("start")
+		b.globalLogs.Printf("start")
 		inAnHour := time.After(time.Hour)
 		allOK := true
 
@@ -202,50 +200,49 @@ func (b *Backupd) Sync(ctx context.Context) error {
 				return err
 			}
 
-			b.globalLogs.Log("processing dataset '%s'", ds)
+			b.globalLogs.Printf("processing dataset '%s'", ds)
 
 			// Refresh this specific dataset
-			logger := logger.New("refresh")
-			if err := b.refreshDataset(ctx, logger, ds); err != nil {
-				b.globalLogs.Log("refresh error for '%s': %s", ds, err)
+			if err := b.refreshDataset(ctx, b.globalLogs, ds); err != nil {
+				b.globalLogs.Printf("refresh error for '%s': %s", ds, err)
 				continue
 			}
 
 			// Replan after refresh
 			if err := b.replanDataset(ctx, ds); err != nil {
-				b.globalLogs.Log("replan error for '%s': %s", ds, err)
+				b.globalLogs.Printf("replan error for '%s': %s", ds, err)
 				continue
 			}
 
 			// Resync with the updated plan
-			b.globalLogs.Log("syncing '%s'", ds)
+			b.globalLogs.Printf("syncing '%s'", ds)
 			if err := b.syncDataset(ctx, ds); err != nil {
 				allOK = false
 				err := fmt.Errorf("syncing '%s': %w", ds, err)
 				// Log to both global and dataset-specific logs
-				b.globalLogs.Log("sync error; skipping dataset: %s", err)
+				b.globalLogs.Printf("sync error; skipping dataset: %s", err)
 				// Also log to dataset-specific location if needed
 			}
 		}
 
-		b.globalLogs.Log("synced all datasets")
+		b.globalLogs.Printf("synced all datasets")
 		if allOK {
 			if b.config.SnitchID != "" {
-				b.globalLogs.Log("alerting deadmanssnitch")
+				b.globalLogs.Printf("alerting deadmanssnitch")
 				if err := snitch.OK(b.config.SnitchID); err != nil {
-					b.globalLogs.Log("snitch error: %v", err)
+					b.globalLogs.Printf("snitch error: %v", err)
 				} else {
-					b.globalLogs.Log("snitched success")
+					b.globalLogs.Printf("snitched success")
 				}
 			}
-			b.globalLogs.Log("waiting to restart")
+			b.globalLogs.Printf("waiting to restart")
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-inAnHour:
 			}
 		} else {
-			b.globalLogs.Log("back to top")
+			b.globalLogs.Printf("back to top")
 		}
 	}
 }
@@ -253,10 +250,8 @@ func (b *Backupd) Sync(ctx context.Context) error {
 func (b *Backupd) refreshAllDatasetsAndPlans(ctx context.Context) error {
 	b.state.Reset(model.New())
 
-	logger := logger.New("refresh-all")
-
 	// First, discover and refresh all datasets
-	localDatasets, err := b.env.Local.GetDatasets(logger)
+	localDatasets, err := b.env.Local.GetDatasets(b.globalLogs)
 	if err != nil {
 		return fmt.Errorf("getting local datasets: %s", err)
 	}
@@ -265,7 +260,7 @@ func (b *Backupd) refreshAllDatasetsAndPlans(ctx context.Context) error {
 			return err
 		}
 
-		snapshots, err := b.env.Local.GetSnapshots(logger, datasetInfo.Name)
+		snapshots, err := b.env.Local.GetSnapshots(b.globalLogs, datasetInfo.Name)
 		if err != nil {
 			return fmt.Errorf("getting snapshots for '%s': %w", datasetInfo.Name, err)
 		}
@@ -273,7 +268,7 @@ func (b *Backupd) refreshAllDatasetsAndPlans(ctx context.Context) error {
 		b.state.Swap(model.AddLocalDataset(datasetInfo.Name, snapshots, datasetInfo.Size))
 	}
 
-	remoteDatasets, err := b.env.Remote.GetDatasets(logger)
+	remoteDatasets, err := b.env.Remote.GetDatasets(b.globalLogs)
 	if err != nil {
 		return fmt.Errorf("getting remote datasets: %w", err)
 	}
@@ -282,7 +277,7 @@ func (b *Backupd) refreshAllDatasetsAndPlans(ctx context.Context) error {
 			return err
 		}
 
-		snapshots, err := b.env.Remote.GetSnapshots(logger, datasetInfo.Name)
+		snapshots, err := b.env.Remote.GetSnapshots(b.globalLogs, datasetInfo.Name)
 		if err != nil {
 			return fmt.Errorf("getting remote snapshots for '%s': %w", datasetInfo.Name, err)
 		}
@@ -317,7 +312,7 @@ func (b *Backupd) generatePlansForAllDatasets(ctx context.Context) {
 		plan, err := model.CalculateTransitionPlan(ds.Current, target)
 		if err != nil {
 			// Log error but continue with other datasets
-			b.globalLogs.Log("error generating plan for '%s': %s", dsName, err)
+			b.globalLogs.Printf("error generating plan for '%s': %s", dsName, err)
 			continue
 		}
 
@@ -335,8 +330,8 @@ func (b *Backupd) generatePlansForAllDatasets(ctx context.Context) {
 	}
 }
 
-func (b *Backupd) refreshDataset(ctx context.Context, logger logger.Logger, dataset model.DatasetName) error {
-	// Refresh local snapshots
+func (b *Backupd) refreshDataset(ctx context.Context, logger *logger.Logger, dataset model.DatasetName) error {
+	// Refresh *local snapshots
 	localSnapshots, err := b.env.Local.GetSnapshots(logger, dataset)
 	if err != nil {
 		return fmt.Errorf("getting local snapshots for '%s': %w", dataset, err)
@@ -404,10 +399,7 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 	plan := ds.Plan
 	target := ds.Target
 
-	// Use the plan's logger for pre-plan operations
-	planLogger := plan.Logs.Logger(dataset.String())
-
-	if err := b.handleIncompleteTransfer(ctx, planLogger, dataset); err != nil {
+	if err := b.handleIncompleteTransfer(ctx, plan.Logs, dataset); err != nil {
 		return fmt.Errorf("handling incomplete transfer of '%s': %w", dataset, err)
 	}
 
@@ -429,7 +421,7 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 		}
 
 		// Get logger from the step's ProcessLogs
-		stepLogger := step.Logs.Logger(dataset.String())
+		stepLogger := step.Logs
 		stepLogger.Printf("Applying op '%s'", step.Operation)
 
 		// Use TryExecute to manage status and timing
@@ -516,6 +508,7 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 			})
 
 		if err != nil {
+			stepLogger.Printf("-- Error: %s", err)
 			// Status is already set to Failed by TryExecute via updateStepStatus
 			return err
 		}
@@ -524,7 +517,7 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 	return nil
 }
 
-func (b *Backupd) handleIncompleteTransfer(ctx context.Context, logger logger.Logger, dataset model.DatasetName) error {
+func (b *Backupd) handleIncompleteTransfer(ctx context.Context, logger *logger.Logger, dataset model.DatasetName) error {
 	ds := b.state.Deref().GetDataset(dataset)
 	if ds == nil || ds.Current == nil || ds.Current.Remote == nil {
 		return nil
@@ -624,7 +617,7 @@ func (b *Backupd) Plan(ctx context.Context, dataset model.DatasetName) error {
 }
 
 // RefreshLocalSnapshots refreshes local snapshot information for all datasets in memory
-func (b *Backupd) RefreshLocalSnapshots(ctx context.Context, logger logger.Logger) error {
+func (b *Backupd) RefreshLocalSnapshots(ctx context.Context, logger *logger.Logger) error {
 	// Directly update state by refreshing snapshots for all datasets
 	// This is concurrency-safe due to the atom's RWMutex
 	b.state.Swap(func(currentState *model.Model) *model.Model {

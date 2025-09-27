@@ -11,7 +11,6 @@ import (
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 
 	"monks.co/backupd/config"
-	"monks.co/backupd/logger"
 	"monks.co/backupd/model"
 )
 
@@ -97,7 +96,7 @@ func run() error {
 		if debugDS == "<root>" {
 			debugDS = ""
 		}
-		logger := logger.New("refresh")
+		logger := b.globalLogs
 		ds := model.DatasetName(debugDS)
 		if err := b.refreshDataset(ctx, logger, ds); err != nil {
 			return err

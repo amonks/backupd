@@ -1,29 +1,45 @@
 package logger
 
 import (
+	"fmt"
 	"io"
 	"log"
+	"time"
 )
 
-type Logger interface {
-	io.Writer
-	Printf(s string, args ...any)
+type Logger struct {
+	label string
+	logs  []LogEntry
 }
 
-type logger struct{ label string }
-
-func New(label string) Logger {
-	return logger{label}
+type LogEntry struct {
+	LogAt time.Time
+	Log   string
 }
 
-func (l logger) Printf(s string, args ...any) {
-	args = append([]any{string(l.label)}, args...)
-	log.Printf("[%s]\t"+s, args...)
+var _ io.Writer = &Logger{}
+
+func New(label string) *Logger {
+	return &Logger{
+		label: label,
+		logs:  []LogEntry{},
+	}
 }
 
-var _ io.Writer = logger{}
+func (p *Logger) Printf(s string, args ...any) {
+	p.Write([]byte(fmt.Sprintf(s, args...)))
+}
 
-func (l logger) Write(bs []byte) (int, error) {
-	log.Println(string(bs))
+func (p *Logger) Write(bs []byte) (int, error) {
+	entry := LogEntry{
+		LogAt: time.Now(),
+		Log:   string(bs),
+	}
+	p.logs = append(p.logs, entry)
+	log.Println(fmt.Sprintf("[%s]\t", p.label) + string(bs))
 	return len(bs), nil
+}
+
+func (p *Logger) GetLogs() []LogEntry {
+	return p.logs
 }

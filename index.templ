@@ -1,14 +1,14 @@
 package main
 
 import (
+	"fmt"
+	"monks.co/backupd/logger"
 	"monks.co/backupd/model"
-	"monks.co/backupd/progress"
 	"monks.co/backupd/sync"
 	"time"
-	"fmt"
 )
 
-templ index(state *model.Model, globalLogs []progress.LogEntry, syncStatus *sync.Status, dataset string, dryrun bool) {
+templ index(state *model.Model, globalLogs []logger.LogEntry, syncStatus *sync.Status, dataset string, dryrun bool) {
 	<!DOCTYPE html>
 	<html>
 		<head>
@@ -279,7 +279,8 @@ templ index(state *model.Model, globalLogs []progress.LogEntry, syncStatus *sync
 								<tr>
 									<td>{ ds.String() }</td>
 									<td>{ state.Datasets[ds].Staleness().Truncate(time.Minute).String() }</td>
-									<td>@renderSyncIndicator(ds, state.Datasets[ds], syncStatus)</td>
+									<td>@renderSyncIndicator(ds, state.Datasets[ds], syncStatus)
+</td>
 									<td><code>{ state.Datasets[ds].Current.LocalString() }</code></td>
 									<td><code>{ state.Datasets[ds].Metrics.LocalUsedString() }</code></td>
 									<td><code>{ state.Datasets[ds].Metrics.LocalLogicalString() }</code></td>
@@ -290,7 +291,6 @@ templ index(state *model.Model, globalLogs []progress.LogEntry, syncStatus *sync
 							}
 						</tbody>
 					</table>
-
 					// Display global logs on the overview page
 					if len(globalLogs) > 0 {
 						<section class="logs">
@@ -337,7 +337,6 @@ templ index(state *model.Model, globalLogs []progress.LogEntry, syncStatus *sync
 									<td>{ ds.Staleness().Truncate(time.Minute).String() }</td>
 								</tr>
 							</table>
-
 							if ds.Plan != nil && len(ds.Plan.Steps) > 0 {
 								<h2>Sync Plan</h2>
 								// Display plan-level logs if any
@@ -407,7 +406,6 @@ templ index(state *model.Model, globalLogs []progress.LogEntry, syncStatus *sync
 									</tbody>
 								</table>
 							}
-
 							<h2>Snapshots</h2>
 							<table class="snapshot-table">
 								<thead>
@@ -425,14 +423,13 @@ templ index(state *model.Model, globalLogs []progress.LogEntry, syncStatus *sync
 								</tbody>
 							</table>
 						</div>
-
 						// Logs are now displayed inline with the plan and steps
 					} else {
 						<p>Dataset not found.</p>
 					}
 				}
 			</div>
-		<script>
+			<script>
 			// Table sorting functionality
 			function makeSortable(table) {
 				const headers = table.querySelectorAll('th.sortable');
@@ -648,14 +645,14 @@ templ renderDatasetSize(dataset *model.Dataset) {
 
 templ renderStepStatus(status model.StepStatus) {
 	switch status {
-	case model.StepPending:
-		<span class="step-status pending" title="Pending"></span>
-	case model.StepInProgress:
-		<span class="step-status in-progress" title="In Progress"></span>
-	case model.StepCompleted:
-		<span class="step-status completed" title="Completed"></span>
-	case model.StepFailed:
-		<span class="step-status failed" title="Failed"></span>
+		case model.StepPending:
+			<span class="step-status pending" title="Pending"></span>
+		case model.StepInProgress:
+			<span class="step-status in-progress" title="In Progress"></span>
+		case model.StepCompleted:
+			<span class="step-status completed" title="Completed"></span>
+		case model.StepFailed:
+			<span class="step-status failed" title="Failed"></span>
 	}
 }
 

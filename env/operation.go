@@ -8,7 +8,7 @@ import (
 	"monks.co/backupd/model"
 )
 
-func (env *Env) Apply(ctx context.Context, logger logger.Logger, op model.Operation) error {
+func (env *Env) Apply(ctx context.Context, logger *logger.Logger, op model.Operation) error {
 	// Unwrap PlanStep if necessary
 	if step, ok := op.(*model.PlanStep); ok {
 		op = step.Operation

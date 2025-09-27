@@ -27,7 +27,7 @@ func New(config *config.Config) *Env {
 	}
 }
 
-func (env *Env) Resume(ctx context.Context, logger logger.Logger, dataset model.DatasetName, token string) error {
+func (env *Env) Resume(ctx context.Context, logger *logger.Logger, dataset model.DatasetName, token string) error {
 	if env.Local.readOnly || env.Remote.readOnly {
 		panic("read only")
 	}
@@ -49,7 +49,7 @@ func (env *Env) Resume(ctx context.Context, logger logger.Logger, dataset model.
 	return nil
 }
 
-func (env *Env) TransferInitialSnapshot(ctx context.Context, logger logger.Logger, dataset model.DatasetName, snapshot string) error {
+func (env *Env) TransferInitialSnapshot(ctx context.Context, logger *logger.Logger, dataset model.DatasetName, snapshot string) error {
 	if env.Local.readOnly || env.Remote.readOnly {
 		panic("read only")
 	}
@@ -72,7 +72,7 @@ func (env *Env) TransferInitialSnapshot(ctx context.Context, logger logger.Logge
 	return nil
 }
 
-func (env *Env) TransferSnapshot(ctx context.Context, logger logger.Logger, dataset model.DatasetName, snapshot string) error {
+func (env *Env) TransferSnapshot(ctx context.Context, logger *logger.Logger, dataset model.DatasetName, snapshot string) error {
 	if env.Local.readOnly || env.Remote.readOnly {
 		panic("read only")
 	}
@@ -95,7 +95,7 @@ func (env *Env) TransferSnapshot(ctx context.Context, logger logger.Logger, data
 	return nil
 }
 
-func (env *Env) TransferSnapshotIncrementally(ctx context.Context, logger logger.Logger, dataset model.DatasetName, from, to string) error {
+func (env *Env) TransferSnapshotIncrementally(ctx context.Context, logger *logger.Logger, dataset model.DatasetName, from, to string) error {
 	if env.Local.readOnly || env.Remote.readOnly {
 		panic("read only")
 	}
@@ -120,7 +120,7 @@ func (env *Env) TransferSnapshotIncrementally(ctx context.Context, logger logger
 }
 
 // CreateSnapshotRecursively creates a recursive snapshot for the configured root
-func (env *Env) CreateSnapshotRecursively(ctx context.Context, logger logger.Logger, root string, periodicity string) error {
+func (env *Env) CreateSnapshotRecursively(ctx context.Context, logger *logger.Logger, root string, periodicity string) error {
 	if err := env.Local.CreateSnapshot(logger, root, periodicity); err != nil {
 		return fmt.Errorf("creating snapshot: %w", err)
 	}

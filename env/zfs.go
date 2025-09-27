@@ -14,8 +14,8 @@ import (
 const readOnly = false
 
 type Executor interface {
-	Exec(logger logger.Logger, cmd ...string) ([]string, error)
-	Execf(logger logger.Logger, cmd string, args ...any) ([]string, error)
+	Exec(logger *logger.Logger, cmd ...string) ([]string, error)
+	Execf(logger *logger.Logger, cmd string, args ...any) ([]string, error)
 }
 
 type ZFS struct {
@@ -36,7 +36,7 @@ func (zfs *ZFS) WithoutPrefix(path string) model.DatasetName {
 	return model.DatasetName(strings.TrimPrefix(path, zfs.prefix))
 }
 
-func (zfs *ZFS) GetResumeToken(logger logger.Logger, dataset model.DatasetName) (string, error) {
+func (zfs *ZFS) GetResumeToken(logger *logger.Logger, dataset model.DatasetName) (string, error) {
 	out, err := zfs.x.Execf(logger, "zfs list -H -o receive_resume_token -S name -d 0 %s", zfs.WithPrefix(dataset))
 	if err != nil {
 		return "", fmt.Errorf("zfs list: %w\n%s", err, strings.Join(out, "\n"))
@@ -50,7 +50,7 @@ func (zfs *ZFS) GetResumeToken(logger logger.Logger, dataset model.DatasetName) 
 	return value, nil
 }
 
-func (zfs *ZFS) Size(logger logger.Logger, cmd *exec.Cmd) (int64, error) {
+func (zfs *ZFS) Size(logger *logger.Logger, cmd *exec.Cmd) (int64, error) {
 	if cmd.Args[0] != "zfs" || cmd.Args[1] != "send" {
 		return 0, fmt.Errorf("must be a zfs send command")
 	}
@@ -70,7 +70,7 @@ func (zfs *ZFS) Size(logger logger.Logger, cmd *exec.Cmd) (int64, error) {
 	return size, nil
 }
 
-func (zfs *ZFS) AbortResumable(logger logger.Logger, dataset model.DatasetName) error {
+func (zfs *ZFS) AbortResumable(logger *logger.Logger, dataset model.DatasetName) error {
 	if zfs.readOnly {
 		panic("read only")
 	}
@@ -87,7 +87,7 @@ type DatasetInfo struct {
 	Size *model.DatasetSize
 }
 
-func (zfs *ZFS) GetDatasets(logger logger.Logger) ([]DatasetInfo, error) {
+func (zfs *ZFS) GetDatasets(logger *logger.Logger) ([]DatasetInfo, error) {
 	// Use used for total on-disk size with children including all snapshots
 	// and logicalreferenced for logical size of most recent snapshot (w/o children)
 	rows, err := zfs.x.Execf(logger, "zfs list -H -p -t filesystem -o name,used,logicalreferenced -d 1000 %s", zfs.prefix)
@@ -123,7 +123,7 @@ func (zfs *ZFS) GetDatasets(logger logger.Logger) ([]DatasetInfo, error) {
 	return out, nil
 }
 
-func (zfs *ZFS) CreateDataset(logger logger.Logger, dataset model.DatasetName) error {
+func (zfs *ZFS) CreateDataset(logger *logger.Logger, dataset model.DatasetName) error {
 	if zfs.readOnly {
 		panic("read only")
 	}
@@ -133,7 +133,7 @@ func (zfs *ZFS) CreateDataset(logger logger.Logger, dataset model.DatasetName) e
 	return nil
 }
 
-func (zfs *ZFS) CreateSnapshot(logger logger.Logger, pool string, periodicity string) error {
+func (zfs *ZFS) CreateSnapshot(logger *logger.Logger, pool string, periodicity string) error {
 	if zfs.readOnly {
 		panic("read only")
 	}
@@ -149,7 +149,7 @@ func (zfs *ZFS) CreateSnapshot(logger logger.Logger, pool string, periodicity st
 	return nil
 }
 
-func (zfs *ZFS) GetLatestSnapshot(logger logger.Logger, dataset model.DatasetName) (*model.Snapshot, error) {
+func (zfs *ZFS) GetLatestSnapshot(logger *logger.Logger, dataset model.DatasetName) (*model.Snapshot, error) {
 	snaps, err := zfs.GetSnapshots(logger, dataset)
 	if err != nil {
 		return nil, err
@@ -157,7 +157,7 @@ func (zfs *ZFS) GetLatestSnapshot(logger logger.Logger, dataset model.DatasetNam
 	return snaps[len(snaps)-1], nil
 }
 
-func (zfs *ZFS) DestroySnapshot(logger logger.Logger, dataset model.DatasetName, snapshot string) error {
+func (zfs *ZFS) DestroySnapshot(logger *logger.Logger, dataset model.DatasetName, snapshot string) error {
 	if zfs.readOnly {
 		panic("read only")
 	}
@@ -167,7 +167,7 @@ func (zfs *ZFS) DestroySnapshot(logger logger.Logger, dataset model.DatasetName,
 	return nil
 }
 
-func (zfs *ZFS) DestroySnapshotRange(logger logger.Logger, dataset model.DatasetName, first, last string) error {
+func (zfs *ZFS) DestroySnapshotRange(logger *logger.Logger, dataset model.DatasetName, first, last string) error {
 	if zfs.readOnly {
 		panic("read only")
 	}
@@ -177,7 +177,7 @@ func (zfs *ZFS) DestroySnapshotRange(logger logger.Logger, dataset model.Dataset
 	return nil
 }
 
-func (zfs *ZFS) GetSnapshots(logger logger.Logger, dataset model.DatasetName) ([]*model.Snapshot, error) {
+func (zfs *ZFS) GetSnapshots(logger *logger.Logger, dataset model.DatasetName) ([]*model.Snapshot, error) {
 	rows, err := zfs.x.Execf(logger, "zfs list -H -p -t snapshot -o name,creation,logicalreferenced -s creation -d 1 %s", zfs.WithPrefix(dataset))
 	if err != nil {
 		return nil, fmt.Errorf("zfs list: %w", err)
