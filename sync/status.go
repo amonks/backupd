@@ -1,6 +1,8 @@
 package sync
 
 import (
+	"maps"
+
 	"monks.co/backupd/atom"
 	"monks.co/backupd/model"
 )
@@ -21,9 +23,7 @@ func New() *Status {
 func (s *Status) SetSyncing(dataset model.DatasetName, syncing bool) {
 	s.Swap(func(old map[model.DatasetName]bool) map[model.DatasetName]bool {
 		out := make(map[model.DatasetName]bool, len(old))
-		for k, v := range old {
-			out[k] = v
-		}
+		maps.Copy(out, old)
 		if syncing {
 			out[dataset] = true
 		} else {

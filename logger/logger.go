@@ -27,7 +27,7 @@ func New(label string) *Logger {
 }
 
 func (p *Logger) Printf(s string, args ...any) {
-	p.Write([]byte(fmt.Sprintf(s, args...)))
+	p.Write(fmt.Appendf(nil, s, args...))
 }
 
 func (p *Logger) Write(bs []byte) (int, error) {

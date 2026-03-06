@@ -1,46 +1,46 @@
 [[task]]
-  id = "dev"
-  type = "long"
-  dependencies = ["templ"]
-
-[[task]]
-  id = "dryrun"
-  type = "long"
-  dependencies = ["templ"]
-  watch = ["**/*.go", "*.go"]
-  cmd = "sudo go run . -dryrun -addr=0.0.0.0:8887"
-
-[[task]]
   id = "templ"
   type = "short"
   watch = ["*.templ"]
-  cmd = "go run github.com/a-h/templ/cmd/templ generate ."
+  cmd = "go tool templ generate ."
 
 [[task]]
-  id = "test"
-  type = "short"
-  dependencies = ["vulncheck", "staticcheck", "go-test", "vet"]
+  id = 'test'
+  type = 'short'
+  dependencies = [
+    'go-test',
+    'go-vet',
+    'gofix',
+    'staticcheck',
+    'govulncheck',
+  ]
 
 [[task]]
-  id = "vulncheck"
-  type = "short"
-  dependencies = ["templ"]
-  cmd = "go run golang.org/x/vuln/cmd/govulncheck ./..."
+  id = 'go-test'
+  type = 'short'
+  dependencies = ['templ']
+  cmd = 'go test ./...'
 
 [[task]]
-  id = "staticcheck"
-  type = "short"
-  dependencies = ["templ"]
-  cmd = "go run honnef.co/go/tools/cmd/staticcheck ./..."
+  id = 'go-vet'
+  type = 'short'
+  dependencies = ['templ']
+  cmd = 'go vet ./...'
 
 [[task]]
-  id = "vet"
-  type = "short"
-  dependencies = ["templ"]
-  cmd = "go vet ./..."
+  id = 'gofix'
+  type = 'short'
+  dependencies = ['templ']
+  cmd = 'test -z "$(go fix -diff ./...)"'
 
 [[task]]
-  id = "go-test"
-  type = "short"
-  dependencies = ["templ"]
-  cmd = "go test ./..."
+  id = 'staticcheck'
+  type = 'short'
+  dependencies = ['templ']
+  cmd = 'go tool staticcheck ./...'
+
+[[task]]
+  id = 'govulncheck'
+  type = 'short'
+  dependencies = ['templ']
+  cmd = 'go tool govulncheck ./...'
