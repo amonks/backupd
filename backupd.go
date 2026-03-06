@@ -329,7 +329,11 @@ func (b *Backupd) refreshDataset(ctx context.Context, logger *logger.Logger, dat
 	// Refresh remote snapshots
 	remoteSnapshots, err := b.env.Remote.GetSnapshots(logger, dataset)
 	if err != nil {
-		return fmt.Errorf("getting remote snapshots for '%s': %w", dataset, err)
+		if strings.Contains(err.Error(), "dataset does not exist") {
+			remoteSnapshots = nil
+		} else {
+			return fmt.Errorf("getting remote snapshots for '%s': %w", dataset, err)
+		}
 	}
 	b.state.Swap(model.AddRemoteDataset(dataset, remoteSnapshots, nil))
 
