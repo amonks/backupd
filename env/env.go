@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"path"
 
 	"monks.co/backupd/config"
 	"monks.co/backupd/logger"
@@ -54,6 +55,15 @@ func (env *Env) TransferInitialSnapshot(ctx context.Context, logger *logger.Logg
 		panic("read only")
 	}
 	remote := env.Remote.x.(*Remote)
+
+	// Ensure parent dataset exists on the remote so zfs receive can create
+	// the leaf dataset. Without this, receives into nested paths like
+	// /home/thor fail because the intermediate /home dataset doesn't exist.
+	if parent := path.Dir(dataset.Path()); parent != "." && parent != "/" {
+		if err := env.Remote.CreateDataset(logger, model.DatasetName(parent)); err != nil {
+			return fmt.Errorf("creating parent dataset '%s' on remote: %w", parent, err)
+		}
+	}
 
 	send := exec.Command("zfs", "send", "--raw",
 		fmt.Sprintf("%s@%s", env.Local.WithPrefix(dataset), snapshot))
