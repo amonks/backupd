@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -39,13 +40,12 @@ type Override struct {
 	} `toml:"remote"`
 }
 
-// PolicyFor resolves the retention policies and baseline behavior for a
-// dataset, named relative to the root with a leading slash ("" is the root
-// itself). The longest-prefix-matching override wins; overrides do not
-// inherit from each other.
-func (c *Config) PolicyFor(dataset string) (local, remote map[string]int, keepBaseline bool) {
-	local, remote, keepBaseline = c.Local.Policy, c.Remote.Policy, true
-
+// OverrideFor returns the override that applies to a dataset (named
+// relative to the root with a leading slash; "" is the root itself) along
+// with its normalized key, or ("", nil) if none matches. The
+// longest-prefix-matching override wins; overrides do not inherit from
+// each other.
+func (c *Config) OverrideFor(dataset string) (string, *Override) {
 	var bestKey string
 	var best *Override
 	for key, override := range c.Overrides {
@@ -57,6 +57,15 @@ func (c *Config) PolicyFor(dataset string) (local, remote map[string]int, keepBa
 			bestKey, best = key, override
 		}
 	}
+	return bestKey, best
+}
+
+// PolicyFor resolves the retention policies and baseline behavior for a
+// dataset via OverrideFor, falling back to the global policies.
+func (c *Config) PolicyFor(dataset string) (local, remote map[string]int, keepBaseline bool) {
+	local, remote, keepBaseline = c.Local.Policy, c.Remote.Policy, true
+
+	_, best := c.OverrideFor(dataset)
 	if best == nil {
 		return local, remote, keepBaseline
 	}
@@ -71,6 +80,44 @@ func (c *Config) PolicyFor(dataset string) (local, remote map[string]int, keepBa
 		keepBaseline = *best.KeepBaseline
 	}
 	return local, remote, keepBaseline
+}
+
+// RetentionDescription returns a human-readable summary of the retention
+// configuration that applies to a dataset, for display in the UI:
+// "default", or e.g. "override /tm: local {daily=1}, remote {daily=1}, no
+// baseline".
+func (c *Config) RetentionDescription(dataset string) string {
+	key, o := c.OverrideFor(dataset)
+	if o == nil {
+		return "default"
+	}
+	var parts []string
+	if o.Local.Policy != nil {
+		parts = append(parts, "local "+formatPolicy(o.Local.Policy))
+	}
+	if o.Remote.Policy != nil {
+		parts = append(parts, "remote "+formatPolicy(o.Remote.Policy))
+	}
+	if o.KeepBaseline != nil && !*o.KeepBaseline {
+		parts = append(parts, "no baseline")
+	}
+	if len(parts) == 0 {
+		return fmt.Sprintf("override %s", key)
+	}
+	return fmt.Sprintf("override %s: %s", key, strings.Join(parts, ", "))
+}
+
+func formatPolicy(policy map[string]int) string {
+	keys := make([]string, 0, len(policy))
+	for k := range policy {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	pairs := make([]string, len(keys))
+	for i, k := range keys {
+		pairs[i] = fmt.Sprintf("%s=%d", k, policy[k])
+	}
+	return "{" + strings.Join(pairs, " ") + "}"
 }
 
 func normalizeOverrideKey(key string) string {

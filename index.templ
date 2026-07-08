@@ -2,13 +2,14 @@ package main
 
 import (
 	"fmt"
+	"monks.co/backupd/config"
 	"monks.co/backupd/logger"
 	"monks.co/backupd/model"
 	"monks.co/backupd/sync"
 	"time"
 )
 
-templ index(state *model.Model, globalLogs []logger.LogEntry, syncStatus *sync.Status, dataset string, dryrun bool) {
+templ index(state *model.Model, globalLogs []logger.LogEntry, syncStatus *sync.Status, dataset string, dryrun bool, conf *config.Config) {
 	<!DOCTYPE html>
 	<html>
 		<head>
@@ -239,6 +240,13 @@ templ index(state *model.Model, globalLogs []logger.LogEntry, syncStatus *sync.S
 				.snapshot-absent {
 					color: #f44336;
 				}
+				.snapshot-doomed {
+					color: #ff9800;
+				}
+				.retention-override {
+					color: #ff9800;
+					font-weight: 500;
+				}
 			</style>
 		</head>
 		<body class={ templ.KV("dryrun-active", dryrun) }>
@@ -265,6 +273,7 @@ templ index(state *model.Model, globalLogs []logger.LogEntry, syncStatus *sync.S
 							<tr>
 								<th class="sortable">dataset</th>
 								<th class="sortable">staleness</th>
+								<th>retention</th>
 								<th>sync status</th>
 								<th>local</th>
 								<th class="sortable">local disk</th>
@@ -279,6 +288,9 @@ templ index(state *model.Model, globalLogs []logger.LogEntry, syncStatus *sync.S
 								<tr>
 									<td>{ ds.String() }</td>
 									<td>{ state.Datasets[ds].Staleness().Truncate(time.Minute).String() }</td>
+									<td>
+										@renderRetention(conf, ds.Path())
+									</td>
 									<td>@renderSyncIndicator(ds, state.Datasets[ds], syncStatus)
 </td>
 									<td><code>{ state.Datasets[ds].Current.LocalString() }</code></td>
@@ -335,6 +347,12 @@ templ index(state *model.Model, globalLogs []logger.LogEntry, syncStatus *sync.S
 								<tr>
 									<th>Staleness</th>
 									<td>{ ds.Staleness().Truncate(time.Minute).String() }</td>
+								</tr>
+								<tr>
+									<th>Retention</th>
+									<td>
+										@renderRetention(conf, dataset)
+									</td>
 								</tr>
 							</table>
 							if ds.Plan != nil && len(ds.Plan.Steps) > 0 {
@@ -658,63 +676,44 @@ templ renderStepStatus(status model.StepStatus) {
 
 templ snapshotRows(ds *model.Dataset) {
 	// Create a union of snapshots
-	if ds.Current != nil && ds.Current.Local != nil && ds.Current.Remote != nil {
+	if ds.Current != nil {
 		for snap := range ds.Current.Local.Union(ds.Current.Remote).AllDesc() {
 			<tr>
 				<td>{ snap.Name }</td>
 				<td>{ snap.Time().Format(time.DateTime) }</td>
 				<td>
-					if ds.Current.Local.Has(snap) {
-						<span class="snapshot-present">✓</span>
-					} else if ds.Target != nil && ds.Target.Local != nil && ds.Target.Local.Has(snap) {
-						<span class="snapshot-absent">✗</span>
-					} else {
-						<span>-</span>
-					}
+					@snapshotPresence(ds.Current.Local.Has(snap), targetHas(ds.Target, model.Local, snap), ds.Target != nil)
 				</td>
 				<td>
-					if ds.Current.Remote.Has(snap) {
-						<span class="snapshot-present">✓</span>
-					} else if ds.Target != nil && ds.Target.Remote != nil && ds.Target.Remote.Has(snap) {
-						<span class="snapshot-absent">✗</span>
-					} else {
-						<span>-</span>
-					}
+					@snapshotPresence(ds.Current.Remote.Has(snap), targetHas(ds.Target, model.Remote, snap), ds.Target != nil)
 				</td>
 				<td><code>{ snap.SizeString() }</code></td>
 			</tr>
 		}
-	} else if ds.Current != nil && ds.Current.Local != nil {
-		for snap := range ds.Current.Local.AllDesc() {
-			<tr>
-				<td>{ snap.Name }</td>
-				<td>{ snap.Time().Format(time.DateTime) }</td>
-				<td><span class="snapshot-present">✓</span></td>
-				<td>
-					if ds.Target != nil && ds.Target.Remote != nil && ds.Target.Remote.Has(snap) {
-						<span class="snapshot-absent">✗</span>
-					} else {
-						<span>-</span>
-					}
-				</td>
-				<td><code>{ snap.SizeString() }</code></td>
-			</tr>
+	}
+}
+
+// snapshotPresence renders one location cell: present (✓), present but
+// scheduled for deletion (orange ✓), missing but scheduled for transfer
+// (✗), or not wanted (-).
+templ snapshotPresence(current bool, inTarget bool, hasTarget bool) {
+	if current {
+		if hasTarget && !inTarget {
+			<span class="snapshot-doomed" title="Present; scheduled for deletion">✓</span>
+		} else {
+			<span class="snapshot-present">✓</span>
 		}
-	} else if ds.Current != nil && ds.Current.Remote != nil {
-		for snap := range ds.Current.Remote.AllDesc() {
-			<tr>
-				<td>{ snap.Name }</td>
-				<td>{ snap.Time().Format(time.DateTime) }</td>
-				<td>
-					if ds.Target != nil && ds.Target.Local != nil && ds.Target.Local.Has(snap) {
-						<span class="snapshot-absent">✗</span>
-					} else {
-						<span>-</span>
-					}
-				</td>
-				<td><span class="snapshot-present">✓</span></td>
-				<td><code>{ snap.SizeString() }</code></td>
-			</tr>
-		}
+	} else if inTarget {
+		<span class="snapshot-absent" title="Missing; scheduled for transfer">✗</span>
+	} else {
+		<span>-</span>
+	}
+}
+
+templ renderRetention(conf *config.Config, dataset string) {
+	if _, override := conf.OverrideFor(dataset); override != nil {
+		<code class="retention-override">{ conf.RetentionDescription(dataset) }</code>
+	} else {
+		<code>default</code>
 	}
 }

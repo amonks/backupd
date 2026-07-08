@@ -122,6 +122,38 @@ func TestPolicyFor_LongestPrefixWins(t *testing.T) {
 	}
 }
 
+func TestOverrideFor(t *testing.T) {
+	conf := loadTestConfig(t)
+
+	if key, o := conf.OverrideFor("/movies"); o != nil {
+		t.Errorf("expected no override for /movies, got %q", key)
+	}
+	if key, o := conf.OverrideFor("/tm/brigid"); o == nil || key != "/tm" {
+		t.Errorf("expected /tm override for /tm/brigid, got %q %v", key, o)
+	}
+	if key, o := conf.OverrideFor("/tm/lugh"); o == nil || key != "/tm/lugh" {
+		t.Errorf("expected /tm/lugh override (longest prefix), got %q %v", key, o)
+	}
+}
+
+func TestRetentionDescription(t *testing.T) {
+	conf := loadTestConfig(t)
+
+	if got := conf.RetentionDescription("/movies"); got != "default" {
+		t.Errorf("expected 'default', got %q", got)
+	}
+
+	want := "override /tm: local {daily=1}, remote {daily=2}, no baseline"
+	if got := conf.RetentionDescription("/tm/brigid"); got != want {
+		t.Errorf("expected %q, got %q", want, got)
+	}
+
+	want = "override /tm/lugh: local {daily=3}"
+	if got := conf.RetentionDescription("/tm/lugh"); got != want {
+		t.Errorf("expected %q, got %q", want, got)
+	}
+}
+
 func TestPolicyFor_KeyNormalization(t *testing.T) {
 	conf := loadTestConfig(t)
 

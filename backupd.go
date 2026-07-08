@@ -47,6 +47,21 @@ func New(config *config.Config, addr string, dryrun bool) *Backupd {
 	}
 }
 
+// targetHas reports whether a snapshot is part of the target inventory at
+// a location, tolerating a nil target (no plan generated yet).
+func targetHas(target *model.SnapshotInventory, loc model.Location, snap *model.Snapshot) bool {
+	if target == nil {
+		return false
+	}
+	switch loc {
+	case model.Local:
+		return target.Local.Has(snap)
+	case model.Remote:
+		return target.Remote.Has(snap)
+	}
+	return false
+}
+
 func (b *Backupd) notifyStateChange() {
 	b.version.Swap(func(v int64) int64 { return v + 1 })
 	select {
@@ -159,7 +174,7 @@ func (b *Backupd) Serve(ctx context.Context) error {
 
 		// Handle special cases first
 		if trimmedPath == "global" {
-			templ.Handler(index(state, globalLogs, syncStatus, "global", b.dryrun)).ServeHTTP(w, req)
+			templ.Handler(index(state, globalLogs, syncStatus, "global", b.dryrun, b.config)).ServeHTTP(w, req)
 			return
 		} else if trimmedPath == "root" {
 			// The empty string is used as the dataset name for the root dataset
@@ -169,7 +184,7 @@ func (b *Backupd) Serve(ctx context.Context) error {
 				http.Error(w, "Root dataset not found", http.StatusNotFound)
 				return
 			}
-			templ.Handler(index(state, globalLogs, syncStatus, "", b.dryrun)).ServeHTTP(w, req)
+			templ.Handler(index(state, globalLogs, syncStatus, "", b.dryrun, b.config)).ServeHTTP(w, req)
 			return
 		}
 
@@ -177,7 +192,7 @@ func (b *Backupd) Serve(ctx context.Context) error {
 		// Add leading slash for the dataset model
 		datasetForModel := "/" + trimmedPath
 
-		templ.Handler(index(state, globalLogs, syncStatus, datasetForModel, b.dryrun)).ServeHTTP(w, req)
+		templ.Handler(index(state, globalLogs, syncStatus, datasetForModel, b.dryrun, b.config)).ServeHTTP(w, req)
 	})
 
 	return listenAndServe(ctx, b.addr, mux)
