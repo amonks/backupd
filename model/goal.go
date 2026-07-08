@@ -2,7 +2,7 @@ package model
 
 import "log"
 
-func CalculateTargetInventory(current *SnapshotInventory, localPolicy, remotePolicy map[string]int) *SnapshotInventory {
+func CalculateTargetInventory(current *SnapshotInventory, localPolicy, remotePolicy map[string]int, keepBaseline bool) *SnapshotInventory {
 	localSnapshots := current.Local
 	remoteSnapshots := current.Remote
 
@@ -49,21 +49,24 @@ func CalculateTargetInventory(current *SnapshotInventory, localPolicy, remotePol
 		goal.Remote.Add(snap)
 	}
 
-	// Keep the oldest snapshot we have
-	if snap := localSnapshots.Oldest(); snap != nil {
-		goal.Local.Add(snap)
-	}
-	if snap := remoteSnapshots.Oldest(); snap != nil {
-		goal.Remote.Add(snap)
+	if keepBaseline {
+		// Keep the oldest snapshot we have
+		if snap := localSnapshots.Oldest(); snap != nil {
+			goal.Local.Add(snap)
+		}
+		if snap := remoteSnapshots.Oldest(); snap != nil {
+			goal.Remote.Add(snap)
+		}
+
+		// Keep the earliest shared snapshot
+		if snap := sharedSnapshots.Oldest(); snap != nil {
+			goal.Local.Add(snap)
+			goal.Remote.Add(snap)
+		}
 	}
 
-	// Keep the earliest shared snapshot
-	if snap := sharedSnapshots.Oldest(); snap != nil {
-		goal.Local.Add(snap)
-		goal.Remote.Add(snap)
-	}
-
-	// Keep the latest shared snapshot
+	// Keep the latest shared snapshot: it is the base for incremental
+	// transfers, so it survives even with keepBaseline=false
 	if snap := sharedSnapshots.Newest(); snap != nil {
 		goal.Local.Add(snap)
 		goal.Remote.Add(snap)

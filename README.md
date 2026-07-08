@@ -30,11 +30,14 @@ Key features:
 
 2. **Snapshot Retention Management:**
    - Applies per-type retention policies (e.g., keep 24 hourly, 7 daily)
+   - Supports per-dataset-subtree policy overrides (longest prefix wins)
    - Processes snapshots by creation time, keeping newest first
    - Preserves critical snapshots:
-     - Oldest snapshot at each location (historical baseline)
-     - Earliest shared snapshot (incremental transfer base)
-     - Latest shared snapshot (synchronization point)
+     - Oldest snapshot at each location (historical baseline; can be
+       disabled per subtree with `keep_baseline = false`)
+     - Earliest shared snapshot (incremental transfer base; also governed
+       by `keep_baseline`)
+     - Latest shared snapshot (synchronization point; always preserved)
    - Deletes non-policy snapshots unless they're critical
 
 3. **Intelligent Transfer Planning:**
@@ -127,6 +130,25 @@ daily = 7        # Keep 7 most recent daily snapshots
 weekly = 4       # Keep 4 most recent weekly snapshots
 monthly = 6      # Keep 6 most recent monthly snapshots
 yearly = 2       # Keep 2 most recent yearly snapshots
+
+# Optional: per-dataset overrides. Keys are dataset paths relative to the
+# root (leading slash optional) and match the whole subtree; the longest
+# matching prefix wins, and overrides do not inherit from each other. A
+# policy given here replaces the global policy for that side wholesale;
+# an omitted side falls back to the global policy.
+#
+# keep_baseline = false disables the oldest/earliest-shared snapshot
+# preservation for the subtree, leaving only policy matches and the latest
+# shared snapshot (the incremental sync point). With a policy like
+# {daily = 1}, this yields "keep the latest backed up, but no history":
+# each day's snapshot transfers, becomes the new sync point, and its
+# predecessor is deleted from both locations on the next cycle.
+[overrides."/scratch"]
+keep_baseline = false
+[overrides."/scratch".local.policy]
+daily = 1
+[overrides."/scratch".remote.policy]
+daily = 1
 ```
 
 ### Example Configurations

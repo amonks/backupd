@@ -296,7 +296,8 @@ func (b *Backupd) generatePlansForAllDatasets(ctx context.Context) {
 		if ds.Current == nil {
 			continue
 		}
-		target := model.CalculateTargetInventory(ds.Current, b.config.Local.Policy, b.config.Remote.Policy)
+		localPolicy, remotePolicy, keepBaseline := b.config.PolicyFor(dsName.Path())
+		target := model.CalculateTargetInventory(ds.Current, localPolicy, remotePolicy, keepBaseline)
 		plan, err := model.CalculateTransitionPlan(ds.Current, target)
 		if err != nil {
 			// Log error but continue with other datasets
@@ -363,7 +364,8 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 	}
 
 	// Generate plan
-	target := model.CalculateTargetInventory(ds.Current, b.config.Local.Policy, b.config.Remote.Policy)
+	localPolicy, remotePolicy, keepBaseline := b.config.PolicyFor(dataset.Path())
+	target := model.CalculateTargetInventory(ds.Current, localPolicy, remotePolicy, keepBaseline)
 	plan, err := model.CalculateTransitionPlan(ds.Current, target)
 	if err != nil {
 		return fmt.Errorf("generating plan for '%s': %w", dataset, err)
@@ -555,7 +557,8 @@ func (b *Backupd) Plan(ctx context.Context, dataset model.DatasetName) error {
 		return fmt.Errorf("dataset '%s' has no current inventory", dataset)
 	}
 
-	target := model.CalculateTargetInventory(ds.Current, b.config.Local.Policy, b.config.Remote.Policy)
+	localPolicy, remotePolicy, keepBaseline := b.config.PolicyFor(dataset.Path())
+	target := model.CalculateTargetInventory(ds.Current, localPolicy, remotePolicy, keepBaseline)
 
 	// Store the target in the dataset for display purposes
 	updatedDS := ds.Clone()
