@@ -9,6 +9,19 @@ type Operation interface {
 	Apply(*SnapshotInventory) (*SnapshotInventory, error)
 }
 
+// IsTransfer reports whether an operation sends data to the remote, as
+// opposed to deleting snapshots.
+func IsTransfer(op Operation) bool {
+	if step, ok := op.(*PlanStep); ok {
+		op = step.Operation
+	}
+	switch op.(type) {
+	case *InitialSnapshotTransfer, *SnapshotTransfer, *SnapshotRangeTransfer:
+		return true
+	}
+	return false
+}
+
 var _ Operation = &SnapshotRangeDeletion{}
 
 type SnapshotRangeDeletion struct {

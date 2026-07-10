@@ -31,10 +31,13 @@ type Backupd struct {
 	dryrun     bool
 	version    *atom.Atom[int64]
 	versionCh  chan struct{}
+
+	// resume is env.Resume, injectable for tests.
+	resume func(context.Context, *logger.Logger, model.DatasetName, string) error
 }
 
 func New(config *config.Config, addr string, dryrun bool) *Backupd {
-	return &Backupd{
+	b := &Backupd{
 		config:     config,
 		state:      atom.New[*model.Model](nil),
 		globalLogs: logger.New("global"),
@@ -45,6 +48,8 @@ func New(config *config.Config, addr string, dryrun bool) *Backupd {
 		version:    atom.New[int64](0),
 		versionCh:  make(chan struct{}, 1),
 	}
+	b.resume = b.env.Resume
+	return b
 }
 
 // targetHas reports whether a snapshot is part of the target inventory at
@@ -367,15 +372,28 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 		return fmt.Errorf("dataset '%s' not found", dataset)
 	}
 
-	// Handle incomplete transfer
-	if err := b.handleIncompleteTransfer(ctx, ds.Logs, dataset); err != nil {
-		return fmt.Errorf("handling incomplete transfer of '%s': %w", dataset, err)
+	// Handle incomplete transfer. A resume failure must not block the
+	// deletions in this dataset's plan: they may be exactly what frees
+	// the space the resume needs (e.g. a full remote). Hold the error,
+	// sync everything up to the plan's first transfer, and return it at
+	// the end so the dataset still counts as failed and is retried.
+	resumeErr := b.handleIncompleteTransfer(ctx, ds.Logs, dataset)
+	if resumeErr != nil {
+		resumeErr = fmt.Errorf("handling incomplete transfer of '%s': %w", dataset, resumeErr)
+		ds.Logs.Printf("%s; syncing deletions only", resumeErr)
 	}
 
 	// Refresh this specific dataset
 	if err := b.refreshDataset(ctx, ds.Logs, dataset); err != nil {
 		b.globalLogs.Printf("refresh error for '%s': %s", dataset, err)
 		return err
+	}
+
+	// Re-read the dataset so the plan is generated from the refreshed
+	// inventory rather than the cycle-start snapshot of it.
+	ds = b.state.Deref().GetDataset(dataset)
+	if ds == nil {
+		return fmt.Errorf("dataset '%s' not found after refresh", dataset)
 	}
 
 	// Generate plan
@@ -404,6 +422,12 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 	for i, step := range plan.Steps {
 		if err := ctx.Err(); err != nil {
 			return err
+		}
+
+		// A failed resume means the remote still holds partial receive
+		// state, so transfers can't proceed; deletions still can.
+		if resumeErr != nil && model.IsTransfer(step.Operation) {
+			return resumeErr
 		}
 
 		// Get logger from the step's ProcessLogs
@@ -500,7 +524,7 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 		}
 	}
 
-	return nil
+	return resumeErr
 }
 
 func (b *Backupd) handleIncompleteTransfer(ctx context.Context, logger *logger.Logger, dataset model.DatasetName) error {
@@ -526,13 +550,22 @@ func (b *Backupd) handleIncompleteTransfer(ctx context.Context, logger *logger.L
 	}
 
 resume:
-	if err := b.env.Resume(ctx, logger, dataset, token); err != nil && strings.Contains(err.Error(), "contains partially-complete state") {
+	if err := b.resume(ctx, logger, dataset, token); err != nil && strings.Contains(err.Error(), "contains partially-complete state") {
 		logger.Printf("aborting resumable transfer")
 		if err := b.env.Remote.AbortResumable(logger, dataset); err != nil {
 			return fmt.Errorf("aborting resumable on '%s': %w", dataset, err)
 		}
 		logger.Printf("retrying resume")
 		goto resume
+	} else if err != nil && strings.Contains(err.Error(), "no longer exists") {
+		// The interrupted send's local snapshot is gone (deleted
+		// manually or by a policy change), so the transfer can never
+		// resume. Abort it on the remote and plan afresh.
+		logger.Printf("transfer cannot resume, aborting it: %s", err)
+		if err := b.env.Remote.AbortResumable(logger, dataset); err != nil {
+			return fmt.Errorf("aborting unresumable transfer on '%s': %w", dataset, err)
+		}
+		return nil
 	} else if err != nil {
 		return fmt.Errorf("resuming transfer on '%s': %w", dataset, err)
 	}
