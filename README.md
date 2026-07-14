@@ -27,6 +27,9 @@ Key features:
    - Generates and validates execution plan
    - Executes transfers and deletions to reach target state
    - Reports status to monitoring services
+   - Retries failed cycles in-process with exponential backoff (1m
+     doubling to a 30m cap), so a remote outage never kills the daemon
+     or the web UI; the backoff resets after a successful cycle
 
 2. **Snapshot Retention Management:**
    - Applies per-type retention policies (e.g., keep 24 hourly, 7 daily)

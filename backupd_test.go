@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"monks.co/backupd/atom"
 	"monks.co/backupd/config"
@@ -99,6 +101,110 @@ var (
 // row renders a snapshot as a `zfs list` output row for a fakeExecutor.
 func row(prefix string, snap *model.Snapshot) string {
 	return fmt.Sprintf("%s/foo@%s\t%d\t0", prefix, snap.Name, snap.CreatedAt)
+}
+
+// TestSyncRetriesWithBackoffWhenRemoteIsDown covers the connectivity crash
+// loop: when the remote is unreachable (e.g. rsync.net refusing SSH), the
+// sync loop must not return the error — under `daemon -r` supervision that
+// meant an instant process restart and a new SSH attempt every ~5 seconds.
+// Instead it retries in-process with exponential backoff, keeping the HTTP
+// server and /snapshot endpoint alive, and exits only on cancellation.
+func TestSyncRetriesWithBackoffWhenRemoteIsDown(t *testing.T) {
+	local := &fakeExecutor{name: "local", handlers: []fakeHandler{
+		{match: "-t filesystem", rows: []string{"data/tank/foo\t0\t0"}},
+		{match: "-t snapshot", rows: []string{row("data/tank", snapA)}},
+	}}
+	remote := &fakeExecutor{name: "remote", handlers: []fakeHandler{
+		{match: "-t filesystem", err: fmt.Errorf("running 'ssh': exit status 255: kex_exchange_identification: read: Connection reset by peer")},
+	}}
+
+	b := newTestBackupd(testConf(), local, remote)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var waits []time.Duration
+	b.wait = func(ctx context.Context, d time.Duration) error {
+		waits = append(waits, d)
+		if len(waits) >= 7 {
+			cancel()
+		}
+		return ctx.Err()
+	}
+
+	if err := b.Sync(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected Sync to return only on cancellation, got: %v", err)
+	}
+
+	want := []time.Duration{
+		time.Minute,
+		2 * time.Minute,
+		4 * time.Minute,
+		8 * time.Minute,
+		16 * time.Minute,
+		30 * time.Minute,
+		30 * time.Minute,
+	}
+	if len(waits) != len(want) {
+		t.Fatalf("expected %d waits, got %d: %v", len(want), len(waits), waits)
+	}
+	for i := range want {
+		if waits[i] != want[i] {
+			t.Errorf("wait %d: expected %s, got %s", i, want[i], waits[i])
+		}
+	}
+}
+
+// TestSyncBackoffResetsAfterSuccessfulCycle: a successful cycle waits the
+// normal hourly interval and resets the backoff, so the next failure starts
+// again from the minimum delay.
+func TestSyncBackoffResetsAfterSuccessfulCycle(t *testing.T) {
+	failing := []fakeHandler{
+		{match: "-t filesystem", err: fmt.Errorf("running 'ssh': exit status 255: kex_exchange_identification: read: Connection reset by peer")},
+	}
+	working := []fakeHandler{
+		{match: "receive_resume_token", rows: []string{"-"}},
+		{match: "-t filesystem", rows: []string{"backup/tank/foo\t0\t0"}},
+		{match: "-t snapshot", rows: []string{row("backup/tank", snapA)}},
+	}
+
+	local := &fakeExecutor{name: "local", handlers: []fakeHandler{
+		{match: "-t filesystem", rows: []string{"data/tank/foo\t0\t0"}},
+		{match: "-t snapshot", rows: []string{row("data/tank", snapA)}},
+	}}
+	remote := &fakeExecutor{name: "remote", handlers: failing}
+
+	b := newTestBackupd(testConf(), local, remote)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var waits []time.Duration
+	b.wait = func(ctx context.Context, d time.Duration) error {
+		waits = append(waits, d)
+		switch len(waits) {
+		case 1:
+			remote.handlers = working
+		case 2:
+			remote.handlers = failing
+		case 3:
+			cancel()
+		}
+		return ctx.Err()
+	}
+
+	if err := b.Sync(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected Sync to return only on cancellation, got: %v", err)
+	}
+
+	if len(waits) != 3 {
+		t.Fatalf("expected 3 waits, got %d: %v", len(waits), waits)
+	}
+	if waits[0] != time.Minute {
+		t.Errorf("wait 0 (failure): expected 1m backoff, got %s", waits[0])
+	}
+	if waits[1] <= 30*time.Minute {
+		t.Errorf("wait 1 (success): expected the hourly interval, got %s", waits[1])
+	}
+	if waits[2] != time.Minute {
+		t.Errorf("wait 2 (failure after success): expected backoff reset to 1m, got %s", waits[2])
+	}
 }
 
 // TestSyncDatasetPlansFromRefreshedInventory covers the stale-plan bug:

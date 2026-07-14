@@ -34,6 +34,10 @@ type Backupd struct {
 
 	// resume is env.Resume, injectable for tests.
 	resume func(context.Context, *logger.Logger, model.DatasetName, string) error
+
+	// wait blocks for a duration or until the context is cancelled,
+	// injectable for tests.
+	wait func(context.Context, time.Duration) error
 }
 
 func New(config *config.Config, addr string, dryrun bool) *Backupd {
@@ -49,7 +53,25 @@ func New(config *config.Config, addr string, dryrun bool) *Backupd {
 		versionCh:  make(chan struct{}, 1),
 	}
 	b.resume = b.env.Resume
+	b.wait = wait
 	return b
+}
+
+// wait blocks until the duration elapses (returning nil) or the context is
+// cancelled (returning the context's error). Non-positive durations return
+// immediately.
+func wait(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return ctx.Err()
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
 }
 
 // targetHas reports whether a snapshot is part of the target inventory at
@@ -203,38 +225,55 @@ func (b *Backupd) Serve(ctx context.Context) error {
 	return listenAndServe(ctx, b.addr, mux)
 }
 
+// Backoff bounds for failed sync cycles. A failure (e.g. the remote
+// refusing SSH) never exits the daemon: the cycle is retried after a delay
+// that doubles from minBackoff to maxBackoff, so an extended remote outage
+// doesn't hammer the remote while the HTTP server and /snapshot endpoint
+// stay available. A successful cycle resets the delay.
+const (
+	minBackoff = time.Minute
+	maxBackoff = 30 * time.Minute
+)
+
 func (b *Backupd) Sync(ctx context.Context) error {
+	backoff := minBackoff
 	for {
 		b.globalLogs.Printf("start")
-		inAnHour := time.After(time.Hour)
+		cycleStart := time.Now()
 		allOK := true
 
 		// At launch: refresh all datasets and generate plans
 		if err := b.refreshAllDatasetsAndPlans(ctx); err != nil {
-			return fmt.Errorf("refreshing all datasets and plans: %w", err)
-		}
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			allOK = false
+			b.globalLogs.Printf("error refreshing all datasets and plans: %s", err)
+		} else {
+			// Then, for each dataset: refresh, replan, resync
+			for _, ds := range b.state.Deref().ListDatasets() {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
 
-		// Then, for each dataset: refresh, replan, resync
-		for _, ds := range b.state.Deref().ListDatasets() {
-			if err := ctx.Err(); err != nil {
-				return err
+				b.globalLogs.Printf("processing dataset '%s'", ds)
+
+				// Resync with the updated plan
+				b.globalLogs.Printf("syncing '%s'", ds)
+				if err := b.syncDataset(ctx, ds); err != nil {
+					allOK = false
+					err := fmt.Errorf("syncing '%s': %w", ds, err)
+					// Log to both global and dataset-specific logs
+					b.globalLogs.Printf("sync error; skipping dataset: %s", err)
+					// Also log to dataset-specific location if needed
+				}
 			}
 
-			b.globalLogs.Printf("processing dataset '%s'", ds)
-
-			// Resync with the updated plan
-			b.globalLogs.Printf("syncing '%s'", ds)
-			if err := b.syncDataset(ctx, ds); err != nil {
-				allOK = false
-				err := fmt.Errorf("syncing '%s': %w", ds, err)
-				// Log to both global and dataset-specific logs
-				b.globalLogs.Printf("sync error; skipping dataset: %s", err)
-				// Also log to dataset-specific location if needed
-			}
+			b.globalLogs.Printf("synced all datasets")
 		}
 
-		b.globalLogs.Printf("synced all datasets")
 		if allOK {
+			backoff = minBackoff
 			if b.config.SnitchID != "" {
 				b.globalLogs.Printf("alerting deadmanssnitch")
 				if err := snitch.OK(b.config.SnitchID); err != nil {
@@ -244,13 +283,15 @@ func (b *Backupd) Sync(ctx context.Context) error {
 				}
 			}
 			b.globalLogs.Printf("waiting to restart")
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-inAnHour:
+			if err := b.wait(ctx, time.Hour-time.Since(cycleStart)); err != nil {
+				return err
 			}
 		} else {
-			b.globalLogs.Printf("back to top")
+			b.globalLogs.Printf("retrying in %s", backoff)
+			if err := b.wait(ctx, backoff); err != nil {
+				return err
+			}
+			backoff = min(2*backoff, maxBackoff)
 		}
 	}
 }
