@@ -9,16 +9,23 @@ A daemon for managing ZFS snapshot backups with local and remote targets.
 Key features:
 - Automated ZFS snapshot replication with intelligent planning
 - Type-based retention policies with configurable limits
-- Real-time web dashboard for monitoring and control
+- Real-time web dashboard built around operator questions: a status
+  strip with a system verdict (ok / failing / paused) and a live
+  activity line (current phase, dataset, plan step, transfer progress
+  with throughput and ETA, next-cycle countdown), per-dataset health
+  verdicts with reasons, and a feed of recently executed operations
 - Pause and resume — globally or per dataset subtree — persisted in the config file
 - Config editing from the dashboard, with validation and a per-dataset impact preview before anything is written
 - Hot config reload: retention, pause, and interval changes apply without a restart
 - Sync-on-demand (full cycle or single dataset) via UI, API, or CLI
-- Cycle history: the last 50 sync cycles with outcomes and per-dataset last-success times
-- Resumable transfers with progress tracking
+- History: cycle outcomes, per-dataset last success *and* last failure
+  (with the error), executed-operation feed, last snitch ping
+- Resumable transfers with live progress tracking
 - RESTful API for control and state inspection
 - Dead Man's Snitch integration for external monitoring
 - Dry-run mode for safe testing
+- Simulation mode (`backupd -sim`): the full daemon against an
+  in-memory ZFS pair — no root, ZFS, or network — for demos and testing
 - Atomic state management for consistency
 
 ### How It Works
@@ -235,6 +242,11 @@ yearly = 5
 - `-logfile <path>`: Log to a file instead of stdout (recommended for production)
 - `-addr <address>`: Server address for the web interface (overrides the config `listen` setting; default: "0.0.0.0:8888")
 - `-dryrun`: Refresh state but don't execute transfers or deletions (preview mode)
+- `-sim`: Run the complete daemon against a simulated in-memory ZFS
+  pair (no root, ZFS, or network required). Boots a demo scenario with
+  backlogged, in-sync, paused, and never-transferred datasets, paced
+  transfers with visible progress, and an interrupted transfer that
+  resumes — then serves the ordinary dashboard at 127.0.0.1:8899
 
 ### Subcommands
 
@@ -565,10 +577,16 @@ The application uses a clear domain-driven design with the following core entiti
 
 **Core Packages:**
 - `model/`: Domain entities and business logic
-- `env/`: ZFS command execution and SSH communication
+- `env/`: ZFS command execution and SSH communication, behind an
+  `env.Interface` seam
+- `sim/`: In-memory implementation of `env.Interface` — a simulated
+  pair of pools with transfers, resume tokens, and fault injection —
+  used by `-sim` mode and the end-to-end test suite
 - `config/`: TOML configuration parsing and validation
-- `sync/`: Synchronization status tracking
-- `progress/`: Operation progress logging
+- `status/`: Live activity tracking (sync phase, current step, transfer
+  progress)
+- `history/`: Cycle outcomes, per-dataset success/failure, executed ops
+- `logger/`: Buffered in-memory operation logs
 - `atom/`: Thread-safe state management
 
 **Concurrent Architecture:**

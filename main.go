@@ -31,12 +31,14 @@ func run() error {
 		logfile string
 		addr    string
 		dryrun  bool
+		simMode bool
 	)
 
 	flag.StringVar(&debugDS, "debug", "", "debug a dataset")
 	flag.StringVar(&logfile, "logfile", "", "log to a file")
 	flag.StringVar(&addr, "addr", "", "server addr (overrides the config 'listen' setting; default 0.0.0.0:8888)")
 	flag.BoolVar(&dryrun, "dryrun", false, "refresh state but don't transfer or delete snapshots")
+	flag.BoolVar(&simMode, "sim", false, "run the full daemon against a simulated ZFS pair (no root or ZFS required)")
 
 	// Customize the help output (after flags are defined)
 	flag.Usage = func() {
@@ -74,6 +76,12 @@ func run() error {
 		default:
 			return fmt.Errorf("unknown command: %s\nRun 'backupd --help' for usage information", args[0])
 		}
+	}
+
+	// Sim mode: the whole daemon against an in-memory environment; no
+	// root, config file, or ZFS needed.
+	if simMode {
+		return runSim(NewSigctx(), addr)
 	}
 
 	// Root check (after help handling)

@@ -1,0 +1,22 @@
+package main
+
+// configPage is the runtime config editor. Preview computes each
+// dataset's would-be target under the edited config without touching
+// ZFS; save previews first and asks for confirmation when the change
+// schedules deletions. The state-change auto-refresh is disabled on
+// this page so an in-progress edit isn't clobbered.
+templ configPage(d pageData) {
+	<h1>Config</h1>
+	<p class="impact-note">
+		Editing <code>{ d.Conf.Path }</code>. Preview validates the file and shows
+		what would change — per dataset — before anything is written. Saving
+		applies immediately: retention, pause, and interval changes take effect
+		without a restart.
+	</p>
+	<textarea id="config-editor" spellcheck="false">{ string(d.Conf.Raw) }</textarea>
+	<div class="config-actions">
+		<button class="btn" id="config-preview">Preview changes</button>
+		<button class="btn warn" id="config-save">Save &amp; apply</button>
+	</div>
+	<div id="config-impacts"></div>
+}

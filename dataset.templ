@@ -1,0 +1,248 @@
+package main
+
+import (
+	"fmt"
+	"time"
+
+	"monks.co/backupd/model"
+	"monks.co/backupd/status"
+)
+
+// datasetPage is one dataset's detail view: verdict and controls, then
+// the facts an operator checks (lag, last success/failure, sizes,
+// retention), then the plan with live progress, the snapshot grid, and
+// collapsible logs.
+templ datasetPage(d pageData) {
+	{{ name := model.DatasetName(d.Page) }}
+	{{ ds := d.State.GetDataset(name) }}
+	{{ dv := d.ViewByName[name] }}
+	if ds == nil {
+		<h1>{ name.String() }</h1>
+		<p>Dataset not found.</p>
+	} else {
+		<h1>
+			{ name.String() }
+			<span class={ "chip", "chip-" + dv.Verdict.Class() }>{ dv.Verdict.String() }</span>
+		</h1>
+		<div class="controls-row" style="display: flex; gap: 0.5rem; margin-bottom: 1rem;">
+			if d.Conf.SubtreePaused(name.Path()) {
+				<button class="btn warn" data-api={ "/api/resume?dataset=" + name.Path() }>Resume dataset</button>
+			} else {
+				<button class="btn" data-api={ "/api/pause?dataset=" + name.Path() } data-confirm={ "Pause syncing for " + name.String() + " and everything under it?" }>Pause dataset</button>
+			}
+			<button class="btn" data-api={ "/api/sync?dataset=" + name.Path() }>Sync now</button>
+		</div>
+		<table class="facts">
+			if dv.Reason != "" {
+				<tr>
+					<th>Status</th>
+					<td>{ dv.Verdict.String() }: { dv.Reason }</td>
+				</tr>
+			}
+			<tr>
+				<th>Replication lag</th>
+				<td>
+					if dv.Lag > 0 {
+						{ fmtCompactDuration(dv.Lag) } <span class="muted">(newest local snapshot vs newest remote)</span>
+					} else {
+						<span class="muted">none</span>
+					}
+				</td>
+			</tr>
+			<tr>
+				<th>Last successful sync</th>
+				<td title={ exactTime(dv.LastSuccess) }>{ fmtAgo(dv.LastSuccess) }</td>
+			</tr>
+			if dv.LastFailure != nil {
+				<tr>
+					<th>Last failure</th>
+					<td>
+						<span title={ exactTime(dv.LastFailure.At) }>{ fmtAgo(dv.LastFailure.At) }</span>
+						&nbsp;<code class="error-text">{ dv.LastFailure.Error }</code>
+					</td>
+				</tr>
+			}
+			<tr>
+				<th>Local</th>
+				<td>
+					{ fmt.Sprint(sideCount(ds, model.Local)) } snapshots
+					· { fmtBytes(sideUsed(ds, model.Local)) } on disk
+					if ds.Metrics.HasLocal {
+						· { fmtBytes(ds.Metrics.LocalSize.LogicalReferenced) } logical
+					}
+				</td>
+			</tr>
+			<tr>
+				<th>Remote</th>
+				<td>
+					{ fmt.Sprint(sideCount(ds, model.Remote)) } snapshots
+					· { fmtBytes(sideUsed(ds, model.Remote)) } on disk
+					if ds.Metrics.HasRemote {
+						· { fmtBytes(ds.Metrics.RemoteSize.LogicalReferenced) } logical
+					}
+				</td>
+			</tr>
+			<tr>
+				<th>Retention</th>
+				<td>
+					@renderRetention(d.Conf, name.Path())
+				</td>
+			</tr>
+			if d.Conf.PausedFor(name.Path()) {
+				<tr>
+					<th>Paused</th>
+					<td>
+						if d.Conf.Paused {
+							<span class="chip chip-paused">yes — global pause</span>
+						} else {
+							<span class="chip chip-paused">yes</span>
+						}
+					</td>
+				</tr>
+			}
+		</table>
+		@planSection(d, name, ds)
+		<h2>Snapshots</h2>
+		<table class="snapshot-table">
+			<thead>
+				<tr>
+					<th>snapshot</th>
+					<th class="sortable">created</th>
+					<th>local</th>
+					<th>remote</th>
+					<th class="sortable num">size</th>
+				</tr>
+			</thead>
+			<tbody>
+				@snapshotRows(ds)
+			</tbody>
+		</table>
+		if ds.Logs != nil && len(ds.Logs.GetLogs()) > 0 {
+			<details class="logs">
+				<summary>Dataset logs ({ fmt.Sprint(len(ds.Logs.GetLogs())) })</summary>
+				<ul>
+					for _, log := range ds.Logs.GetLogs() {
+						<li>{ log.LogAt.Format(time.DateTime) } :: { log.Log }</li>
+					}
+				</ul>
+			</details>
+		}
+	}
+}
+
+// planSection shows the transition plan with per-step status and, for
+// the in-flight step, a live progress bar.
+templ planSection(d pageData, name model.DatasetName, ds *model.Dataset) {
+	if ds.Plan != nil && len(ds.Plan.Steps) > 0 {
+		{{ dv := d.ViewByName[name] }}
+		<h2>
+			Plan
+			<span class="muted" style="font-weight: normal;">
+				— { fmt.Sprint(len(ds.Plan.Steps)) } steps, { fmt.Sprint(dv.StepsDone) } done
+			</span>
+		</h2>
+		<table>
+			<thead>
+				<tr>
+					<th class="num">#</th>
+					<th>status</th>
+					<th>operation</th>
+					<th>started</th>
+					<th class="num">duration</th>
+				</tr>
+			</thead>
+			<tbody>
+				for i, step := range ds.Plan.Steps {
+					<tr>
+						<td class="num">{ fmt.Sprint(i + 1) }</td>
+						<td>
+							@renderStepStatus(step.Status)
+						</td>
+						<td><code>{ step.String() }</code></td>
+						<td>
+							if step.StartedAt != nil {
+								{ step.StartedAt.Format("15:04:05") }
+							} else {
+								<span class="muted">—</span>
+							}
+						</td>
+						<td class="num">
+							if dur := step.Duration(); dur > 0 {
+								{ dur.Round(time.Millisecond).String() }
+							} else {
+								<span class="muted">—</span>
+							}
+						</td>
+					</tr>
+					if step.Status == model.StepInProgress && d.Activity.Phase == status.Syncing && d.Activity.Dataset == name && d.Activity.Transfer != nil {
+						<tr class="step-progress">
+							<td></td>
+							<td colspan="4">
+								<progress max="100" value={ fmt.Sprintf("%.1f", d.Activity.Transfer.Percent()) }></progress>
+								<span class="progress-label">{ transferLabel(*d.Activity.Transfer) }</span>
+							</td>
+						</tr>
+					}
+					if step.Logs != nil && len(step.Logs.GetLogs()) > 0 {
+						for _, logEntry := range step.Logs.GetLogs() {
+							<tr class="step-log">
+								<td></td>
+								<td colspan="4">
+									<code class="log-message">{ logEntry.LogAt.Format("15:04:05") } { logEntry.Log }</code>
+								</td>
+							</tr>
+						}
+					}
+				}
+			</tbody>
+		</table>
+	}
+}
+
+templ renderStepStatus(st model.StepStatus) {
+	switch st {
+		case model.StepPending:
+			<span class="step-status pending" title="Pending"></span>
+		case model.StepInProgress:
+			<span class="step-status in-progress" title="In progress"></span>
+		case model.StepCompleted:
+			<span class="step-status completed" title="Completed"></span>
+		case model.StepFailed:
+			<span class="step-status failed" title="Failed"></span>
+	}
+}
+
+templ snapshotRows(ds *model.Dataset) {
+	if ds.Current != nil {
+		for snap := range ds.Current.Local.Union(ds.Current.Remote).AllDesc() {
+			<tr>
+				<td>{ snap.Name }</td>
+				<td data-sort={ fmt.Sprint(snap.CreatedAt) }>{ snap.Time().Format(time.DateTime) }</td>
+				<td>
+					@snapshotPresence(ds.Current.Local.Has(snap), targetHas(ds.Target, model.Local, snap), ds.Target != nil)
+				</td>
+				<td>
+					@snapshotPresence(ds.Current.Remote.Has(snap), targetHas(ds.Target, model.Remote, snap), ds.Target != nil)
+				</td>
+				<td class="num" data-sort={ fmt.Sprint(snap.LogicalReferenced) }><code>{ snap.SizeString() }</code></td>
+			</tr>
+		}
+	}
+}
+
+// snapshotPresence renders one location cell: present (✓), present but
+// scheduled for deletion (orange ✓), missing but scheduled for transfer
+// (✗), or not wanted (-).
+templ snapshotPresence(current bool, inTarget bool, hasTarget bool) {
+	if current {
+		if hasTarget && !inTarget {
+			<span class="snapshot-doomed" title="Present; scheduled for deletion">✓</span>
+		} else {
+			<span class="snapshot-present" title="Present">✓</span>
+		}
+	} else if inTarget {
+		<span class="snapshot-absent" title="Missing; scheduled for transfer">✗</span>
+	} else {
+		<span class="muted">-</span>
+	}
+}

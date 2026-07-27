@@ -12,8 +12,12 @@ import (
 	"monks.co/backupd/model"
 )
 
-// keep bounds the cycle ring buffer.
-const keep = 50
+// keep bounds the cycle ring buffer; keepOps bounds the executed-
+// operations feed.
+const (
+	keep    = 50
+	keepOps = 200
+)
 
 // Cycle summarizes one sync cycle.
 type Cycle struct {
@@ -31,9 +35,32 @@ func (c Cycle) Duration() time.Duration {
 	return c.StoppedAt.Sub(c.StartedAt)
 }
 
+// Failure records a dataset's most recent sync failure. It is kept
+// alongside — not erased by — later successes, so the dashboard can
+// compare timestamps to decide whether the dataset is currently
+// failing.
+type Failure struct {
+	At    time.Time
+	Error string
+}
+
+// Op is one executed operation: a transfer, deletion, resume, or
+// snapshot creation. The feed of recent Ops is the dashboard's "what
+// has backupd actually done" answer.
+type Op struct {
+	At        time.Time
+	Dataset   model.DatasetName
+	Operation string
+	Duration  time.Duration
+	Error     string // empty on success
+}
+
 type record struct {
 	cycles      []Cycle // newest first
+	ops         []Op    // newest first
 	lastSuccess map[model.DatasetName]time.Time
+	lastFailure map[model.DatasetName]Failure
+	lastSnitch  time.Time
 }
 
 type History struct {
@@ -44,6 +71,7 @@ func New() *History {
 	return &History{
 		atom: atom.New(record{
 			lastSuccess: make(map[model.DatasetName]time.Time),
+			lastFailure: make(map[model.DatasetName]Failure),
 		}),
 	}
 }
@@ -58,7 +86,23 @@ func (h *History) RecordCycle(c Cycle) {
 		if len(cycles) > keep {
 			cycles = cycles[:keep]
 		}
-		return record{cycles: cycles, lastSuccess: r.lastSuccess}
+		r.cycles = cycles
+		return r
+	})
+}
+
+// RecordOp prepends an executed operation, discarding the oldest beyond
+// the feed size.
+func (h *History) RecordOp(op Op) {
+	h.atom.Swap(func(r record) record {
+		ops := make([]Op, 0, len(r.ops)+1)
+		ops = append(ops, op)
+		ops = append(ops, r.ops...)
+		if len(ops) > keepOps {
+			ops = ops[:keepOps]
+		}
+		r.ops = ops
+		return r
 	})
 }
 
@@ -68,7 +112,27 @@ func (h *History) RecordDatasetSuccess(dataset model.DatasetName, at time.Time) 
 		lastSuccess := make(map[model.DatasetName]time.Time, len(r.lastSuccess)+1)
 		maps.Copy(lastSuccess, r.lastSuccess)
 		lastSuccess[dataset] = at
-		return record{cycles: r.cycles, lastSuccess: lastSuccess}
+		r.lastSuccess = lastSuccess
+		return r
+	})
+}
+
+// RecordDatasetFailure notes that a dataset's sync failed and why.
+func (h *History) RecordDatasetFailure(dataset model.DatasetName, at time.Time, errMsg string) {
+	h.atom.Swap(func(r record) record {
+		lastFailure := make(map[model.DatasetName]Failure, len(r.lastFailure)+1)
+		maps.Copy(lastFailure, r.lastFailure)
+		lastFailure[dataset] = Failure{At: at, Error: errMsg}
+		r.lastFailure = lastFailure
+		return r
+	})
+}
+
+// RecordSnitch notes a successful Dead Man's Snitch ping.
+func (h *History) RecordSnitch(at time.Time) {
+	h.atom.Swap(func(r record) record {
+		r.lastSnitch = at
+		return r
 	})
 }
 
@@ -77,8 +141,25 @@ func (h *History) Cycles() []Cycle {
 	return h.atom.Deref().cycles
 }
 
+// Ops returns executed operations, newest first.
+func (h *History) Ops() []Op {
+	return h.atom.Deref().ops
+}
+
 // LastSuccess returns when a dataset last fully executed its plan.
 func (h *History) LastSuccess(dataset model.DatasetName) (time.Time, bool) {
 	at, ok := h.atom.Deref().lastSuccess[dataset]
 	return at, ok
+}
+
+// LastFailure returns a dataset's most recent sync failure, if any.
+func (h *History) LastFailure(dataset model.DatasetName) (Failure, bool) {
+	f, ok := h.atom.Deref().lastFailure[dataset]
+	return f, ok
+}
+
+// LastSnitch returns when the snitch was last successfully pinged.
+func (h *History) LastSnitch() (time.Time, bool) {
+	at := h.atom.Deref().lastSnitch
+	return at, !at.IsZero()
 }

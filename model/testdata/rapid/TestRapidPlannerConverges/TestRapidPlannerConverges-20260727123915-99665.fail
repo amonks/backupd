@@ -1,0 +1,55 @@
+# 2026/07/27 12:39:15.199052 [TestRapidPlannerConverges] [rapid] draw n: 2
+# 2026/07/27 12:39:15.199054 [TestRapidPlannerConverges] [rapid] draw type: "hourly"
+# 2026/07/27 12:39:15.199055 [TestRapidPlannerConverges] [rapid] draw hour: 1
+# 2026/07/27 12:39:15.199057 [TestRapidPlannerConverges] [rapid] draw type: "daily"
+# 2026/07/27 12:39:15.199058 [TestRapidPlannerConverges] [rapid] draw hour: 1
+# 2026/07/27 12:39:15.199059 [TestRapidPlannerConverges] [rapid] draw local-0: true
+# 2026/07/27 12:39:15.199060 [TestRapidPlannerConverges] [rapid] draw local-1: true
+# 2026/07/27 12:39:15.199062 [TestRapidPlannerConverges] [rapid] draw shared-0: false
+# 2026/07/27 12:39:15.199062 [TestRapidPlannerConverges] [rapid] draw shared-1: false
+# 2026/07/27 12:39:15.199064 [TestRapidPlannerConverges] [rapid] draw local-has-hourly: false
+# 2026/07/27 12:39:15.199064 [TestRapidPlannerConverges] [rapid] draw local-has-daily: false
+# 2026/07/27 12:39:15.199065 [TestRapidPlannerConverges] [rapid] draw local-has-weekly: false
+# 2026/07/27 12:39:15.199065 [TestRapidPlannerConverges] [rapid] draw local-has-monthly: false
+# 2026/07/27 12:39:15.199065 [TestRapidPlannerConverges] [rapid] draw remote-has-hourly: true
+# 2026/07/27 12:39:15.199066 [TestRapidPlannerConverges] [rapid] draw remote-n-hourly: 1
+# 2026/07/27 12:39:15.199066 [TestRapidPlannerConverges] [rapid] draw remote-has-daily: true
+# 2026/07/27 12:39:15.199067 [TestRapidPlannerConverges] [rapid] draw remote-n-daily: 1
+# 2026/07/27 12:39:15.199068 [TestRapidPlannerConverges] [rapid] draw remote-has-weekly: false
+# 2026/07/27 12:39:15.199068 [TestRapidPlannerConverges] [rapid] draw remote-has-monthly: false
+# 2026/07/27 12:39:15.199068 [TestRapidPlannerConverges] [rapid] draw keepBaseline: false
+# 2026/07/27 12:39:15.199085 [TestRapidPlannerConverges] cycle 0: applying transfer range from /ds@daily-t01 to hourly-t01: invalid range /ds@daily-t01 to /ds@hourly-t01
+# 
+v0.4.8#2145044087911275843
+0x0
+0x0
+0x1
+0x0
+0x0
+0x0
+0x0
+0x1
+0x0
+0x1
+0x0
+0x0
+0x1
+0x1
+0x1
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x1
+0x0
+0x0
+0x1
+0x1
+0x0
+0x0
+0x1
+0x0
+0x0
+0x0

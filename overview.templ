@@ -1,0 +1,203 @@
+package main
+
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"monks.co/backupd/config"
+	"monks.co/backupd/model"
+)
+
+// overview is the fleet page: every dataset's health at a glance, then
+// what the daemon has done recently (executed operations and cycle
+// outcomes), with raw logs demoted to a collapsible section.
+templ overview(d pageData) {
+	<h1>Overview</h1>
+	<table id="fleet">
+		<thead>
+			<tr>
+				<th class="sortable">dataset</th>
+				<th>status</th>
+				<th class="sortable num">lag</th>
+				<th class="sortable">last success</th>
+				<th>pending</th>
+				<th class="sortable num">local</th>
+				<th class="sortable num">remote</th>
+				<th>retention</th>
+			</tr>
+		</thead>
+		<tbody>
+			for _, dv := range d.Views {
+				@fleetRow(d, dv)
+			}
+		</tbody>
+	</table>
+	if len(d.Ops) > 0 {
+		<h2>Recent Activity</h2>
+		<table>
+			<thead>
+				<tr>
+					<th>when</th>
+					<th>dataset</th>
+					<th>operation</th>
+					<th class="num">duration</th>
+					<th>result</th>
+				</tr>
+			</thead>
+			<tbody>
+				for i, op := range d.Ops {
+					if i < 30 {
+						<tr>
+							<td title={ op.At.Format("2006-01-02 15:04:05") }>{ fmtAgo(op.At) }</td>
+							<td>
+								if op.Dataset != "" || op.Operation == "" {
+									<a href={ templ.SafeURL(datasetHref(op.Dataset)) }>{ op.Dataset.String() }</a>
+								}
+							</td>
+							<td><code>{ op.Operation }</code></td>
+							<td class="num">{ op.Duration.Round(time.Millisecond).String() }</td>
+							<td>
+								if op.Error == "" {
+									<span class="cycle-ok">ok</span>
+								} else {
+									<span class="error-text">{ op.Error }</span>
+								}
+							</td>
+						</tr>
+					}
+				}
+			</tbody>
+		</table>
+		if len(d.Ops) > 30 {
+			<p class="muted">Showing 30 of { fmt.Sprint(len(d.Ops)) } recorded operations.</p>
+		}
+	}
+	if len(d.Cycles) > 0 {
+		<h2>Cycle History</h2>
+		<table>
+			<thead>
+				<tr>
+					<th>started</th>
+					<th class="num">duration</th>
+					<th>result</th>
+					<th class="num">datasets</th>
+					<th>detail</th>
+				</tr>
+			</thead>
+			<tbody>
+				for _, c := range d.Cycles {
+					<tr>
+						<td>{ c.StartedAt.Format(time.DateTime) }</td>
+						<td class="num">{ c.Duration().Round(time.Second).String() }</td>
+						<td>
+							if c.Paused {
+								<span class="cycle-paused">paused</span>
+							} else if c.OK {
+								<span class="cycle-ok">ok</span>
+							} else {
+								<span class="cycle-failed">failed</span>
+							}
+						</td>
+						<td class="num">{ fmt.Sprint(c.Datasets) }</td>
+						<td>
+							if c.Error != "" {
+								<code>{ c.Error }</code>
+							} else if len(c.Failures) > 0 {
+								<code>failed: { strings.Join(c.Failures, ", ") }</code>
+							}
+						</td>
+					</tr>
+				}
+			</tbody>
+		</table>
+	}
+	if len(d.GlobalLogs) > 0 {
+		<details class="logs">
+			<summary>Global logs ({ fmt.Sprint(len(d.GlobalLogs)) })</summary>
+			<ul>
+				for _, log := range d.GlobalLogs {
+					<li>{ log.LogAt.Format(time.DateTime) } :: { log.Log }</li>
+				}
+			</ul>
+		</details>
+	}
+}
+
+templ fleetRow(d pageData, dv DatasetView) {
+	<tr>
+		<td><a href={ templ.SafeURL(datasetHref(dv.Name)) }>{ dv.Name.String() }</a></td>
+		<td>
+			@verdictChip(dv)
+		</td>
+		<td class="num" data-sort={ fmt.Sprint(int64(dv.Lag.Seconds())) }>
+			if dv.Lag > 0 {
+				{ fmtCompactDuration(dv.Lag) }
+			} else {
+				<span class="muted">—</span>
+			}
+		</td>
+		<td data-sort={ fmt.Sprint(dv.LastSuccess.Unix()) } title={ exactTime(dv.LastSuccess) }>{ fmtAgo(dv.LastSuccess) }</td>
+		<td>
+			if s := dv.PendingSummary(); s != "" {
+				{ s }
+			} else {
+				<span class="muted">—</span>
+			}
+		</td>
+		@sideCell(d.State.GetDataset(dv.Name), model.Local)
+		@sideCell(d.State.GetDataset(dv.Name), model.Remote)
+		<td>
+			@renderRetention(d.Conf, dv.Name.Path())
+		</td>
+	</tr>
+}
+
+// sideCell shows one side's snapshot count and on-disk size, sortable
+// by size.
+templ sideCell(ds *model.Dataset, loc model.Location) {
+	<td class="num" data-sort={ fmt.Sprint(sideUsed(ds, loc)) }>
+		{ fmt.Sprint(sideCount(ds, loc)) } · { fmtBytes(sideUsed(ds, loc)) }
+	</td>
+}
+
+func sideCount(ds *model.Dataset, loc model.Location) int {
+	if ds == nil || ds.Current == nil {
+		return 0
+	}
+	if loc == model.Local {
+		return ds.Current.Local.Len()
+	}
+	return ds.Current.Remote.Len()
+}
+
+func sideUsed(ds *model.Dataset, loc model.Location) int64 {
+	if ds == nil {
+		return 0
+	}
+	if loc == model.Local {
+		if !ds.Metrics.HasLocal {
+			return 0
+		}
+		return ds.Metrics.LocalSize.Used
+	}
+	if !ds.Metrics.HasRemote {
+		return 0
+	}
+	return ds.Metrics.RemoteSize.Used
+}
+
+func exactTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format("2006-01-02 15:04:05")
+}
+
+templ renderRetention(conf *config.Config, dataset string) {
+	if _, override := conf.OverrideFor(dataset); override != nil {
+		<code class="retention-override">{ conf.RetentionDescription(dataset) }</code>
+	} else {
+		<code>default</code>
+	}
+}

@@ -191,7 +191,11 @@ func (op *SnapshotRangeTransfer) Apply(inv *SnapshotInventory) (*SnapshotInvento
 	if !op.Start.Eq(inv.Remote.Newest()) {
 		return nil, fmt.Errorf("too late to transfer %s: newest on remote is %s", op.Start, inv.Remote.Newest())
 	}
-	if op.Start.CreatedAt >= op.End.CreatedAt {
+	// Ranges are ordered by the same total order Snapshots uses —
+	// (CreatedAt, Name) — not by CreatedAt alone: a recursive snapshot
+	// run can create e.g. a daily and a weekly snapshot in the same
+	// second, and those must still be transferable.
+	if !op.Start.Less(op.End) {
 		return nil, fmt.Errorf("invalid range %s to %s", op.Start, op.End)
 	}
 	if !inv.Remote.Has(op.Start) {

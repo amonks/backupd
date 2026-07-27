@@ -14,7 +14,7 @@ import (
 	"monks.co/backupd/history"
 	"monks.co/backupd/logger"
 	"monks.co/backupd/model"
-	"monks.co/backupd/sync"
+	"monks.co/backupd/status"
 )
 
 // fakeExecutor implements env.Executor. Each command is matched against the
@@ -77,7 +77,6 @@ func newTestBackupd(conf *config.Config, local, remote *fakeExecutor) *Backupd {
 		conf:       atom.New(conf),
 		state:      atom.New[*model.Model](nil),
 		globalLogs: logger.New("global"),
-		syncStatus: sync.New(),
 		env: &env.Env{
 			Local:  env.NewZFS(conf.Local.Root, local),
 			Remote: env.NewZFS(conf.Remote.Root, remote),
@@ -88,6 +87,7 @@ func newTestBackupd(conf *config.Config, local, remote *fakeExecutor) *Backupd {
 		syncNow:   make(chan syncRequest, 16),
 		history:   history.New(),
 	}
+	b.activity = status.New(b.notifyStateChange)
 	b.resume = func(context.Context, *logger.Logger, model.DatasetName, string) error {
 		return fmt.Errorf("unexpected resume call")
 	}

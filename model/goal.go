@@ -1,7 +1,5 @@
 package model
 
-import "log"
-
 func CalculateTargetInventory(current *SnapshotInventory, localPolicy, remotePolicy map[string]int, keepBaseline bool) *SnapshotInventory {
 	localSnapshots := current.Local
 	remoteSnapshots := current.Remote
@@ -38,13 +36,15 @@ func CalculateTargetInventory(current *SnapshotInventory, localPolicy, remotePol
 			continue
 		}
 
-		// too bad; already skipped it :shrug:
-		if newest := remoteSnapshots.Newest(); newest != nil && snap.CreatedAt < newest.CreatedAt {
+		// too bad; already skipped it :shrug: (ordered by the same
+		// (CreatedAt, Name) total order used everywhere, so a snapshot
+		// sharing its creation second with the remote's newest is only
+		// transferable when it sorts after it)
+		if newest := remoteSnapshots.Newest(); newest != nil && snap.Less(newest) {
 			continue
 		}
 
 		// transfer it
-		log.Printf("keep %s", snap.ID())
 		goal.Local.Add(snap)
 		goal.Remote.Add(snap)
 	}

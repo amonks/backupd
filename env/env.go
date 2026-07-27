@@ -13,6 +13,11 @@ import (
 
 type Env struct {
 	Local, Remote *ZFS
+
+	// OnProgress, when set, receives cumulative progress for the
+	// in-flight transfer: bytes piped so far and the expected total.
+	// Transfers run one at a time, so a single callback suffices.
+	OnProgress func(sent, total int64)
 }
 
 func New(config *config.Config) *Env {
@@ -43,7 +48,7 @@ func (env *Env) Resume(ctx context.Context, logger *logger.Logger, dataset model
 		return fmt.Errorf("getting size of resume: %w", err)
 	}
 
-	if err := Pipe(ctx, logger, size, send, recv); err != nil {
+	if err := Pipe(ctx, logger, size, env.OnProgress, send, recv); err != nil {
 		return err
 	}
 
@@ -75,7 +80,7 @@ func (env *Env) TransferInitialSnapshot(ctx context.Context, logger *logger.Logg
 		return fmt.Errorf("getting size of transfer '%s': %w", snapshot, err)
 	}
 
-	if err := Pipe(ctx, logger, size, send, recv); err != nil {
+	if err := Pipe(ctx, logger, size, env.OnProgress, send, recv); err != nil {
 		return err
 	}
 
@@ -98,7 +103,7 @@ func (env *Env) TransferSnapshot(ctx context.Context, logger *logger.Logger, dat
 		return fmt.Errorf("getting size of transfer '%s': %w", snapshot, err)
 	}
 
-	if err := Pipe(ctx, logger, size, send, recv); err != nil {
+	if err := Pipe(ctx, logger, size, env.OnProgress, send, recv); err != nil {
 		return err
 	}
 
@@ -122,7 +127,7 @@ func (env *Env) TransferSnapshotIncrementally(ctx context.Context, logger *logge
 		return fmt.Errorf("getting size of range transfer from '%s' to '%s': %w", from, to, err)
 	}
 
-	if err := Pipe(ctx, logger, size, send, recv); err != nil {
+	if err := Pipe(ctx, logger, size, env.OnProgress, send, recv); err != nil {
 		return err
 	}
 

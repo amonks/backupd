@@ -1,0 +1,380 @@
+package main
+
+import (
+	"fmt"
+	"strings"
+
+	"monks.co/backupd/config"
+	"monks.co/backupd/history"
+	"monks.co/backupd/logger"
+	"monks.co/backupd/model"
+	"monks.co/backupd/status"
+)
+
+// pageData is everything a dashboard render needs, assembled once per
+// request in handlePage. Templates read from it and from the derived
+// DatasetView/SystemView values; they do no derivation of their own.
+type pageData struct {
+	Page       string // "global", "config", or a dataset path ("" is the root dataset)
+	State      *model.Model
+	Conf       *config.Config
+	Activity   status.Activity
+	Views      []DatasetView
+	ViewByName map[model.DatasetName]DatasetView
+	System     SystemView
+	Cycles     []history.Cycle
+	Ops        []history.Op
+	GlobalLogs []logger.LogEntry
+	Dryrun     bool
+}
+
+templ page(d pageData) {
+	<!DOCTYPE html>
+	<html>
+		<head>
+			<title>backupd</title>
+			@styles()
+		</head>
+		<body>
+			@statusStrip(d)
+			<div class="shell">
+				@sidebar(d)
+				<main class="main-content">
+					switch d.Page {
+						case "global":
+							@overview(d)
+						case "config":
+							@configPage(d)
+						default:
+							@datasetPage(d)
+					}
+				</main>
+			</div>
+			@script()
+		</body>
+	</html>
+}
+
+// statusStrip is the always-visible header answering "is everything
+// ok" and "what is happening right now".
+templ statusStrip(d pageData) {
+	<header class="strip">
+		<div class="strip-cell strip-verdict">
+			<span class={ "chip", "chip-" + d.System.Verdict.Class() }>{ strings.ToUpper(d.System.Verdict.String()) }</span>
+			if d.Dryrun {
+				<span class="chip chip-dryrun" title="No transfers or deletions will occur">DRY RUN</span>
+			}
+			if d.System.Reason != "" {
+				<span class="strip-reason">{ d.System.Reason }</span>
+			}
+		</div>
+		<div class="strip-cell strip-activity">
+			<span class={ "phase-dot", "dot-" + phaseClass(d.Activity.Phase) }></span>
+			<span>{ activityLabel(d.Activity) }</span>
+			if !d.Activity.Until.IsZero() && (d.Activity.Phase == status.Idle || d.Activity.Phase == status.BackingOff) {
+				<span class="countdown" data-until={ fmt.Sprint(d.Activity.Until.UnixMilli()) }>{ fmtUntil(d.Activity.Until) }</span>
+			}
+			if d.Activity.Transfer != nil {
+				<progress max="100" value={ fmt.Sprintf("%.1f", d.Activity.Transfer.Percent()) }></progress>
+				<span class="progress-label">{ transferLabel(*d.Activity.Transfer) }</span>
+			}
+		</div>
+		<div class="strip-cell strip-facts">
+			if d.System.LastCycle != nil {
+				<span class="strip-fact" title={ "started " + d.System.LastCycle.StartedAt.Format("2006-01-02 15:04:05") }>
+					last cycle:&nbsp;
+					if d.System.LastCycle.Paused {
+						<span class="cycle-paused">paused</span>
+					} else if d.System.LastCycle.OK {
+						<span class="cycle-ok">ok</span>
+					} else {
+						<span class="cycle-failed">failed</span>
+					}
+				</span>
+			}
+			if d.Conf.SnitchID != "" {
+				<span class="strip-fact">snitch: { fmtAgo(d.System.LastSnitch) }</span>
+			}
+			<span class="strip-fact">{ fmt.Sprint(d.System.Datasets) } datasets</span>
+			<span class="strip-fact">{ fmtBytes(d.System.LocalUsed) } local · { fmtBytes(d.System.RemoteUsed) } remote</span>
+		</div>
+	</header>
+}
+
+// phaseClass maps an activity phase to a verdict-ish color class for
+// the little phase dot.
+func phaseClass(p status.Phase) string {
+	switch p {
+	case status.Syncing, status.Refreshing:
+		return "syncing"
+	case status.Idle:
+		return "ok"
+	case status.BackingOff:
+		return "failing"
+	default:
+		return "unknown"
+	}
+}
+
+templ sidebar(d pageData) {
+	<nav class="sidebar">
+		<a href="/global" class={ "nav-link", templ.KV("active", d.Page == "global") }>Overview</a>
+		<a href="/config" class={ "nav-link", templ.KV("active", d.Page == "config") }>Config</a>
+		<div class="controls">
+			if d.Conf.Paused {
+				<button class="btn warn" data-api="/api/resume">Resume all</button>
+			} else {
+				<button class="btn" data-api="/api/pause" data-confirm="Pause all execution? State keeps refreshing, but no transfers or deletions run, and the dead-man's-snitch ping is withheld.">Pause all</button>
+			}
+			<button class="btn" data-api="/api/sync">Sync now</button>
+			<div class="snapshot-row">
+				<select id="snapshot-periodicity">
+					<option value="daily">daily</option>
+					<option value="weekly">weekly</option>
+					<option value="monthly">monthly</option>
+					<option value="yearly">yearly</option>
+				</select>
+				<button class="btn" id="snapshot-btn">Snapshot</button>
+			</div>
+		</div>
+		<div class="side-heading">Datasets</div>
+		for _, dv := range d.Views {
+			@sidebarLink(d, dv)
+		}
+	</nav>
+}
+
+templ sidebarLink(d pageData, dv DatasetView) {
+	<a href={ templ.SafeURL(datasetHref(dv.Name)) } class={ "dataset-link", templ.KV("active", dv.Name.Path() == d.Page && d.Page != "global" && d.Page != "config") }>
+		<span class={ "dot", "dot-" + dv.Verdict.Class() } title={ dv.Verdict.String() + reasonSuffix(dv.Reason) }></span>
+		<span class="dataset-name">{ dv.Name.String() }</span>
+		if dv.Lag > 0 {
+			<span class="dataset-lag" title="Replication lag: newest local snapshot vs newest remote">{ fmtCompactDuration(dv.Lag) }</span>
+		}
+	</a>
+}
+
+// datasetHref maps a dataset name to its page URL. The root dataset's
+// empty path gets the dedicated /root URL.
+func datasetHref(name model.DatasetName) string {
+	if name == "" {
+		return "/root"
+	}
+	return "/" + strings.TrimPrefix(name.Path(), "/")
+}
+
+func reasonSuffix(reason string) string {
+	if reason == "" {
+		return ""
+	}
+	return ": " + reason
+}
+
+templ verdictChip(dv DatasetView) {
+	<span class={ "chip", "chip-" + dv.Verdict.Class() }>{ dv.Verdict.String() }</span>
+	if dv.Reason != "" {
+		<span class="chip-reason" title={ dv.Reason }>{ dv.Reason }</span>
+	}
+}
+
+templ styles() {
+	<style>
+		:root {
+			--ok: #2e7d32;
+			--ok-bg: #e8f5e9;
+			--syncing: #1565c0;
+			--syncing-bg: #e3f2fd;
+			--pending: #ef6c00;
+			--pending-bg: #fff3e0;
+			--paused: #607d8b;
+			--paused-bg: #eceff1;
+			--failing: #c62828;
+			--failing-bg: #ffebee;
+			--unknown: #757575;
+			--unknown-bg: #f5f5f5;
+			--border: #e0e0e0;
+			--muted: #757575;
+		}
+		* { box-sizing: border-box; }
+		body {
+			font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+			margin: 0;
+			height: 100vh;
+			display: flex;
+			flex-direction: column;
+			color: #212121;
+		}
+		code { font-size: 0.9em; }
+
+		/* Status strip */
+		.strip {
+			display: flex;
+			align-items: center;
+			gap: 1.25rem;
+			padding: 0.5rem 1rem;
+			border-bottom: 1px solid var(--border);
+			background: #fafafa;
+			flex-wrap: wrap;
+		}
+		.strip-cell { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+		.strip-activity { flex: 1; }
+		.strip-facts { margin-left: auto; gap: 1rem; color: var(--muted); font-size: 0.85rem; }
+		.strip-fact { white-space: nowrap; }
+		.strip-reason { color: var(--muted); font-size: 0.9rem; }
+		.chip {
+			display: inline-block;
+			padding: 0.15rem 0.6rem;
+			border-radius: 999px;
+			font-size: 0.75rem;
+			font-weight: 600;
+			letter-spacing: 0.03em;
+			white-space: nowrap;
+		}
+		.chip-ok { background: var(--ok-bg); color: var(--ok); }
+		.chip-syncing { background: var(--syncing-bg); color: var(--syncing); }
+		.chip-pending { background: var(--pending-bg); color: var(--pending); }
+		.chip-paused { background: var(--paused-bg); color: var(--paused); }
+		.chip-failing { background: var(--failing-bg); color: var(--failing); }
+		.chip-unknown { background: var(--unknown-bg); color: var(--unknown); }
+		.chip-dryrun { background: #fff8e1; color: #b26a00; border: 1px solid #ffe082; }
+		.chip-reason {
+			color: var(--muted);
+			font-size: 0.85rem;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+			max-width: 28rem;
+			display: inline-block;
+			vertical-align: bottom;
+		}
+		.countdown { color: var(--muted); font-variant-numeric: tabular-nums; }
+		progress { width: 10rem; height: 0.6rem; accent-color: var(--syncing); }
+		.progress-label { color: var(--muted); font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+		.dot, .phase-dot {
+			width: 10px; height: 10px;
+			border-radius: 50%;
+			flex-shrink: 0;
+			display: inline-block;
+		}
+		.dot-ok { background: var(--ok); }
+		.dot-syncing { background: var(--syncing); animation: pulse 1.2s ease-in-out infinite alternate; }
+		.dot-pending { background: var(--pending); }
+		.dot-paused { background: var(--paused); }
+		.dot-failing { background: var(--failing); }
+		.dot-unknown { background: var(--unknown); }
+		@keyframes pulse { from { opacity: 0.4; } to { opacity: 1; } }
+		@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+		/* Shell */
+		.shell { display: flex; flex: 1; min-height: 0; }
+		.sidebar {
+			width: 270px;
+			border-right: 1px solid var(--border);
+			background: #fafafa;
+			padding: 0.75rem;
+			overflow-y: auto;
+			flex-shrink: 0;
+		}
+		.main-content { flex: 1; padding: 1rem 1.5rem; overflow-y: auto; }
+		.nav-link, .dataset-link {
+			display: flex;
+			align-items: center;
+			gap: 0.5rem;
+			padding: 0.35rem 0.5rem;
+			border-radius: 4px;
+			text-decoration: none;
+			color: #212121;
+			margin-bottom: 0.1rem;
+		}
+		.nav-link:hover, .dataset-link:hover, .nav-link.active, .dataset-link.active { background: #e8e8e8; }
+		.side-heading {
+			margin: 1rem 0 0.35rem;
+			font-size: 0.75rem;
+			font-weight: 600;
+			letter-spacing: 0.06em;
+			text-transform: uppercase;
+			color: var(--muted);
+		}
+		.dataset-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+		.dataset-lag { margin-left: auto; font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+		.controls { display: flex; flex-direction: column; gap: 0.4rem; margin: 0.75rem 0; }
+		.controls .snapshot-row { display: flex; gap: 0.4rem; }
+		.controls .snapshot-row select { flex: 1; min-width: 0; }
+		.btn {
+			padding: 0.35rem 0.7rem;
+			border: 1px solid #bbb;
+			border-radius: 4px;
+			background: white;
+			cursor: pointer;
+			font-size: 0.85rem;
+		}
+		.btn:hover { background: #eee; }
+		.btn.warn { border-color: var(--paused); color: var(--paused); font-weight: 500; }
+
+		/* Content */
+		h1 { font-size: 1.4rem; margin: 0.25rem 0 1rem; }
+		h1 .chip { vertical-align: middle; margin-left: 0.5rem; }
+		h2 { font-size: 1.05rem; margin: 1.5rem 0 0.5rem; }
+		table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
+		th, td { padding: 0.3em 0.9em 0.3em 0; text-align: left; border-bottom: 1px solid var(--border); vertical-align: baseline; }
+		th { font-weight: 600; font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+		td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+		th.sortable { cursor: pointer; user-select: none; position: relative; padding-right: 1.3rem; }
+		th.sortable::after { content: '↕'; position: absolute; right: 0.4rem; opacity: 0.3; }
+		th.sortable.sort-asc::after { content: '↑'; opacity: 0.8; }
+		th.sortable.sort-desc::after { content: '↓'; opacity: 0.8; }
+		.muted { color: var(--muted); }
+		.error-text { color: var(--failing); }
+		.cycle-ok { color: var(--ok); font-weight: 600; }
+		.cycle-failed { color: var(--failing); font-weight: 600; }
+		.cycle-paused { color: var(--paused); font-weight: 600; }
+
+		/* Plan steps */
+		.step-status { display: inline-block; width: 14px; height: 14px; vertical-align: middle; }
+		.step-status.pending { border: 2px solid #ccc; border-radius: 50%; }
+		.step-status.in-progress { border: 2px solid var(--syncing); border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; }
+		.step-status.completed::before { content: '✓'; color: var(--ok); font-weight: bold; }
+		.step-status.failed::before { content: '✗'; color: var(--failing); font-weight: bold; }
+		.step-log td { border-bottom: none; }
+		.log-message { font-size: 0.8rem; color: var(--muted); font-family: monospace; display: block; padding: 0.1rem 0 0.1rem 2rem; }
+		.step-progress td { border-bottom: none; padding-left: 2rem; }
+		.step-progress progress { width: 16rem; }
+
+		/* Snapshot grid */
+		.snapshot-table th, .snapshot-table td { text-align: center; }
+		.snapshot-table th:first-child, .snapshot-table td:first-child { text-align: left; }
+		.snapshot-present { color: var(--ok); }
+		.snapshot-absent { color: var(--failing); }
+		.snapshot-doomed { color: var(--pending); }
+		.retention-override { color: var(--pending); font-weight: 500; }
+
+		/* Logs */
+		details.logs { margin: 1rem 0; }
+		details.logs summary { cursor: pointer; color: var(--muted); }
+		details.logs ul { list-style: none; padding: 0.5rem; margin: 0.5rem 0 0; background: #f7f7f7; border-radius: 4px; max-height: 24rem; overflow-y: auto; }
+		details.logs li { padding: 0.1rem 0; font-family: monospace; font-size: 0.8rem; white-space: pre-wrap; }
+
+		/* Config editor */
+		#config-editor {
+			width: 100%;
+			min-height: 24rem;
+			font-family: monospace;
+			font-size: 0.9rem;
+			padding: 0.75rem;
+			border: 1px solid #ccc;
+			border-radius: 4px;
+			resize: vertical;
+		}
+		.config-actions { display: flex; gap: 0.5rem; margin: 0.75rem 0; }
+		.config-error {
+			background: var(--failing-bg);
+			color: var(--failing);
+			padding: 0.75rem;
+			border-radius: 4px;
+			white-space: pre-wrap;
+			font-family: monospace;
+			font-size: 0.85rem;
+		}
+		.impact-note { color: var(--muted); font-size: 0.9rem; }
+	</style>
+}

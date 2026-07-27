@@ -1,0 +1,162 @@
+# 2026/07/27 12:39:10.671675 [TestRapidPlannerReachesTarget] [rapid] draw n: 10
+# 2026/07/27 12:39:10.671677 [TestRapidPlannerReachesTarget] [rapid] draw type: "hourly"
+# 2026/07/27 12:39:10.671678 [TestRapidPlannerReachesTarget] [rapid] draw hour: 2
+# 2026/07/27 12:39:10.671679 [TestRapidPlannerReachesTarget] [rapid] draw type: "monthly"
+# 2026/07/27 12:39:10.671680 [TestRapidPlannerReachesTarget] [rapid] draw hour: 39
+# 2026/07/27 12:39:10.671681 [TestRapidPlannerReachesTarget] [rapid] draw type: "weekly"
+# 2026/07/27 12:39:10.671682 [TestRapidPlannerReachesTarget] [rapid] draw hour: 4
+# 2026/07/27 12:39:10.671683 [TestRapidPlannerReachesTarget] [rapid] draw type: "monthly"
+# 2026/07/27 12:39:10.671683 [TestRapidPlannerReachesTarget] [rapid] draw hour: 1
+# 2026/07/27 12:39:10.671684 [TestRapidPlannerReachesTarget] [rapid] draw type: "monthly"
+# 2026/07/27 12:39:10.671685 [TestRapidPlannerReachesTarget] [rapid] draw hour: 38
+# 2026/07/27 12:39:10.671686 [TestRapidPlannerReachesTarget] [rapid] draw type: "hourly"
+# 2026/07/27 12:39:10.671686 [TestRapidPlannerReachesTarget] [rapid] draw hour: 17
+# 2026/07/27 12:39:10.671687 [TestRapidPlannerReachesTarget] [rapid] draw type: "monthly"
+# 2026/07/27 12:39:10.671687 [TestRapidPlannerReachesTarget] [rapid] draw hour: 24
+# 2026/07/27 12:39:10.671688 [TestRapidPlannerReachesTarget] [rapid] draw type: "weekly"
+# 2026/07/27 12:39:10.671689 [TestRapidPlannerReachesTarget] [rapid] draw hour: 39
+# 2026/07/27 12:39:10.671690 [TestRapidPlannerReachesTarget] [rapid] draw type: "hourly"
+# 2026/07/27 12:39:10.671691 [TestRapidPlannerReachesTarget] [rapid] draw hour: 10
+# 2026/07/27 12:39:10.671692 [TestRapidPlannerReachesTarget] [rapid] draw type: "hourly"
+# 2026/07/27 12:39:10.671692 [TestRapidPlannerReachesTarget] [rapid] draw hour: 36
+# 2026/07/27 12:39:10.671694 [TestRapidPlannerReachesTarget] [rapid] draw local-0: false
+# 2026/07/27 12:39:10.671694 [TestRapidPlannerReachesTarget] [rapid] draw local-1: true
+# 2026/07/27 12:39:10.671695 [TestRapidPlannerReachesTarget] [rapid] draw local-2: true
+# 2026/07/27 12:39:10.671695 [TestRapidPlannerReachesTarget] [rapid] draw local-3: false
+# 2026/07/27 12:39:10.671696 [TestRapidPlannerReachesTarget] [rapid] draw local-4: false
+# 2026/07/27 12:39:10.671696 [TestRapidPlannerReachesTarget] [rapid] draw local-5: false
+# 2026/07/27 12:39:10.671696 [TestRapidPlannerReachesTarget] [rapid] draw local-6: true
+# 2026/07/27 12:39:10.671697 [TestRapidPlannerReachesTarget] [rapid] draw local-7: false
+# 2026/07/27 12:39:10.671697 [TestRapidPlannerReachesTarget] [rapid] draw local-8: true
+# 2026/07/27 12:39:10.671698 [TestRapidPlannerReachesTarget] [rapid] draw local-9: true
+# 2026/07/27 12:39:10.671700 [TestRapidPlannerReachesTarget] [rapid] draw remoteonly-0: true
+# 2026/07/27 12:39:10.671701 [TestRapidPlannerReachesTarget] [rapid] draw shared-1: false
+# 2026/07/27 12:39:10.671701 [TestRapidPlannerReachesTarget] [rapid] draw shared-2: false
+# 2026/07/27 12:39:10.671702 [TestRapidPlannerReachesTarget] [rapid] draw remoteonly-3: true
+# 2026/07/27 12:39:10.671703 [TestRapidPlannerReachesTarget] [rapid] draw remoteonly-4: false
+# 2026/07/27 12:39:10.671704 [TestRapidPlannerReachesTarget] [rapid] draw remoteonly-5: false
+# 2026/07/27 12:39:10.671705 [TestRapidPlannerReachesTarget] [rapid] draw shared-6: true
+# 2026/07/27 12:39:10.671705 [TestRapidPlannerReachesTarget] [rapid] draw remoteonly-7: false
+# 2026/07/27 12:39:10.671706 [TestRapidPlannerReachesTarget] [rapid] draw shared-8: false
+# 2026/07/27 12:39:10.671707 [TestRapidPlannerReachesTarget] [rapid] draw shared-9: false
+# 2026/07/27 12:39:10.671711 [TestRapidPlannerReachesTarget] [rapid] draw local-has-hourly: false
+# 2026/07/27 12:39:10.671711 [TestRapidPlannerReachesTarget] [rapid] draw local-has-daily: false
+# 2026/07/27 12:39:10.671711 [TestRapidPlannerReachesTarget] [rapid] draw local-has-weekly: false
+# 2026/07/27 12:39:10.671712 [TestRapidPlannerReachesTarget] [rapid] draw local-has-monthly: true
+# 2026/07/27 12:39:10.671712 [TestRapidPlannerReachesTarget] [rapid] draw local-n-monthly: 4
+# 2026/07/27 12:39:10.671713 [TestRapidPlannerReachesTarget] [rapid] draw remote-has-hourly: true
+# 2026/07/27 12:39:10.671713 [TestRapidPlannerReachesTarget] [rapid] draw remote-n-hourly: 1
+# 2026/07/27 12:39:10.671713 [TestRapidPlannerReachesTarget] [rapid] draw remote-has-daily: true
+# 2026/07/27 12:39:10.671714 [TestRapidPlannerReachesTarget] [rapid] draw remote-n-daily: 1
+# 2026/07/27 12:39:10.671714 [TestRapidPlannerReachesTarget] [rapid] draw remote-has-weekly: true
+# 2026/07/27 12:39:10.671715 [TestRapidPlannerReachesTarget] [rapid] draw remote-n-weekly: 5
+# 2026/07/27 12:39:10.671715 [TestRapidPlannerReachesTarget] [rapid] draw remote-has-monthly: true
+# 2026/07/27 12:39:10.671715 [TestRapidPlannerReachesTarget] [rapid] draw remote-n-monthly: 5
+# 2026/07/27 12:39:10.671716 [TestRapidPlannerReachesTarget] [rapid] draw keepBaseline: false
+# 
+v0.4.8#13260008732748137749
+0x19563d032b5241
+0xbedb03207c41e
+0x9
+0x1290a989b4b02b
+0x0
+0x15fb772441af80
+0x7b8dcf32220cb
+0x2
+0x1d77e6a28afbed
+0x3
+0xcd47c7510420f
+0x1f832b31b7e0cf
+0xffffffffffffffff
+0x1caa2319879a30
+0x2
+0x4a34f2d1c9d5
+0xf194b1dabe6be
+0x4
+0x8209cf0ff010e
+0x3
+0xba4a41427dd7c
+0x12c6c667c9fa
+0x1
+0x413bc38d09c9a
+0x3
+0xbcc68a0a4541
+0x19863d671a371a
+0x26
+0x13d40f0a5e652c
+0x0
+0xb5461da3830eb
+0x16348b2906cdf6
+0x28
+0x2e
+0x11
+0x7b194629e0362
+0x3
+0x1cd990eae16ad7
+0xd77d0dbc9db5d
+0x18
+0x459db66497486
+0x2
+0x1aee97bd3234dd
+0x1f68a4f8eed1fd
+0xffffffffffffffff
+0xd0c2f9d7e4fd2
+0x0
+0x1a0287567bd53
+0x1cce0c8db43bc1
+0x32
+0x2e
+0x3b
+0x3d
+0x31
+0xa
+0x13ff6fd8ff6ae7
+0x0
+0x10b2631c58cb2d
+0x1e46b50bb4d791
+0x24
+0x0
+0x1
+0x1
+0x0
+0x0
+0x0
+0x1
+0x0
+0x1
+0x1
+0x1
+0x0
+0x0
+0x1
+0x0
+0x0
+0x1
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x1
+0xf6c653986e0b1
+0x8d913a391afd5
+0x7
+0x4
+0x1
+0x3f565835551ea
+0x4f963cae4758a
+0x1
+0x1
+0x1eadfb8f8f0dfb
+0x1ea6e274fdfddf
+0x1
+0x1
+0x25faa7eb01fe2
+0x1b6d16a236af46
+0x5
+0x1
+0xb2b5a1eb9662
+0xab46a511e756b
+0x5
+0x0

@@ -131,7 +131,7 @@ func (b *Backupd) handleSnapshot(w http.ResponseWriter, req *http.Request) {
 
 	root := b.conf.Deref().Local.Root
 
-	if err := b.env.CreateSnapshotRecursively(req.Context(), b.globalLogs, root, periodicity); err != nil {
+	if err := b.env.Snapshot(req.Context(), b.globalLogs, root, periodicity); err != nil {
 		http.Error(w, fmt.Sprintf("Error creating snapshot: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -142,6 +142,10 @@ func (b *Backupd) handleSnapshot(w http.ResponseWriter, req *http.Request) {
 	}
 
 	b.globalLogs.Printf("Created %s snapshot for root %s", periodicity, root)
+	b.history.RecordOp(history.Op{
+		At:        time.Now(),
+		Operation: fmt.Sprintf("recursive %s snapshot", periodicity),
+	})
 	b.notifyStateChange()
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, "Created %s snapshot for root %s\n", periodicity, root)
@@ -253,6 +257,8 @@ func (b *Backupd) handleConfigPut(w http.ResponseWriter, req *http.Request) {
 
 type apiDatasetState struct {
 	Name             string     `json:"name"`
+	Verdict          string     `json:"verdict"`
+	Reason           string     `json:"reason,omitempty"`
 	Paused           bool       `json:"paused"`
 	Syncing          bool       `json:"syncing"`
 	StalenessSeconds int64      `json:"stalenessSeconds"`
@@ -261,60 +267,103 @@ type apiDatasetState struct {
 	PlanSteps        int        `json:"planSteps"`
 	PlanCompleted    int        `json:"planCompleted"`
 	PlanFailed       int        `json:"planFailed"`
+	PendingDeletions int        `json:"pendingDeletions"`
+	PendingTransfers int        `json:"pendingTransfers"`
 	LastSuccess      *time.Time `json:"lastSuccess,omitempty"`
+	LastFailure      *time.Time `json:"lastFailure,omitempty"`
+	LastError        string     `json:"lastError,omitempty"`
+}
+
+type apiActivity struct {
+	Phase               string     `json:"phase"`
+	Dataset             string     `json:"dataset,omitempty"`
+	Step                int        `json:"step,omitempty"`
+	Steps               int        `json:"steps,omitempty"`
+	Operation           string     `json:"operation,omitempty"`
+	Until               *time.Time `json:"until,omitempty"`
+	ConsecutiveFailures int        `json:"consecutiveFailures,omitempty"`
+	TransferPercent     *float64   `json:"transferPercent,omitempty"`
+	TransferRate        *float64   `json:"transferRateBytesPerSec,omitempty"`
 }
 
 func (b *Backupd) handleState(w http.ResponseWriter, req *http.Request) {
-	state := b.state.Deref()
-	conf := b.conf.Deref()
+	d := b.pageData("")
+
+	act := apiActivity{
+		Phase:               d.Activity.Phase.String(),
+		Dataset:             d.Activity.Dataset.Path(),
+		Step:                d.Activity.Step,
+		Steps:               d.Activity.Steps,
+		Operation:           d.Activity.Operation,
+		ConsecutiveFailures: d.Activity.ConsecutiveFailures,
+	}
+	if !d.Activity.Until.IsZero() {
+		act.Until = &d.Activity.Until
+	}
+	if x := d.Activity.Transfer; x != nil {
+		pct := x.Percent()
+		act.TransferPercent = &pct
+		act.TransferRate = &x.Rate
+	}
 
 	resp := struct {
+		Verdict  string            `json:"verdict"`
+		Reason   string            `json:"reason,omitempty"`
 		Paused   bool              `json:"paused"`
 		Dryrun   bool              `json:"dryrun"`
+		Activity apiActivity       `json:"activity"`
 		Datasets []apiDatasetState `json:"datasets"`
 		Cycles   []history.Cycle   `json:"cycles"`
 	}{
-		Paused:   conf.Paused,
-		Dryrun:   b.dryrun,
+		Verdict:  d.System.Verdict.String(),
+		Reason:   d.System.Reason,
+		Paused:   d.Conf.Paused,
+		Dryrun:   d.Dryrun,
+		Activity: act,
 		Datasets: []apiDatasetState{},
-		Cycles:   b.history.Cycles(),
+		Cycles:   d.Cycles,
 	}
 	if resp.Cycles == nil {
 		resp.Cycles = []history.Cycle{}
 	}
 
-	if state != nil {
-		for _, name := range state.ListDatasets() {
-			ds := state.GetDataset(name)
-			if ds == nil {
-				continue
-			}
-			d := apiDatasetState{
-				Name:             name.String(),
-				Paused:           conf.PausedFor(name.Path()),
-				Syncing:          b.syncStatus.IsSyncing(name),
-				StalenessSeconds: int64(ds.Staleness().Seconds()),
-			}
-			if ds.Current != nil {
-				d.LocalSnapshots = ds.Current.Local.Len()
-				d.RemoteSnapshots = ds.Current.Remote.Len()
-			}
-			if ds.Plan != nil {
-				d.PlanSteps = len(ds.Plan.Steps)
-				for _, step := range ds.Plan.Steps {
-					switch step.Status {
-					case model.StepCompleted:
-						d.PlanCompleted++
-					case model.StepFailed:
-						d.PlanFailed++
-					}
+	for _, dv := range d.Views {
+		ds := d.State.GetDataset(dv.Name)
+		out := apiDatasetState{
+			Name:             dv.Name.String(),
+			Verdict:          dv.Verdict.String(),
+			Reason:           dv.Reason,
+			Paused:           d.Conf.PausedFor(dv.Name.Path()),
+			Syncing:          dv.Verdict == VerdictSyncing,
+			StalenessSeconds: int64(dv.Lag.Seconds()),
+			PendingDeletions: dv.PendingDeletions,
+			PendingTransfers: dv.PendingTransfers,
+		}
+		if ds != nil && ds.Current != nil {
+			out.LocalSnapshots = ds.Current.Local.Len()
+			out.RemoteSnapshots = ds.Current.Remote.Len()
+		}
+		if ds != nil && ds.Plan != nil {
+			out.PlanSteps = len(ds.Plan.Steps)
+			for _, step := range ds.Plan.Steps {
+				switch step.Status {
+				case model.StepCompleted:
+					out.PlanCompleted++
+				case model.StepFailed:
+					out.PlanFailed++
 				}
 			}
-			if at, ok := b.history.LastSuccess(name); ok {
-				d.LastSuccess = &at
-			}
-			resp.Datasets = append(resp.Datasets, d)
 		}
+		if !dv.LastSuccess.IsZero() {
+			at := dv.LastSuccess
+			out.LastSuccess = &at
+		}
+		if dv.LastFailure != nil {
+			at := dv.LastFailure.At
+			out.LastFailure = &at
+			out.LastError = dv.LastFailure.Error
+		}
+		resp.Datasets = append(resp.Datasets, out)
 	}
 
 	writeJSON(w, resp)
@@ -332,16 +381,43 @@ func (b *Backupd) handlePoll(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
+// pageData assembles one consistent snapshot of everything the
+// dashboard shows: raw state plus the derived per-dataset and system
+// verdicts.
+func (b *Backupd) pageData(page string) pageData {
+	state := b.state.Deref()
+	conf := b.conf.Deref()
+
+	var views []DatasetView
+	byName := map[model.DatasetName]DatasetView{}
+	if state != nil {
+		for _, name := range state.ListDatasets() {
+			dv := datasetView(name, state.GetDataset(name), conf, b.history, b.activity)
+			views = append(views, dv)
+			byName[name] = dv
+		}
+	}
+
+	return pageData{
+		Page:       page,
+		State:      state,
+		Conf:       conf,
+		Activity:   b.activity.Get(),
+		Views:      views,
+		ViewByName: byName,
+		System:     systemView(state, conf, b.history, b.activity, views),
+		Cycles:     b.history.Cycles(),
+		Ops:        b.history.Ops(),
+		GlobalLogs: b.globalLogs.GetLogs(),
+		Dryrun:     b.dryrun,
+	}
+}
+
 func (b *Backupd) handlePage(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-
-	state := b.state.Deref()
-	conf := b.conf.Deref()
-	globalLogs := b.globalLogs.GetLogs()
-	syncStatus := b.syncStatus
 
 	path := req.URL.Path
 	if path == "/" {
@@ -351,22 +427,16 @@ func (b *Backupd) handlePage(w http.ResponseWriter, req *http.Request) {
 
 	trimmedPath := strings.TrimPrefix(path, "/")
 
-	if trimmedPath == "global" || trimmedPath == "config" {
-		templ.Handler(index(state, globalLogs, syncStatus, b.history, trimmedPath, b.dryrun, conf)).ServeHTTP(w, req)
-		return
-	} else if trimmedPath == "root" {
-		// The empty string is used as the dataset name for the root dataset
-		_, ok := state.Datasets[""]
-		if !ok {
-			http.Error(w, "Root dataset not found", http.StatusNotFound)
-			return
-		}
-		templ.Handler(index(state, globalLogs, syncStatus, b.history, "", b.dryrun, conf)).ServeHTTP(w, req)
-		return
+	var pageName string
+	switch trimmedPath {
+	case "global", "config":
+		pageName = trimmedPath
+	case "root":
+		// The empty string is the root dataset's name.
+		pageName = ""
+	default:
+		pageName = "/" + trimmedPath
 	}
 
-	// For all other paths, treat them as dataset paths
-	datasetForModel := "/" + trimmedPath
-
-	templ.Handler(index(state, globalLogs, syncStatus, b.history, datasetForModel, b.dryrun, conf)).ServeHTTP(w, req)
+	templ.Handler(page(b.pageData(pageName))).ServeHTTP(w, req)
 }

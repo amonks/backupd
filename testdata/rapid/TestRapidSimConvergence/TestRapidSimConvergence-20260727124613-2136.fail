@@ -1,0 +1,86 @@
+# 2026/07/27 12:46:13.723877 [TestRapidSimConvergence] [rapid] draw datasets: 2
+# 2026/07/27 12:46:13.723879 [TestRapidSimConvergence] [rapid] draw a-n: 3
+# 2026/07/27 12:46:13.723880 [TestRapidSimConvergence] [rapid] draw a-type-0: "daily"
+# 2026/07/27 12:46:13.723881 [TestRapidSimConvergence] [rapid] draw a-hour-0: 0
+# 2026/07/27 12:46:13.723882 [TestRapidSimConvergence] [rapid] draw a-local-0: true
+# 2026/07/27 12:46:13.723883 [TestRapidSimConvergence] [rapid] draw a-remote-0: false
+# 2026/07/27 12:46:13.723883 [TestRapidSimConvergence] [rapid] draw a-type-1: "daily"
+# 2026/07/27 12:46:13.723884 [TestRapidSimConvergence] [rapid] draw a-hour-1: 1
+# 2026/07/27 12:46:13.723884 [TestRapidSimConvergence] [rapid] draw a-local-1: true
+# 2026/07/27 12:46:13.723885 [TestRapidSimConvergence] [rapid] draw a-remote-1: false
+# 2026/07/27 12:46:13.723885 [TestRapidSimConvergence] [rapid] draw a-type-2: "weekly"
+# 2026/07/27 12:46:13.723886 [TestRapidSimConvergence] [rapid] draw a-hour-2: 0
+# 2026/07/27 12:46:13.723886 [TestRapidSimConvergence] [rapid] draw a-local-2: true
+# 2026/07/27 12:46:13.723886 [TestRapidSimConvergence] [rapid] draw a-remote-2: false
+# 2026/07/27 12:46:13.723888 [TestRapidSimConvergence] [rapid] draw b-n: 1
+# 2026/07/27 12:46:13.723888 [TestRapidSimConvergence] [rapid] draw b-type-0: "hourly"
+# 2026/07/27 12:46:13.723889 [TestRapidSimConvergence] [rapid] draw b-hour-0: 0
+# 2026/07/27 12:46:13.723890 [TestRapidSimConvergence] [rapid] draw b-local-0: false
+# 2026/07/27 12:46:13.723890 [TestRapidSimConvergence] [rapid] draw b-remote-0: false
+# 2026/07/27 12:46:13.723890 [TestRapidSimConvergence] [rapid] draw local-has-hourly: false
+# 2026/07/27 12:46:13.723890 [TestRapidSimConvergence] [rapid] draw local-has-daily: false
+# 2026/07/27 12:46:13.723891 [TestRapidSimConvergence] [rapid] draw local-has-weekly: false
+# 2026/07/27 12:46:13.723891 [TestRapidSimConvergence] [rapid] draw remote-has-hourly: false
+# 2026/07/27 12:46:13.723891 [TestRapidSimConvergence] [rapid] draw remote-has-daily: true
+# 2026/07/27 12:46:13.723892 [TestRapidSimConvergence] [rapid] draw remote-n-daily: 2
+# 2026/07/27 12:46:13.723892 [TestRapidSimConvergence] [rapid] draw remote-has-weekly: true
+# 2026/07/27 12:46:13.723892 [TestRapidSimConvergence] [rapid] draw remote-n-weekly: 1
+# 2026/07/27 12:46:13.723892 [TestRapidSimConvergence] [rapid] draw keepBaseline: false
+# 2026/07/27 12:46:13.724287 [TestRapidSimConvergence] /a not converged; remaining plan:
+# destroy Local /a@weekly-t00
+# sim state:
+# local /a: daily-t00 weekly-t00 daily-t01
+# local /b:
+# remote /a: daily-t00 weekly-t00 daily-t01
+# 
+v0.4.8#5429414735184052907
+0x0
+0x0
+0x1
+0x0
+0x38e38e38e38e4
+0x3
+0x0
+0x1
+0x0
+0x0
+0x0
+0x1
+0x0
+0x0
+0x1
+0x0
+0x0
+0x1
+0x1
+0x0
+0x38e38e38e38e4
+0x2
+0x0
+0x0
+0x0
+0x1
+0x0
+0x0
+0x0
+0x1
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x1
+0x0
+0x38e38e38e38e4
+0x2
+0x1
+0x0
+0x0
+0x1
+0x0

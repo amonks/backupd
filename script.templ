@@ -1,0 +1,249 @@
+package main
+
+// script is the dashboard's client-side behavior. All event handlers
+// are delegated from `document` so they survive DOM replacement: state
+// changes are applied by fetching the current page and swapping the
+// body in place (preserving scroll positions) rather than reloading,
+// which keeps the page readable while a sync is writing progress.
+templ script() {
+	<script>
+	// ---- Table sorting -------------------------------------------------
+	// Cells may carry a data-sort attribute with a numeric key (bytes,
+	// seconds, unix time); otherwise their text is compared, numerically
+	// when both sides parse as numbers. Sort choices persist across
+	// body swaps via sortState, keyed by table id or column signature.
+	const sortState = {};
+
+	function tableKey(table) {
+		return table.id || Array.from(table.querySelectorAll('th')).map(th => th.textContent.trim()).join('|');
+	}
+
+	function cellValue(row, col) {
+		const td = row.cells[col];
+		if (!td) return '';
+		if (td.dataset.sort !== undefined) return td.dataset.sort;
+		return td.textContent.trim();
+	}
+
+	function compareCells(a, b) {
+		const an = parseFloat(a), bn = parseFloat(b);
+		if (!isNaN(an) && !isNaN(bn)) return an - bn;
+		if (a === '—' || a === '-') return b === '—' || b === '-' ? 0 : 1;
+		if (b === '—' || b === '-') return -1;
+		return a.localeCompare(b);
+	}
+
+	function sortTable(table, col, asc) {
+		const tbody = table.querySelector('tbody');
+		if (!tbody) return;
+		// Group each sortable row with its detail rows (step logs,
+		// progress bars) so they move together.
+		const groups = [];
+		for (const row of Array.from(tbody.rows)) {
+			if (row.classList.contains('step-log') || row.classList.contains('step-progress')) {
+				if (groups.length) groups[groups.length - 1].push(row);
+			} else {
+				groups.push([row]);
+			}
+		}
+		groups.sort((ga, gb) => compareCells(cellValue(ga[0], col), cellValue(gb[0], col)) * (asc ? 1 : -1));
+		for (const group of groups) for (const row of group) tbody.appendChild(row);
+
+		table.querySelectorAll('th').forEach(th => th.classList.remove('sort-asc', 'sort-desc'));
+		const th = table.querySelectorAll('th')[col];
+		if (th) th.classList.add(asc ? 'sort-asc' : 'sort-desc');
+	}
+
+	document.addEventListener('click', function(e) {
+		const th = e.target.closest('th.sortable');
+		if (!th) return;
+		const table = th.closest('table');
+		const col = Array.from(table.querySelectorAll('th')).indexOf(th);
+		const key = tableKey(table);
+		const prev = sortState[key];
+		const asc = !(prev && prev.col === col && prev.asc);
+		sortState[key] = { col, asc };
+		sortTable(table, col, asc);
+	});
+
+	function reapplySorts() {
+		document.querySelectorAll('table').forEach(table => {
+			const st = sortState[tableKey(table)];
+			if (st) sortTable(table, st.col, st.asc);
+		});
+	}
+
+	// ---- Countdowns ----------------------------------------------------
+	// Elements with data-until (ms since epoch) tick down client-side.
+	function formatUntil(ms) {
+		let s = Math.floor(ms / 1000);
+		if (s <= 0) return 'any moment';
+		const d = Math.floor(s / 86400); s %= 86400;
+		const h = Math.floor(s / 3600); s %= 3600;
+		const m = Math.floor(s / 60); s %= 60;
+		if (d > 0) return `in ${d}d${h > 0 ? h + 'h' : ''}`;
+		if (h > 0) return `in ${h}h${m > 0 ? m + 'm' : ''}`;
+		if (m > 0) return `in ${m}m${s > 0 ? s + 's' : ''}`;
+		return `in ${s}s`;
+	}
+	setInterval(function() {
+		document.querySelectorAll('[data-until]').forEach(el => {
+			el.textContent = formatUntil(parseInt(el.dataset.until, 10) - Date.now());
+		});
+	}, 1000);
+
+	// ---- Control buttons -----------------------------------------------
+	// Any element with data-api posts to that endpoint, optionally
+	// confirming first. The page updates via the state-change poll.
+	document.addEventListener('click', async function(e) {
+		const btn = e.target.closest('button[data-api]');
+		if (!btn) return;
+		if (btn.dataset.confirm && !confirm(btn.dataset.confirm)) return;
+		btn.disabled = true;
+		try {
+			const res = await fetch(btn.dataset.api, { method: 'POST' });
+			if (!res.ok) alert(await res.text());
+		} catch (err) {
+			alert(err);
+		} finally {
+			btn.disabled = false;
+		}
+	});
+
+	document.addEventListener('click', async function(e) {
+		if (!e.target.closest('#snapshot-btn')) return;
+		const btn = e.target.closest('#snapshot-btn');
+		const periodicity = document.getElementById('snapshot-periodicity').value;
+		if (!confirm(`Create a recursive ${periodicity} snapshot?`)) return;
+		btn.disabled = true;
+		try {
+			const res = await fetch(`/api/snapshot?periodicity=${periodicity}`, { method: 'POST' });
+			if (!res.ok) alert(await res.text());
+		} catch (err) {
+			alert(err);
+		} finally {
+			btn.disabled = false;
+		}
+	});
+
+	// ---- Config editor -------------------------------------------------
+	async function previewConfig() {
+		const body = document.getElementById('config-editor').value;
+		const el = document.getElementById('config-impacts');
+		let res;
+		try {
+			res = await fetch('/api/config/preview', { method: 'POST', body });
+		} catch (err) {
+			el.innerHTML = '<pre class="config-error"></pre>';
+			el.querySelector('pre').textContent = String(err);
+			return null;
+		}
+		if (!res.ok) {
+			el.innerHTML = '<pre class="config-error"></pre>';
+			el.querySelector('pre').textContent = await res.text();
+			return null;
+		}
+		const data = await res.json();
+		renderImpacts(data.impacts);
+		return data.impacts;
+	}
+
+	function renderImpacts(impacts) {
+		const el = document.getElementById('config-impacts');
+		if (!impacts.length) {
+			el.innerHTML = '<p class="impact-note">Valid config. No dataset’s retention target changes.</p>';
+			return;
+		}
+		const rows = impacts.map(i => {
+			const cells = [
+				i.dataset,
+				i.retentionOld === i.retentionNew ? i.retentionNew : `${i.retentionOld} → ${i.retentionNew}`,
+				i.pausedOld === i.pausedNew ? (i.pausedNew ? 'paused' : '') : (i.pausedNew ? '→ paused' : '→ resumed'),
+				i.localDeletions,
+				i.remoteDeletions,
+				i.transfers,
+			];
+			return '<tr>' + cells.map(c => `<td>${escapeHtml(String(c))}</td>`).join('') + '</tr>';
+		}).join('');
+		el.innerHTML = '<h2>Impact</h2><table><thead><tr>'
+			+ '<th>dataset</th><th>retention</th><th>pause</th>'
+			+ '<th>local deletions</th><th>remote deletions</th><th>transfers</th>'
+			+ '</tr></thead><tbody>' + rows + '</tbody></table>';
+	}
+
+	function escapeHtml(s) {
+		const div = document.createElement('div');
+		div.textContent = s;
+		return div.innerHTML;
+	}
+
+	document.addEventListener('click', async function(e) {
+		if (e.target.closest('#config-preview')) {
+			previewConfig();
+			return;
+		}
+		const saveBtn = e.target.closest('#config-save');
+		if (!saveBtn) return;
+		const impacts = await previewConfig();
+		if (impacts === null) return;
+		const deletions = impacts.reduce((n, i) => n + i.localDeletions + i.remoteDeletions, 0);
+		let msg = 'Save and apply this config?';
+		if (impacts.length) {
+			msg = `Save and apply? ${impacts.length} dataset(s) affected; ${deletions} snapshot(s) become scheduled for deletion.`;
+		}
+		if (!confirm(msg)) return;
+		saveBtn.disabled = true;
+		try {
+			const res = await fetch('/api/config', { method: 'PUT', body: document.getElementById('config-editor').value });
+			if (!res.ok) {
+				alert(await res.text());
+				return;
+			}
+			window.location.reload();
+		} finally {
+			saveBtn.disabled = false;
+		}
+	});
+
+	// ---- Live refresh --------------------------------------------------
+	// Long-poll for state changes; on change, re-fetch the page and swap
+	// the body in place, preserving sidebar/main scroll positions —
+	// a full reload would lose them every few seconds during a sync.
+	async function refreshBody() {
+		const res = await fetch(location.href);
+		if (!res.ok) return;
+		const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+		const sidebar = document.querySelector('.sidebar');
+		const main = document.querySelector('.main-content');
+		const scrolls = {
+			sidebar: sidebar ? sidebar.scrollTop : 0,
+			main: main ? main.scrollTop : 0,
+		};
+		document.body.replaceChildren(...doc.body.childNodes);
+		const newSidebar = document.querySelector('.sidebar');
+		const newMain = document.querySelector('.main-content');
+		if (newSidebar) newSidebar.scrollTop = scrolls.sidebar;
+		if (newMain) newMain.scrollTop = scrolls.main;
+		reapplySorts();
+	}
+
+	async function poll() {
+		while (true) {
+			try {
+				const response = await fetch('/poll');
+				if (response.ok && response.status === 200) {
+					await refreshBody();
+				}
+			} catch (error) {
+				await new Promise(resolve => setTimeout(resolve, 5000));
+			}
+		}
+	}
+
+	// The config page doesn't auto-refresh: a swap would clobber an
+	// in-progress edit.
+	if (window.location.pathname !== '/config') {
+		poll();
+	}
+	</script>
+}

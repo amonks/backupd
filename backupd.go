@@ -19,15 +19,15 @@ import (
 	"monks.co/backupd/logger"
 	"monks.co/backupd/model"
 	"monks.co/backupd/snitch"
-	"monks.co/backupd/sync"
+	"monks.co/backupd/status"
 )
 
 type Backupd struct {
 	conf       *atom.Atom[*config.Config]
 	state      *atom.Atom[*model.Model]
 	globalLogs *logger.Logger
-	syncStatus *sync.Status
-	env        *env.Env
+	activity   *status.Tracker
+	env        env.Interface
 	addr       string
 	dryrun     bool
 	version    *atom.Atom[int64]
@@ -54,12 +54,20 @@ type syncRequest struct {
 }
 
 func New(conf *config.Config, addr string, dryrun bool) *Backupd {
+	e := env.New(conf)
+	b := NewWithEnv(conf, addr, dryrun, e)
+	e.OnProgress = b.activity.Progress
+	return b
+}
+
+// NewWithEnv builds a daemon around any environment implementation —
+// the real ZFS-over-SSH env, or the sim package's in-memory pair.
+func NewWithEnv(conf *config.Config, addr string, dryrun bool, e env.Interface) *Backupd {
 	b := &Backupd{
 		conf:       atom.New(conf),
 		state:      atom.New[*model.Model](nil),
 		globalLogs: logger.New("global"),
-		syncStatus: sync.New(),
-		env:        env.New(conf),
+		env:        e,
 		addr:       addr,
 		dryrun:     dryrun,
 		version:    atom.New[int64](0),
@@ -67,7 +75,8 @@ func New(conf *config.Config, addr string, dryrun bool) *Backupd {
 		syncNow:    make(chan syncRequest, 16),
 		history:    history.New(),
 	}
-	b.resume = b.env.Resume
+	b.activity = status.New(b.notifyStateChange)
+	b.resume = e.Resume
 	b.snitch = snitch.OK
 	b.wait = b.waitWake
 	return b
@@ -105,14 +114,16 @@ func (b *Backupd) TriggerSync(all bool, dataset model.DatasetName) bool {
 	}
 }
 
-// idle waits between sync cycles. Sync-now requests interrupt it: a
-// global request ends the idle immediately (the caller starts the next
-// cycle), while a per-dataset request syncs just that dataset and
-// resumes waiting out the interval.
-func (b *Backupd) idle(ctx context.Context, d time.Duration) error {
+// idle waits between sync cycles, tracking the wait (idle after a
+// success, backing off after `failures` failed cycles) in the activity
+// state. Sync-now requests interrupt it: a global request ends the idle
+// immediately (the caller starts the next cycle), while a per-dataset
+// request syncs just that dataset and resumes waiting out the interval.
+func (b *Backupd) idle(ctx context.Context, d time.Duration, failures int) error {
 	deadline := time.Now().Add(d)
 	remaining := d
 	for {
+		b.activity.Wait(deadline, failures)
 		req, err := b.wait(ctx, remaining)
 		if err != nil {
 			return err
@@ -232,8 +243,10 @@ const (
 
 func (b *Backupd) Sync(ctx context.Context) error {
 	backoff := minBackoff
+	consecutive := 0
 	for {
 		b.globalLogs.Printf("start")
+		b.activity.StartCycle()
 		b.reloadConfigFromDisk()
 		cycleStart := time.Now()
 		allOK := true
@@ -287,6 +300,7 @@ func (b *Backupd) Sync(ctx context.Context) error {
 
 		if allOK {
 			backoff = minBackoff
+			consecutive = 0
 			conf := b.conf.Deref()
 			if conf.SnitchID != "" {
 				// A paused system is not a backed-up system: skip
@@ -300,16 +314,18 @@ func (b *Backupd) Sync(ctx context.Context) error {
 						b.globalLogs.Printf("snitch error: %v", err)
 					} else {
 						b.globalLogs.Printf("snitched success")
+						b.history.RecordSnitch(time.Now())
 					}
 				}
 			}
 			b.globalLogs.Printf("waiting to restart")
-			if err := b.idle(ctx, conf.Interval()-time.Since(cycleStart)); err != nil {
+			if err := b.idle(ctx, conf.Interval()-time.Since(cycleStart), 0); err != nil {
 				return err
 			}
 		} else {
+			consecutive++
 			b.globalLogs.Printf("retrying in %s", backoff)
-			if err := b.idle(ctx, backoff); err != nil {
+			if err := b.idle(ctx, backoff, consecutive); err != nil {
 				return err
 			}
 			backoff = min(2*backoff, maxBackoff)
@@ -321,7 +337,7 @@ func (b *Backupd) refreshAllDatasetsAndPlans(ctx context.Context) error {
 	b.state.Reset(model.New())
 
 	// First, discover and refresh all datasets
-	localDatasets, err := b.env.Local.GetDatasets(b.globalLogs)
+	localDatasets, err := b.env.LocalDatasets(b.globalLogs)
 	if err != nil {
 		return fmt.Errorf("getting local datasets: %s", err)
 	}
@@ -330,7 +346,7 @@ func (b *Backupd) refreshAllDatasetsAndPlans(ctx context.Context) error {
 			return err
 		}
 
-		snapshots, err := b.env.Local.GetSnapshots(b.globalLogs, datasetInfo.Name)
+		snapshots, err := b.env.LocalSnapshots(b.globalLogs, datasetInfo.Name)
 		if err != nil {
 			return fmt.Errorf("getting snapshots for '%s': %w", datasetInfo.Name, err)
 		}
@@ -338,7 +354,7 @@ func (b *Backupd) refreshAllDatasetsAndPlans(ctx context.Context) error {
 		b.state.Swap(model.AddLocalDataset(datasetInfo.Name, snapshots, datasetInfo.Size))
 	}
 
-	remoteDatasets, err := b.env.Remote.GetDatasets(b.globalLogs)
+	remoteDatasets, err := b.env.RemoteDatasets(b.globalLogs)
 	if err != nil {
 		return fmt.Errorf("getting remote datasets: %w", err)
 	}
@@ -347,7 +363,7 @@ func (b *Backupd) refreshAllDatasetsAndPlans(ctx context.Context) error {
 			return err
 		}
 
-		snapshots, err := b.env.Remote.GetSnapshots(b.globalLogs, datasetInfo.Name)
+		snapshots, err := b.env.RemoteSnapshots(b.globalLogs, datasetInfo.Name)
 		if err != nil {
 			return fmt.Errorf("getting remote snapshots for '%s': %w", datasetInfo.Name, err)
 		}
@@ -403,14 +419,14 @@ func (b *Backupd) generatePlansForAllDatasets(ctx context.Context) {
 
 func (b *Backupd) refreshDataset(ctx context.Context, logger *logger.Logger, dataset model.DatasetName) error {
 	// Refresh *local snapshots
-	localSnapshots, err := b.env.Local.GetSnapshots(logger, dataset)
+	localSnapshots, err := b.env.LocalSnapshots(logger, dataset)
 	if err != nil {
 		return fmt.Errorf("getting local snapshots for '%s': %w", dataset, err)
 	}
 	b.state.Swap(model.AddLocalDataset(dataset, localSnapshots, nil))
 
 	// Refresh remote snapshots
-	remoteSnapshots, err := b.env.Remote.GetSnapshots(logger, dataset)
+	remoteSnapshots, err := b.env.RemoteSnapshots(logger, dataset)
 	if err != nil {
 		if strings.Contains(err.Error(), "dataset does not exist") {
 			remoteSnapshots = nil
@@ -423,11 +439,19 @@ func (b *Backupd) refreshDataset(ctx context.Context, logger *logger.Logger, dat
 	return nil
 }
 
-// syncDataset executes the plan for the given dataset.
+// syncDataset executes the plan for the given dataset, recording the
+// outcome in history (cancellation is not an outcome).
 func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) error {
-	// Mark dataset as syncing
-	b.syncStatus.SetSyncing(dataset, true)
-	defer b.syncStatus.SetSyncing(dataset, false)
+	err := b.syncDatasetInner(ctx, dataset)
+	if err != nil && ctx.Err() == nil {
+		b.history.RecordDatasetFailure(dataset, time.Now(), err.Error())
+		b.notifyStateChange()
+	}
+	return err
+}
+
+func (b *Backupd) syncDatasetInner(ctx context.Context, dataset model.DatasetName) error {
+	b.activity.StartDataset(dataset)
 
 	ds := b.state.Deref().GetDataset(dataset)
 	if ds == nil {
@@ -494,9 +518,6 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 		return nil
 	}
 
-	// Store initial state for validation during execution
-	initialState := b.state.Deref()
-
 	for i, step := range plan.Steps {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -519,6 +540,7 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 		// Get logger from the step's ProcessLogs
 		stepLogger := step.Logs
 		stepLogger.Printf("Applying op '%s'", step.Operation)
+		b.activity.StartStep(i+1, len(plan.Steps), step.Operation.String())
 
 		// Use TryExecute to manage status and timing
 		err := step.TryExecute(
@@ -527,11 +549,15 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 			},
 			func() error {
 				stepLogger.Printf("-- Ensuring in-memory state supports this update...")
-				initialDS := initialState.GetDataset(dataset)
-				if initialDS == nil || initialDS.Current == nil {
+				// Check against the *current* in-memory state, which
+				// earlier steps have already advanced — checking the
+				// cycle-start state instead would wrongly reject the
+				// second of two chained transfers (A→B, then B→C).
+				currentDS := b.state.Deref().GetDataset(dataset)
+				if currentDS == nil || currentDS.Current == nil {
 					return fmt.Errorf("dataset '%s' has no current inventory", dataset)
 				}
-				_, err := step.Apply(initialDS.Current)
+				_, err := step.Apply(currentDS.Current)
 				if err != nil {
 					return fmt.Errorf("applying op '%s' to in-memory state of '%s': %w", step, dataset, err)
 				}
@@ -603,6 +629,20 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 				return nil
 			})
 
+		// Record the executed operation in the activity feed. In dryrun
+		// mode nothing actually ran, so nothing is recorded.
+		if !b.dryrun && ctx.Err() == nil {
+			op := history.Op{At: time.Now(), Dataset: dataset, Operation: step.Operation.String()}
+			if step.StoppedAt != nil {
+				op.At = *step.StoppedAt
+			}
+			op.Duration = step.Duration()
+			if err != nil {
+				op.Error = err.Error()
+			}
+			b.history.RecordOp(op)
+		}
+
 		if err != nil {
 			stepLogger.Printf("-- Error: %s", err)
 			// Status is already set to Failed by TryExecute via updateStepStatus
@@ -622,7 +662,7 @@ func (b *Backupd) handleIncompleteTransfer(ctx context.Context, logger *logger.L
 		return nil
 	}
 
-	token, err := b.env.Remote.GetResumeToken(logger, dataset)
+	token, err := b.env.RemoteResumeToken(logger, dataset)
 	if err != nil && strings.Contains(err.Error(), "dataset does not exist") {
 		return nil
 	} else if err != nil {
@@ -638,10 +678,11 @@ func (b *Backupd) handleIncompleteTransfer(ctx context.Context, logger *logger.L
 		return nil
 	}
 
+	start := time.Now()
 resume:
 	if err := b.resume(ctx, logger, dataset, token); err != nil && strings.Contains(err.Error(), "contains partially-complete state") {
 		logger.Printf("aborting resumable transfer")
-		if err := b.env.Remote.AbortResumable(logger, dataset); err != nil {
+		if err := b.env.AbortRemoteResumable(logger, dataset); err != nil {
 			return fmt.Errorf("aborting resumable on '%s': %w", dataset, err)
 		}
 		logger.Printf("retrying resume")
@@ -651,15 +692,33 @@ resume:
 		// manually or by a policy change), so the transfer can never
 		// resume. Abort it on the remote and plan afresh.
 		logger.Printf("transfer cannot resume, aborting it: %s", err)
-		if err := b.env.Remote.AbortResumable(logger, dataset); err != nil {
+		if err := b.env.AbortRemoteResumable(logger, dataset); err != nil {
 			return fmt.Errorf("aborting unresumable transfer on '%s': %w", dataset, err)
 		}
+		b.history.RecordOp(history.Op{
+			At: time.Now(), Dataset: dataset,
+			Operation: "abort unresumable transfer",
+			Duration:  time.Since(start),
+		})
 		return nil
 	} else if err != nil {
+		if ctx.Err() == nil {
+			b.history.RecordOp(history.Op{
+				At: time.Now(), Dataset: dataset,
+				Operation: "resume interrupted transfer",
+				Duration:  time.Since(start),
+				Error:     err.Error(),
+			})
+		}
 		return fmt.Errorf("resuming transfer on '%s': %w", dataset, err)
 	}
 
 	logger.Printf("resume complete")
+	b.history.RecordOp(history.Op{
+		At: time.Now(), Dataset: dataset,
+		Operation: "resume interrupted transfer",
+		Duration:  time.Since(start),
+	})
 
 	return nil
 }
@@ -732,7 +791,7 @@ func (b *Backupd) RefreshLocalSnapshots(ctx context.Context, logger *logger.Logg
 
 		newState := currentState
 		for _, dsName := range currentState.ListDatasets() {
-			snapshots, err := b.env.Local.GetSnapshots(logger, dsName)
+			snapshots, err := b.env.LocalSnapshots(logger, dsName)
 			if err != nil {
 				log.Printf("Warning: failed to refresh snapshots for dataset %s: %v", dsName, err)
 				continue

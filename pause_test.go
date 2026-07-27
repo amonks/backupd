@@ -176,7 +176,7 @@ func TestSyncNowGlobalWakesIdle(t *testing.T) {
 		t.Fatal("TriggerSync returned false")
 	}
 	start := time.Now()
-	if err := b.idle(context.Background(), 10*time.Second); err != nil {
+	if err := b.idle(context.Background(), 10*time.Second, 0); err != nil {
 		t.Fatalf("idle: %v", err)
 	}
 	if elapsed := time.Since(start); elapsed > 2*time.Second {
@@ -196,7 +196,7 @@ func TestSyncNowDatasetSyncsDuringIdle(t *testing.T) {
 		t.Fatal("TriggerSync returned false")
 	}
 	start := time.Now()
-	if err := b.idle(context.Background(), 300*time.Millisecond); err != nil {
+	if err := b.idle(context.Background(), 300*time.Millisecond, 0); err != nil {
 		t.Fatalf("idle: %v", err)
 	}
 	if elapsed := time.Since(start); elapsed < 250*time.Millisecond {

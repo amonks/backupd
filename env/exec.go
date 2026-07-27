@@ -87,11 +87,12 @@ func (oc *outputCollector) Write(bs []byte) (int, error) {
 // It's expected that this is a long running process, taking hours or more.
 // The process can be canceled gracefully using the passed-in context.
 // While the process runs, we log details each minute about the throughput of
-// the pipe.
-func Pipe(ctx context.Context, logger *logger.Logger, size int64, from, to *exec.Cmd) error {
+// the pipe, and report cumulative progress to onProgress (which may be nil)
+// on every write.
+func Pipe(ctx context.Context, logger *logger.Logger, size int64, onProgress func(sent, total int64), from, to *exec.Cmd) error {
 	logger.Printf("%s | %s", strings.Join(from.Args, " "), strings.Join(to.Args, " "))
 
-	throughputStat := NewThroughputStat(logger, size)
+	throughputStat := NewThroughputStat(logger, size, onProgress)
 	defer throughputStat.Log()
 
 	pw, pr := io.Pipe()
@@ -209,6 +210,7 @@ type ThroughputStat struct {
 	bytesTransferred int64
 	size             int64
 	dataPoints       []dataPoint
+	onProgress       func(sent, total int64)
 }
 
 // dataPoint stores the number of bytes written and the timestamp.
@@ -218,11 +220,12 @@ type dataPoint struct {
 }
 
 // NewThroughputStat initializes a new ThroughputStat.
-func NewThroughputStat(logger *logger.Logger, size int64) *ThroughputStat {
+func NewThroughputStat(logger *logger.Logger, size int64, onProgress func(sent, total int64)) *ThroughputStat {
 	return &ThroughputStat{
-		startedAt: time.Now(),
-		logger:    logger,
-		size:      size,
+		startedAt:  time.Now(),
+		logger:     logger,
+		size:       size,
+		onProgress: onProgress,
 	}
 }
 
@@ -232,6 +235,9 @@ func (s *ThroughputStat) Write(bs []byte) (int, error) {
 
 	bytes := int64(len(bs))
 	s.bytesTransferred += bytes
+	if s.onProgress != nil {
+		s.onProgress(s.bytesTransferred, s.size)
+	}
 
 	// Add the current data point
 	s.dataPoints = append(s.dataPoints, dataPoint{bytes: bytes, timestamp: time.Now()})
