@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -10,11 +11,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/a-h/templ"
 	"golang.org/x/sync/errgroup"
 	"monks.co/backupd/atom"
 	"monks.co/backupd/config"
 	"monks.co/backupd/env"
+	"monks.co/backupd/history"
 	"monks.co/backupd/logger"
 	"monks.co/backupd/model"
 	"monks.co/backupd/snitch"
@@ -22,7 +23,7 @@ import (
 )
 
 type Backupd struct {
-	config     *config.Config
+	conf       *atom.Atom[*config.Config]
 	state      *atom.Atom[*model.Model]
 	globalLogs *logger.Logger
 	syncStatus *sync.Status
@@ -31,47 +32,138 @@ type Backupd struct {
 	dryrun     bool
 	version    *atom.Atom[int64]
 	versionCh  chan struct{}
+	syncNow    chan syncRequest
+	history    *history.History
 
 	// resume is env.Resume, injectable for tests.
 	resume func(context.Context, *logger.Logger, model.DatasetName, string) error
 
-	// wait blocks for a duration or until the context is cancelled,
-	// injectable for tests.
-	wait func(context.Context, time.Duration) error
+	// snitch pings Dead Man's Snitch, injectable for tests.
+	snitch func(id string) error
+
+	// wait blocks for a duration, returning early with a sync-now
+	// request if one arrives; injectable for tests.
+	wait func(context.Context, time.Duration) (*syncRequest, error)
 }
 
-func New(config *config.Config, addr string, dryrun bool) *Backupd {
+// syncRequest asks the sync loop for an immediate sync: the whole cycle
+// (all) or a single dataset.
+type syncRequest struct {
+	all     bool
+	dataset model.DatasetName
+}
+
+func New(conf *config.Config, addr string, dryrun bool) *Backupd {
 	b := &Backupd{
-		config:     config,
+		conf:       atom.New(conf),
 		state:      atom.New[*model.Model](nil),
 		globalLogs: logger.New("global"),
 		syncStatus: sync.New(),
-		env:        env.New(config),
+		env:        env.New(conf),
 		addr:       addr,
 		dryrun:     dryrun,
 		version:    atom.New[int64](0),
 		versionCh:  make(chan struct{}, 1),
+		syncNow:    make(chan syncRequest, 16),
+		history:    history.New(),
 	}
 	b.resume = b.env.Resume
-	b.wait = wait
+	b.snitch = snitch.OK
+	b.wait = b.waitWake
 	return b
 }
 
-// wait blocks until the duration elapses (returning nil) or the context is
-// cancelled (returning the context's error). Non-positive durations return
-// immediately.
-func wait(ctx context.Context, d time.Duration) error {
+// waitWake blocks until the duration elapses (returning nil, nil), a
+// sync-now request arrives (returning the request), or the context is
+// cancelled (returning the context's error). Non-positive durations
+// return immediately.
+func (b *Backupd) waitWake(ctx context.Context, d time.Duration) (*syncRequest, error) {
 	if d <= 0 {
-		return ctx.Err()
+		return nil, ctx.Err()
 	}
 	t := time.NewTimer(d)
 	defer t.Stop()
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		return nil, ctx.Err()
 	case <-t.C:
-		return nil
+		return nil, nil
+	case req := <-b.syncNow:
+		return &req, nil
 	}
+}
+
+// TriggerSync requests an immediate sync — a full cycle (all) or a single
+// dataset — waking the sync loop if it is idle between cycles. It returns
+// false if the request buffer is full.
+func (b *Backupd) TriggerSync(all bool, dataset model.DatasetName) bool {
+	select {
+	case b.syncNow <- syncRequest{all: all, dataset: dataset}:
+		return true
+	default:
+		return false
+	}
+}
+
+// idle waits between sync cycles. Sync-now requests interrupt it: a
+// global request ends the idle immediately (the caller starts the next
+// cycle), while a per-dataset request syncs just that dataset and
+// resumes waiting out the interval.
+func (b *Backupd) idle(ctx context.Context, d time.Duration) error {
+	deadline := time.Now().Add(d)
+	remaining := d
+	for {
+		req, err := b.wait(ctx, remaining)
+		if err != nil {
+			return err
+		}
+		if req == nil {
+			return nil
+		}
+		if req.all {
+			b.globalLogs.Printf("sync requested; starting cycle now")
+			return nil
+		}
+		b.globalLogs.Printf("sync requested for '%s'", req.dataset)
+		if err := b.syncDataset(ctx, req.dataset); err != nil {
+			b.globalLogs.Printf("sync error for '%s': %s", req.dataset, err)
+		}
+		remaining = time.Until(deadline)
+	}
+}
+
+// applyConfig swaps in a new config. Policy, pause, interval, and snitch
+// changes take effect immediately; the ZFS roots and SSH endpoint were
+// captured by env at startup, so changes there get a restart warning.
+func (b *Backupd) applyConfig(fresh *config.Config) {
+	cur := b.conf.Deref()
+	if fresh.Local.Root != cur.Local.Root ||
+		fresh.Remote.Root != cur.Remote.Root ||
+		fresh.Remote.SSHKey != cur.Remote.SSHKey ||
+		fresh.Remote.SSHHost != cur.Remote.SSHHost {
+		b.globalLogs.Printf("warning: local/remote endpoints changed; restart backupd to apply them")
+	}
+	b.conf.Reset(fresh)
+	b.notifyStateChange()
+}
+
+// reloadConfigFromDisk picks up hand-edits to the config file at cycle
+// start. An invalid or unreadable file keeps the current config.
+func (b *Backupd) reloadConfigFromDisk() {
+	cur := b.conf.Deref()
+	if cur.Path == "" {
+		return
+	}
+	fresh, err := config.LoadFrom(cur.Path)
+	if err != nil {
+		b.globalLogs.Printf("config reload failed; keeping current config: %s", err)
+		return
+	}
+	if bytes.Equal(fresh.Raw, cur.Raw) {
+		return
+	}
+	b.globalLogs.Printf("reloaded config from %s", cur.Path)
+	b.applyConfig(fresh)
 }
 
 // targetHas reports whether a snapshot is part of the target inventory at
@@ -125,104 +217,7 @@ func (b *Backupd) Go(ctx context.Context) error {
 }
 
 func (b *Backupd) Serve(ctx context.Context) error {
-	mux := http.NewServeMux()
-
-	// Handle snapshot creation endpoint
-	mux.HandleFunc("/snapshot", func(w http.ResponseWriter, req *http.Request) {
-		if req.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
-		periodicity := req.URL.Query().Get("periodicity")
-		if periodicity == "" {
-			http.Error(w, "Missing periodicity parameter", http.StatusBadRequest)
-			return
-		}
-
-		root := b.config.Local.Root
-
-		if err := b.env.CreateSnapshotRecursively(ctx, b.globalLogs, root, periodicity); err != nil {
-			http.Error(w, fmt.Sprintf("Error creating snapshot: %v", err), http.StatusInternalServerError)
-			return
-		}
-
-		if err := b.RefreshLocalSnapshots(ctx, b.globalLogs); err != nil {
-			http.Error(w, fmt.Sprintf("Error refreshing state: %v", err), http.StatusInternalServerError)
-			return
-		}
-
-		b.globalLogs.Printf("Created %s snapshot for root %s", periodicity, root)
-		b.notifyStateChange()
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, "Created %s snapshot for root %s\n", periodicity, root)
-	})
-
-	// Long-polling endpoint for state changes
-	mux.HandleFunc("/poll", func(w http.ResponseWriter, req *http.Request) {
-		if req.Method != http.MethodGet {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
-		select {
-		case <-b.versionCh:
-			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, "refresh")
-		case <-time.After(5 * time.Minute):
-			w.WriteHeader(http.StatusNoContent)
-		case <-req.Context().Done():
-			w.WriteHeader(http.StatusNoContent)
-		}
-	})
-
-	// Handle all routes with the generic handler and implement our own routing logic
-	mux.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
-		// Only handle GET requests
-		if req.Method != http.MethodGet {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
-		state := b.state.Deref()
-		globalLogs := b.globalLogs.GetLogs()
-		syncStatus := b.syncStatus
-
-		// Get the path without the leading slash
-		path := req.URL.Path
-		if path == "/" {
-			// Root path redirects to global view
-			http.Redirect(w, req, "/global", http.StatusFound)
-			return
-		}
-
-		// Remove leading slash for routing but keep it for special cases
-		trimmedPath := strings.TrimPrefix(path, "/")
-
-		// Handle special cases first
-		if trimmedPath == "global" {
-			templ.Handler(index(state, globalLogs, syncStatus, "global", b.dryrun, b.config)).ServeHTTP(w, req)
-			return
-		} else if trimmedPath == "root" {
-			// The empty string is used as the dataset name for the root dataset
-			// Check if the root dataset exists in the model
-			_, ok := state.Datasets[""]
-			if !ok {
-				http.Error(w, "Root dataset not found", http.StatusNotFound)
-				return
-			}
-			templ.Handler(index(state, globalLogs, syncStatus, "", b.dryrun, b.config)).ServeHTTP(w, req)
-			return
-		}
-
-		// For all other paths, treat them as dataset paths
-		// Add leading slash for the dataset model
-		datasetForModel := "/" + trimmedPath
-
-		templ.Handler(index(state, globalLogs, syncStatus, datasetForModel, b.dryrun, b.config)).ServeHTTP(w, req)
-	})
-
-	return listenAndServe(ctx, b.addr, mux)
+	return listenAndServe(ctx, b.addr, b.handler())
 }
 
 // Backoff bounds for failed sync cycles. A failure (e.g. the remote
@@ -239,8 +234,12 @@ func (b *Backupd) Sync(ctx context.Context) error {
 	backoff := minBackoff
 	for {
 		b.globalLogs.Printf("start")
+		b.reloadConfigFromDisk()
 		cycleStart := time.Now()
 		allOK := true
+		var cycleErr string
+		var failures []string
+		var datasets int
 
 		// At launch: refresh all datasets and generate plans
 		if err := b.refreshAllDatasetsAndPlans(ctx); err != nil {
@@ -248,6 +247,7 @@ func (b *Backupd) Sync(ctx context.Context) error {
 				return ctx.Err()
 			}
 			allOK = false
+			cycleErr = err.Error()
 			b.globalLogs.Printf("error refreshing all datasets and plans: %s", err)
 		} else {
 			// Then, for each dataset: refresh, replan, resync
@@ -257,11 +257,13 @@ func (b *Backupd) Sync(ctx context.Context) error {
 				}
 
 				b.globalLogs.Printf("processing dataset '%s'", ds)
+				datasets++
 
 				// Resync with the updated plan
 				b.globalLogs.Printf("syncing '%s'", ds)
 				if err := b.syncDataset(ctx, ds); err != nil {
 					allOK = false
+					failures = append(failures, ds.String())
 					err := fmt.Errorf("syncing '%s': %w", ds, err)
 					// Log to both global and dataset-specific logs
 					b.globalLogs.Printf("sync error; skipping dataset: %s", err)
@@ -272,23 +274,42 @@ func (b *Backupd) Sync(ctx context.Context) error {
 			b.globalLogs.Printf("synced all datasets")
 		}
 
+		b.history.RecordCycle(history.Cycle{
+			StartedAt: cycleStart,
+			StoppedAt: time.Now(),
+			OK:        allOK,
+			Paused:    b.conf.Deref().Paused,
+			Error:     cycleErr,
+			Datasets:  datasets,
+			Failures:  failures,
+		})
+		b.notifyStateChange()
+
 		if allOK {
 			backoff = minBackoff
-			if b.config.SnitchID != "" {
-				b.globalLogs.Printf("alerting deadmanssnitch")
-				if err := snitch.OK(b.config.SnitchID); err != nil {
-					b.globalLogs.Printf("snitch error: %v", err)
+			conf := b.conf.Deref()
+			if conf.SnitchID != "" {
+				// A paused system is not a backed-up system: skip
+				// the ping so a long-forgotten pause eventually
+				// trips the dead man's switch.
+				if conf.Paused {
+					b.globalLogs.Printf("paused; skipping deadmanssnitch")
 				} else {
-					b.globalLogs.Printf("snitched success")
+					b.globalLogs.Printf("alerting deadmanssnitch")
+					if err := b.snitch(conf.SnitchID); err != nil {
+						b.globalLogs.Printf("snitch error: %v", err)
+					} else {
+						b.globalLogs.Printf("snitched success")
+					}
 				}
 			}
 			b.globalLogs.Printf("waiting to restart")
-			if err := b.wait(ctx, time.Hour-time.Since(cycleStart)); err != nil {
+			if err := b.idle(ctx, conf.Interval()-time.Since(cycleStart)); err != nil {
 				return err
 			}
 		} else {
 			b.globalLogs.Printf("retrying in %s", backoff)
-			if err := b.wait(ctx, backoff); err != nil {
+			if err := b.idle(ctx, backoff); err != nil {
 				return err
 			}
 			backoff = min(2*backoff, maxBackoff)
@@ -357,7 +378,7 @@ func (b *Backupd) generatePlansForAllDatasets(ctx context.Context) {
 		if ds.Current == nil {
 			continue
 		}
-		localPolicy, remotePolicy, keepBaseline := b.config.PolicyFor(dsName.Path())
+		localPolicy, remotePolicy, keepBaseline := b.conf.Deref().PolicyFor(dsName.Path())
 		target := model.CalculateTargetInventory(ds.Current, localPolicy, remotePolicy, keepBaseline)
 		plan, err := model.CalculateTransitionPlan(ds.Current, target)
 		if err != nil {
@@ -413,15 +434,24 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 		return fmt.Errorf("dataset '%s' not found", dataset)
 	}
 
-	// Handle incomplete transfer. A resume failure must not block the
-	// deletions in this dataset's plan: they may be exactly what frees
-	// the space the resume needs (e.g. a full remote). Hold the error,
-	// sync everything up to the plan's first transfer, and return it at
-	// the end so the dataset still counts as failed and is retried.
-	resumeErr := b.handleIncompleteTransfer(ctx, ds.Logs, dataset)
-	if resumeErr != nil {
-		resumeErr = fmt.Errorf("handling incomplete transfer of '%s': %w", dataset, resumeErr)
-		ds.Logs.Printf("%s; syncing deletions only", resumeErr)
+	// While paused (globally or for this dataset), the state is still
+	// refreshed and the plan regenerated — the dashboard keeps showing
+	// what would happen — but nothing executes, including resuming an
+	// interrupted transfer.
+	paused := b.conf.Deref().PausedFor(dataset.Path())
+
+	var resumeErr error
+	if !paused {
+		// Handle incomplete transfer. A resume failure must not block the
+		// deletions in this dataset's plan: they may be exactly what frees
+		// the space the resume needs (e.g. a full remote). Hold the error,
+		// sync everything up to the plan's first transfer, and return it at
+		// the end so the dataset still counts as failed and is retried.
+		resumeErr = b.handleIncompleteTransfer(ctx, ds.Logs, dataset)
+		if resumeErr != nil {
+			resumeErr = fmt.Errorf("handling incomplete transfer of '%s': %w", dataset, resumeErr)
+			ds.Logs.Printf("%s; syncing deletions only", resumeErr)
+		}
 	}
 
 	// Refresh this specific dataset
@@ -438,7 +468,7 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 	}
 
 	// Generate plan
-	localPolicy, remotePolicy, keepBaseline := b.config.PolicyFor(dataset.Path())
+	localPolicy, remotePolicy, keepBaseline := b.conf.Deref().PolicyFor(dataset.Path())
 	target := model.CalculateTargetInventory(ds.Current, localPolicy, remotePolicy, keepBaseline)
 	plan, err := model.CalculateTransitionPlan(ds.Current, target)
 	if err != nil {
@@ -457,12 +487,27 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 		return fmt.Errorf("validating plan for '%s': %w", dataset, err)
 	}
 
+	if paused {
+		if len(plan.Steps) > 0 {
+			ds.Logs.Printf("paused; plan (%d steps) not executed", len(plan.Steps))
+		}
+		return nil
+	}
+
 	// Store initial state for validation during execution
 	initialState := b.state.Deref()
 
 	for i, step := range plan.Steps {
 		if err := ctx.Err(); err != nil {
 			return err
+		}
+
+		// Pause takes effect at step boundaries: the in-flight
+		// operation finishes, then nothing new starts. Remaining
+		// steps stay pending.
+		if b.conf.Deref().PausedFor(dataset.Path()) {
+			ds.Logs.Printf("paused; stopping before step %d of %d", i+1, len(plan.Steps))
+			return nil
 		}
 
 		// A failed resume means the remote still holds partial receive
@@ -565,6 +610,9 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 		}
 	}
 
+	if resumeErr == nil {
+		b.history.RecordDatasetSuccess(dataset, time.Now())
+	}
 	return resumeErr
 }
 
@@ -646,7 +694,7 @@ func (b *Backupd) Plan(ctx context.Context, dataset model.DatasetName) error {
 		return fmt.Errorf("dataset '%s' has no current inventory", dataset)
 	}
 
-	localPolicy, remotePolicy, keepBaseline := b.config.PolicyFor(dataset.Path())
+	localPolicy, remotePolicy, keepBaseline := b.conf.Deref().PolicyFor(dataset.Path())
 	target := model.CalculateTargetInventory(ds.Current, localPolicy, remotePolicy, keepBaseline)
 
 	// Store the target in the dataset for display purposes
@@ -707,32 +755,38 @@ func (b *Backupd) RefreshLocalSnapshots(ctx context.Context, logger *logger.Logg
 	return nil
 }
 
-// CreateSnapshot sends a request to the running daemon to create a snapshot
-func (b *Backupd) CreateSnapshot(ctx context.Context, periodicity string) error {
+// CallAPI sends a control request to the running daemon at b.addr and
+// logs the response body. The CLI subcommands (snapshot, pause, resume,
+// sync) are thin wrappers over this.
+func (b *Backupd) CallAPI(ctx context.Context, method, path string) error {
 	client := &http.Client{Timeout: 30 * time.Second}
 
-	url := fmt.Sprintf("http://%s/snapshot?periodicity=%s", b.addr, periodicity)
-	req, err := http.NewRequestWithContext(ctx, "POST", url, nil)
+	url := fmt.Sprintf("http://%s%s", b.addr, path)
+	req, err := http.NewRequestWithContext(ctx, method, url, nil)
 	if err != nil {
 		return fmt.Errorf("creating request: %w", err)
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("calling snapshot endpoint: %w", err)
+		return fmt.Errorf("calling %s: %w", path, err)
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("snapshot endpoint returned status %d: %s", resp.StatusCode, string(body))
-	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return fmt.Errorf("reading response: %w", err)
 	}
 
-	log.Printf("Snapshot created: %s", strings.TrimSpace(string(body)))
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("%s returned status %d: %s", path, resp.StatusCode, string(body))
+	}
+
+	log.Printf("%s", strings.TrimSpace(string(body)))
 	return nil
+}
+
+// CreateSnapshot sends a request to the running daemon to create a snapshot
+func (b *Backupd) CreateSnapshot(ctx context.Context, periodicity string) error {
+	return b.CallAPI(ctx, "POST", "/api/snapshot?periodicity="+periodicity)
 }

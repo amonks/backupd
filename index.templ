@@ -3,13 +3,15 @@ package main
 import (
 	"fmt"
 	"monks.co/backupd/config"
+	"monks.co/backupd/history"
 	"monks.co/backupd/logger"
 	"monks.co/backupd/model"
 	"monks.co/backupd/sync"
+	"strings"
 	"time"
 )
 
-templ index(state *model.Model, globalLogs []logger.LogEntry, syncStatus *sync.Status, dataset string, dryrun bool, conf *config.Config) {
+templ index(state *model.Model, globalLogs []logger.LogEntry, syncStatus *sync.Status, hist *history.History, dataset string, dryrun bool, conf *config.Config) {
 	<!DOCTYPE html>
 	<html>
 		<head>
@@ -36,6 +38,107 @@ templ index(state *model.Model, globalLogs []logger.LogEntry, syncStatus *sync.S
 				}
 				body.dryrun-active {
 					padding-top: 2.5rem;
+				}
+				.paused-banner {
+					background-color: #607d8b;
+					color: white;
+					text-align: center;
+					padding: 0.5rem;
+					position: fixed;
+					top: 0;
+					left: 0;
+					right: 0;
+					z-index: 1000;
+					font-weight: bold;
+				}
+				body.paused-active {
+					padding-top: 2.5rem;
+				}
+				body.dryrun-active .paused-banner {
+					top: 2.5rem;
+				}
+				body.dryrun-active.paused-active {
+					padding-top: 5rem;
+				}
+				.controls {
+					display: flex;
+					flex-direction: column;
+					gap: 0.4rem;
+					margin: 0.5rem 0 1rem 0;
+				}
+				.controls .snapshot-row {
+					display: flex;
+					gap: 0.4rem;
+				}
+				.controls .snapshot-row select {
+					flex: 1;
+					min-width: 0;
+				}
+				.btn {
+					padding: 0.35rem 0.7rem;
+					border: 1px solid #bbb;
+					border-radius: 4px;
+					background-color: white;
+					cursor: pointer;
+					font-size: 0.85rem;
+				}
+				.btn:hover {
+					background-color: #eee;
+				}
+				.btn.warn {
+					border-color: #607d8b;
+					color: #607d8b;
+					font-weight: 500;
+				}
+				.dataset-controls {
+					display: flex;
+					gap: 0.5rem;
+					margin-bottom: 1rem;
+				}
+				.paused-label {
+					color: #607d8b;
+					font-weight: 500;
+				}
+				.cycle-ok {
+					color: #4caf50;
+					font-weight: bold;
+				}
+				.cycle-failed {
+					color: #f44336;
+					font-weight: bold;
+				}
+				.cycle-paused {
+					color: #607d8b;
+					font-weight: bold;
+				}
+				#config-editor {
+					width: 100%;
+					min-height: 24rem;
+					font-family: monospace;
+					font-size: 0.9rem;
+					padding: 0.75rem;
+					border: 1px solid #ccc;
+					border-radius: 4px;
+					box-sizing: border-box;
+					resize: vertical;
+				}
+				.config-actions {
+					display: flex;
+					gap: 0.5rem;
+					margin: 0.75rem 0;
+				}
+				.config-error {
+					background-color: #ffebee;
+					color: #c62828;
+					padding: 0.75rem;
+					border-radius: 4px;
+					white-space: pre-wrap;
+					font-family: monospace;
+					font-size: 0.85rem;
+				}
+				.impact-note {
+					color: #666;
+					font-size: 0.9rem;
 				}
 				.sidebar {
 					width: 250px;
@@ -105,6 +208,9 @@ templ index(state *model.Model, globalLogs []logger.LogEntry, syncStatus *sync.S
 				}
 				.sync-indicator.stale {
 					background-color: #ff9800;
+				}
+				.sync-indicator.paused {
+					background-color: #9e9e9e;
 				}
 				@keyframes pulse {
 					from { opacity: 0.6; }
@@ -249,9 +355,12 @@ templ index(state *model.Model, globalLogs []logger.LogEntry, syncStatus *sync.S
 				}
 			</style>
 		</head>
-		<body class={ templ.KV("dryrun-active", dryrun) }>
+		<body class={ templ.KV("dryrun-active", dryrun), templ.KV("paused-active", conf.Paused) }>
 			if dryrun {
 				<div class="dryrun-banner">DRY RUN MODE - No actual transfers or deletions will occur</div>
+			}
+			if conf.Paused {
+				<div class="paused-banner">PAUSED - State is refreshed and planned, but nothing executes</div>
 			}
 			<div class="sidebar">
 				<h2>System</h2>
@@ -260,9 +369,31 @@ templ index(state *model.Model, globalLogs []logger.LogEntry, syncStatus *sync.S
 						<div class="dataset-name">Global Overview</div>
 					</div>
 				</a>
+				<a href="/config" class={ "dataset-link", templ.KV("active", dataset == "config") }>
+					<div class="dataset-info">
+						<div class="dataset-name">Config</div>
+					</div>
+				</a>
+				<div class="controls">
+					if conf.Paused {
+						<button class="btn warn" data-api="/api/resume">Resume all</button>
+					} else {
+						<button class="btn" data-api="/api/pause" data-confirm="Pause all execution? State keeps refreshing, but no transfers or deletions run, and the dead-man's-snitch ping is withheld.">Pause all</button>
+					}
+					<button class="btn" data-api="/api/sync">Sync now</button>
+					<div class="snapshot-row">
+						<select id="snapshot-periodicity">
+							<option value="daily">daily</option>
+							<option value="weekly">weekly</option>
+							<option value="monthly">monthly</option>
+							<option value="yearly">yearly</option>
+						</select>
+						<button class="btn" id="snapshot-btn">Snapshot</button>
+					</div>
+				</div>
 				<h2>Datasets</h2>
 				for _, ds := range state.ListDatasets() {
-					@renderDatasetLink(ds, state.Datasets[ds], syncStatus, dataset)
+					@renderDatasetLink(ds, state.Datasets[ds], syncStatus, conf, dataset)
 				}
 			</div>
 			<div class="main-content">
@@ -291,7 +422,7 @@ templ index(state *model.Model, globalLogs []logger.LogEntry, syncStatus *sync.S
 									<td>
 										@renderRetention(conf, ds.Path())
 									</td>
-									<td>@renderSyncIndicator(ds, state.Datasets[ds], syncStatus)
+									<td>@renderSyncIndicator(ds, state.Datasets[ds], syncStatus, conf.PausedFor(ds.Path()))
 </td>
 									<td><code>{ state.Datasets[ds].Current.LocalString() }</code></td>
 									<td><code>{ state.Datasets[ds].Metrics.LocalUsedString() }</code></td>
@@ -303,6 +434,45 @@ templ index(state *model.Model, globalLogs []logger.LogEntry, syncStatus *sync.S
 							}
 						</tbody>
 					</table>
+					if cycles := hist.Cycles(); len(cycles) > 0 {
+						<h2>Cycle History</h2>
+						<table>
+							<thead>
+								<tr>
+									<th>Started</th>
+									<th>Duration</th>
+									<th>Result</th>
+									<th>Datasets</th>
+									<th>Detail</th>
+								</tr>
+							</thead>
+							<tbody>
+								for _, c := range cycles {
+									<tr>
+										<td>{ c.StartedAt.Format(time.DateTime) }</td>
+										<td>{ c.Duration().Round(time.Second).String() }</td>
+										<td>
+											if c.Paused {
+												<span class="cycle-paused">paused</span>
+											} else if c.OK {
+												<span class="cycle-ok">ok</span>
+											} else {
+												<span class="cycle-failed">failed</span>
+											}
+										</td>
+										<td>{ fmt.Sprint(c.Datasets) }</td>
+										<td>
+											if c.Error != "" {
+												<code>{ c.Error }</code>
+											} else if len(c.Failures) > 0 {
+												<code>failed: { strings.Join(c.Failures, ", ") }</code>
+											}
+										</td>
+									</tr>
+								}
+							</tbody>
+						</table>
+					}
 					// Display global logs on the overview page
 					if len(globalLogs) > 0 {
 						<section class="logs">
@@ -314,10 +484,32 @@ templ index(state *model.Model, globalLogs []logger.LogEntry, syncStatus *sync.S
 							</ul>
 						</section>
 					}
+				} else if dataset == "config" {
+					<h1>Config</h1>
+					<p class="impact-note">
+						Editing <code>{ conf.Path }</code>. Preview validates the file and shows
+						what would change — per dataset — before anything is written. Saving
+						applies immediately: retention, pause, and interval changes take effect
+						without a restart.
+					</p>
+					<textarea id="config-editor" spellcheck="false">{ string(conf.Raw) }</textarea>
+					<div class="config-actions">
+						<button class="btn" id="config-preview">Preview changes</button>
+						<button class="btn warn" id="config-save">Save &amp; apply</button>
+					</div>
+					<div id="config-impacts"></div>
 				} else {
 					<h1>Dataset: { dataset }</h1>
 					if ds, ok := state.Datasets[model.DatasetName(dataset)]; ok {
 						<div>
+							<div class="dataset-controls">
+								if conf.SubtreePaused(dataset) {
+									<button class="btn warn" data-api={ "/api/resume?dataset=" + dataset }>Resume dataset</button>
+								} else if dataset != "" {
+									<button class="btn" data-api={ "/api/pause?dataset=" + dataset } data-confirm={ "Pause syncing for " + dataset + " and everything under it?" }>Pause dataset</button>
+								}
+								<button class="btn" data-api={ "/api/sync?dataset=" + dataset }>Sync now</button>
+							</div>
 							<h2>Status</h2>
 							<table>
 								<tr>
@@ -354,6 +546,24 @@ templ index(state *model.Model, globalLogs []logger.LogEntry, syncStatus *sync.S
 										@renderRetention(conf, dataset)
 									</td>
 								</tr>
+								if conf.PausedFor(dataset) {
+									<tr>
+										<th>Paused</th>
+										<td>
+											if conf.Paused {
+												<span class="paused-label">yes (global pause)</span>
+											} else {
+												<span class="paused-label">yes</span>
+											}
+										</td>
+									</tr>
+								}
+								if lastSuccess, ok := hist.LastSuccess(model.DatasetName(dataset)); ok {
+									<tr>
+										<th>Last successful sync</th>
+										<td>{ lastSuccess.Format(time.DateTime) }</td>
+									</tr>
+								}
 							</table>
 							if ds.Plan != nil && len(ds.Plan.Steps) > 0 {
 								<h2>Sync Plan</h2>
@@ -577,6 +787,123 @@ templ index(state *model.Model, globalLogs []logger.LogEntry, syncStatus *sync.S
 				document.querySelectorAll('table').forEach(makeSortable);
 			});
 
+			// Control buttons: any element with data-api posts to that
+			// endpoint, optionally confirming first. The page refreshes via
+			// the state-change poll.
+			document.addEventListener('click', async function(e) {
+				const btn = e.target.closest('button[data-api]');
+				if (!btn) return;
+				if (btn.dataset.confirm && !confirm(btn.dataset.confirm)) return;
+				btn.disabled = true;
+				try {
+					const res = await fetch(btn.dataset.api, { method: 'POST' });
+					if (!res.ok) alert(await res.text());
+				} catch (err) {
+					alert(err);
+				} finally {
+					btn.disabled = false;
+				}
+			});
+
+			document.addEventListener('DOMContentLoaded', function() {
+				const snapshotBtn = document.getElementById('snapshot-btn');
+				if (snapshotBtn) {
+					snapshotBtn.addEventListener('click', async function() {
+						const periodicity = document.getElementById('snapshot-periodicity').value;
+						if (!confirm(`Create a recursive ${periodicity} snapshot?`)) return;
+						snapshotBtn.disabled = true;
+						try {
+							const res = await fetch(`/api/snapshot?periodicity=${periodicity}`, { method: 'POST' });
+							if (!res.ok) alert(await res.text());
+						} catch (err) {
+							alert(err);
+						} finally {
+							snapshotBtn.disabled = false;
+						}
+					});
+				}
+			});
+
+			// Config editor: preview renders the per-dataset impact of the
+			// edited config without writing anything; save previews first and
+			// asks for confirmation when the change schedules deletions.
+			async function previewConfig() {
+				const body = document.getElementById('config-editor').value;
+				const el = document.getElementById('config-impacts');
+				let res;
+				try {
+					res = await fetch('/api/config/preview', { method: 'POST', body });
+				} catch (err) {
+					el.innerHTML = '<pre class="config-error"></pre>';
+					el.querySelector('pre').textContent = String(err);
+					return null;
+				}
+				if (!res.ok) {
+					el.innerHTML = '<pre class="config-error"></pre>';
+					el.querySelector('pre').textContent = await res.text();
+					return null;
+				}
+				const data = await res.json();
+				renderImpacts(data.impacts);
+				return data.impacts;
+			}
+
+			function renderImpacts(impacts) {
+				const el = document.getElementById('config-impacts');
+				if (!impacts.length) {
+					el.innerHTML = '<p class="impact-note">Valid config. No dataset’s retention target changes.</p>';
+					return;
+				}
+				const rows = impacts.map(i => {
+					const cells = [
+						i.dataset,
+						i.retentionOld === i.retentionNew ? i.retentionNew : `${i.retentionOld} → ${i.retentionNew}`,
+						i.pausedOld === i.pausedNew ? (i.pausedNew ? 'paused' : '') : (i.pausedNew ? '→ paused' : '→ resumed'),
+						i.localDeletions,
+						i.remoteDeletions,
+						i.transfers,
+					];
+					return '<tr>' + cells.map(c => `<td>${escapeHtml(String(c))}</td>`).join('') + '</tr>';
+				}).join('');
+				el.innerHTML = '<h2>Impact</h2><table><thead><tr>'
+					+ '<th>dataset</th><th>retention</th><th>pause</th>'
+					+ '<th>local deletions</th><th>remote deletions</th><th>transfers</th>'
+					+ '</tr></thead><tbody>' + rows + '</tbody></table>';
+			}
+
+			function escapeHtml(s) {
+				const div = document.createElement('div');
+				div.textContent = s;
+				return div.innerHTML;
+			}
+
+			document.addEventListener('DOMContentLoaded', function() {
+				const previewBtn = document.getElementById('config-preview');
+				const saveBtn = document.getElementById('config-save');
+				if (previewBtn) previewBtn.addEventListener('click', previewConfig);
+				if (saveBtn) saveBtn.addEventListener('click', async function() {
+					const impacts = await previewConfig();
+					if (impacts === null) return;
+					const deletions = impacts.reduce((n, i) => n + i.localDeletions + i.remoteDeletions, 0);
+					let msg = 'Save and apply this config?';
+					if (impacts.length) {
+						msg = `Save and apply? ${impacts.length} dataset(s) affected; ${deletions} snapshot(s) become scheduled for deletion.`;
+					}
+					if (!confirm(msg)) return;
+					saveBtn.disabled = true;
+					try {
+						const res = await fetch('/api/config', { method: 'PUT', body: document.getElementById('config-editor').value });
+						if (!res.ok) {
+							alert(await res.text());
+							return;
+						}
+						window.location.reload();
+					} finally {
+						saveBtn.disabled = false;
+					}
+				});
+			});
+
 			// Long-polling for state changes
 			async function poll() {
 				while (true) {
@@ -595,21 +922,24 @@ templ index(state *model.Model, globalLogs []logger.LogEntry, syncStatus *sync.S
 				}
 			}
 
-			// Start polling when the page loads
+			// Start polling when the page loads — except on the config page,
+			// where a reload would clobber an in-progress edit.
 			document.addEventListener('DOMContentLoaded', function() {
-				poll();
+				if (window.location.pathname !== '/config') {
+					poll();
+				}
 			});
 		</script>
 		</body>
 	</html>
 }
 
-templ renderDatasetLink(ds model.DatasetName, dataset *model.Dataset, syncStatus *sync.Status, currentDataset string) {
+templ renderDatasetLink(ds model.DatasetName, dataset *model.Dataset, syncStatus *sync.Status, conf *config.Config, currentDataset string) {
 	// Create a URL-safe path for the dataset
 	// For the special root dataset, we need a special case
 	if ds.String() == "<root>" {
 		<a href={ templ.SafeURL("/root") } class={ "dataset-link", templ.KV("active", ds.String() == currentDataset) }>
-			@renderSyncIndicator(ds, dataset, syncStatus)
+			@renderSyncIndicator(ds, dataset, syncStatus, conf.PausedFor(ds.Path()))
 			<div class="dataset-info">
 				<div class="dataset-name">{ ds.String() }</div>
 				@renderDatasetSize(dataset)
@@ -622,7 +952,7 @@ templ renderDatasetLink(ds model.DatasetName, dataset *model.Dataset, syncStatus
 		// For normal datasets, create a URL using just the dataset name without the leading slash
 		// This allows the URL router to handle it properly
 		<a href={ templ.SafeURL("/" + ds.String()[1:]) } class={ "dataset-link", templ.KV("active", ds.String() == currentDataset) }>
-			@renderSyncIndicator(ds, dataset, syncStatus)
+			@renderSyncIndicator(ds, dataset, syncStatus, conf.PausedFor(ds.Path()))
 			<div class="dataset-info">
 				<div class="dataset-name">{ ds.String() }</div>
 				@renderDatasetSize(dataset)
@@ -634,9 +964,11 @@ templ renderDatasetLink(ds model.DatasetName, dataset *model.Dataset, syncStatus
 	}
 }
 
-templ renderSyncIndicator(ds model.DatasetName, dataset *model.Dataset, syncStatus *sync.Status) {
+templ renderSyncIndicator(ds model.DatasetName, dataset *model.Dataset, syncStatus *sync.Status, paused bool) {
 	if syncStatus.IsSyncing(ds) {
 		<span class="sync-indicator syncing" title="Currently syncing"></span>
+	} else if paused {
+		<span class="sync-indicator paused" title="Paused"></span>
 	} else if dataset.Staleness() > time.Minute*10 {
 		<span class="sync-indicator stale" title="Stale - needs sync"></span>
 	} else {

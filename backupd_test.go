@@ -11,6 +11,7 @@ import (
 	"monks.co/backupd/atom"
 	"monks.co/backupd/config"
 	"monks.co/backupd/env"
+	"monks.co/backupd/history"
 	"monks.co/backupd/logger"
 	"monks.co/backupd/model"
 	"monks.co/backupd/sync"
@@ -28,6 +29,7 @@ type fakeHandler struct {
 	match string
 	rows  []string
 	err   error
+	fn    func() // optional side effect, run on match
 }
 
 func (f *fakeExecutor) Exec(logger *logger.Logger, args ...string) ([]string, error) {
@@ -35,6 +37,9 @@ func (f *fakeExecutor) Exec(logger *logger.Logger, args ...string) ([]string, er
 	f.calls = append(f.calls, cmd)
 	for _, h := range f.handlers {
 		if strings.Contains(cmd, h.match) {
+			if h.fn != nil {
+				h.fn()
+			}
 			return h.rows, h.err
 		}
 	}
@@ -69,7 +74,7 @@ func testConf() *config.Config {
 
 func newTestBackupd(conf *config.Config, local, remote *fakeExecutor) *Backupd {
 	b := &Backupd{
-		config:     conf,
+		conf:       atom.New(conf),
 		state:      atom.New[*model.Model](nil),
 		globalLogs: logger.New("global"),
 		syncStatus: sync.New(),
@@ -80,10 +85,14 @@ func newTestBackupd(conf *config.Config, local, remote *fakeExecutor) *Backupd {
 		addr:      "127.0.0.1:0",
 		version:   atom.New[int64](0),
 		versionCh: make(chan struct{}, 1),
+		syncNow:   make(chan syncRequest, 16),
+		history:   history.New(),
 	}
 	b.resume = func(context.Context, *logger.Logger, model.DatasetName, string) error {
 		return fmt.Errorf("unexpected resume call")
 	}
+	b.snitch = func(string) error { return nil }
+	b.wait = b.waitWake
 	b.state.Reset(model.New())
 	return b
 }
@@ -122,12 +131,12 @@ func TestSyncRetriesWithBackoffWhenRemoteIsDown(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var waits []time.Duration
-	b.wait = func(ctx context.Context, d time.Duration) error {
+	b.wait = func(ctx context.Context, d time.Duration) (*syncRequest, error) {
 		waits = append(waits, d)
 		if len(waits) >= 7 {
 			cancel()
 		}
-		return ctx.Err()
+		return nil, ctx.Err()
 	}
 
 	if err := b.Sync(ctx); !errors.Is(err, context.Canceled) {
@@ -176,7 +185,7 @@ func TestSyncBackoffResetsAfterSuccessfulCycle(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var waits []time.Duration
-	b.wait = func(ctx context.Context, d time.Duration) error {
+	b.wait = func(ctx context.Context, d time.Duration) (*syncRequest, error) {
 		waits = append(waits, d)
 		switch len(waits) {
 		case 1:
@@ -186,7 +195,7 @@ func TestSyncBackoffResetsAfterSuccessfulCycle(t *testing.T) {
 		case 3:
 			cancel()
 		}
-		return ctx.Err()
+		return nil, ctx.Err()
 	}
 
 	if err := b.Sync(ctx); !errors.Is(err, context.Canceled) {

@@ -5,13 +5,22 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
 
 type Config struct {
 	SnitchID string `toml:"snitch_id"`
-	Remote   struct {
+	// Paused pauses execution globally: state is still refreshed and plans
+	// are still generated, but no transfers or deletions run.
+	Paused bool `toml:"paused"`
+	// IntervalRaw is the duration between sync cycles (default "1h").
+	IntervalRaw string `toml:"interval"`
+	// Listen is the HTTP listen address (default "0.0.0.0:8888"); the
+	// -addr flag overrides it.
+	Listen string `toml:"listen"`
+	Remote struct {
 		SSHKey  string         `toml:"ssh_key"`
 		SSHHost string         `toml:"ssh_host"`
 		Policy  map[string]int `toml:"policy"`
@@ -20,8 +29,14 @@ type Config struct {
 	Local struct {
 		Policy map[string]int `toml:"policy"`
 		Root   string         `toml:"root"`
-	}
+	} `toml:"local"`
 	Overrides map[string]*Override `toml:"overrides"`
+
+	// Path is the file this config was loaded from, and Raw its exact
+	// bytes. Raw, not a re-serialization, is the source of truth for
+	// editing: it preserves comments and formatting.
+	Path string `toml:"-"`
+	Raw  []byte `toml:"-"`
 }
 
 // Override customizes retention for a dataset subtree. Keys are dataset
@@ -32,7 +47,11 @@ type Config struct {
 // only policy matches and the latest shared snapshot (the sync point).
 type Override struct {
 	KeepBaseline *bool `toml:"keep_baseline"`
-	Local        struct {
+	// Paused pauses execution for this subtree. Unlike retention, pause is
+	// cumulative: a dataset is paused if any matching override prefix is
+	// paused, regardless of which override wins retention resolution.
+	Paused bool `toml:"paused"`
+	Local  struct {
 		Policy map[string]int `toml:"policy"`
 	} `toml:"local"`
 	Remote struct {
@@ -80,6 +99,45 @@ func (c *Config) PolicyFor(dataset string) (local, remote map[string]int, keepBa
 		keepBaseline = *best.KeepBaseline
 	}
 	return local, remote, keepBaseline
+}
+
+// PausedFor reports whether execution is paused for a dataset (named
+// relative to the root with a leading slash; "" is the root itself).
+// Pause accumulates across all matching override prefixes rather than
+// following retention's longest-prefix-wins rule: pausing /tm pauses
+// /tm/lugh even if /tm/lugh has its own retention override.
+func (c *Config) PausedFor(dataset string) bool {
+	return c.Paused || c.SubtreePaused(dataset)
+}
+
+// SubtreePaused reports whether a dataset is paused by an override (its
+// own or an ancestor's), ignoring the global pause. The UI uses this to
+// decide whether a dataset's button should say Pause or Resume: under a
+// global pause, per-dataset buttons still control the subtree flag.
+func (c *Config) SubtreePaused(dataset string) bool {
+	for key, override := range c.Overrides {
+		key = normalizeOverrideKey(key)
+		if dataset != key && !strings.HasPrefix(dataset, key+"/") {
+			continue
+		}
+		if override.Paused {
+			return true
+		}
+	}
+	return false
+}
+
+// Interval returns the duration between sync cycles, defaulting to an
+// hour. Parse guarantees IntervalRaw is valid.
+func (c *Config) Interval() time.Duration {
+	if c.IntervalRaw == "" {
+		return time.Hour
+	}
+	d, err := time.ParseDuration(c.IntervalRaw)
+	if err != nil {
+		return time.Hour
+	}
+	return d
 }
 
 // RetentionDescription returns a human-readable summary of the retention
@@ -137,23 +195,74 @@ var pathHierarchy = []string{
 
 func Load() (*Config, error) {
 	for _, path := range pathHierarchy {
-		f, err := os.Open(path)
-		if err != nil && os.IsNotExist(err) {
+		if _, err := os.Stat(path); err != nil && os.IsNotExist(err) {
 			continue
 		} else if err != nil {
 			return nil, err
 		}
-
-		defer f.Close()
-
-		dec := toml.NewDecoder(f)
-		var conf Config
-		if _, err := dec.Decode(&conf); err != nil {
-			return nil, fmt.Errorf("decoding '%s': %w", path, err)
-		}
-
-		return &conf, nil
+		return LoadFrom(path)
 	}
 
 	return nil, fmt.Errorf("no config file exists {%s}", strings.Join(pathHierarchy, ", "))
+}
+
+// LoadFrom loads and validates the config file at path, recording the
+// path and raw bytes for later editing.
+func LoadFrom(path string) (*Config, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	conf, err := Parse(raw)
+	if err != nil {
+		return nil, fmt.Errorf("decoding '%s': %w", path, err)
+	}
+	conf.Path = path
+	return conf, nil
+}
+
+// Parse decodes and validates a config. Decoding is strict: unknown keys
+// are an error, so typos like "dialy" surface immediately instead of
+// silently retaining nothing.
+func Parse(raw []byte) (*Config, error) {
+	var conf Config
+	meta, err := toml.Decode(string(raw), &conf)
+	if err != nil {
+		return nil, err
+	}
+	if undecoded := meta.Undecoded(); len(undecoded) > 0 {
+		keys := make([]string, len(undecoded))
+		for i, k := range undecoded {
+			keys[i] = k.String()
+		}
+		return nil, fmt.Errorf("unknown keys: %s", strings.Join(keys, ", "))
+	}
+	if conf.IntervalRaw != "" {
+		if _, err := time.ParseDuration(conf.IntervalRaw); err != nil {
+			return nil, fmt.Errorf("invalid interval %q: %w", conf.IntervalRaw, err)
+		}
+	}
+	conf.Raw = raw
+	return &conf, nil
+}
+
+// Save atomically replaces the config file at path with raw, preserving
+// the file's mode. Write-then-rename ensures the daemon never loads a
+// half-written config after a crash.
+func Save(path string, raw []byte) error {
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(path); err == nil {
+		mode = info.Mode().Perm()
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, raw, mode); err != nil {
+		return fmt.Errorf("writing '%s': %w", tmp, err)
+	}
+	if err := os.Chmod(tmp, mode); err != nil {
+		return fmt.Errorf("chmod '%s': %w", tmp, err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("renaming '%s' to '%s': %w", tmp, path, err)
+	}
+	return nil
 }

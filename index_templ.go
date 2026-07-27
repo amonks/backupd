@@ -11,13 +11,15 @@ import templruntime "github.com/a-h/templ/runtime"
 import (
 	"fmt"
 	"monks.co/backupd/config"
+	"monks.co/backupd/history"
 	"monks.co/backupd/logger"
 	"monks.co/backupd/model"
 	"monks.co/backupd/sync"
+	"strings"
 	"time"
 )
 
-func index(state *model.Model, globalLogs []logger.LogEntry, syncStatus *sync.Status, dataset string, dryrun bool, conf *config.Config) templ.Component {
+func index(state *model.Model, globalLogs []logger.LogEntry, syncStatus *sync.Status, hist *history.History, dataset string, dryrun bool, conf *config.Config) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -38,11 +40,11 @@ func index(state *model.Model, globalLogs []logger.LogEntry, syncStatus *sync.St
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<!doctype html><html><head><title>backupd</title><style>\n\t\t\t\tbody {\n\t\t\t\t\tfont-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif;\n\t\t\t\t\tmargin: 0;\n\t\t\t\t\tpadding: 0;\n\t\t\t\t\tdisplay: flex;\n\t\t\t\t\theight: 100vh;\n\t\t\t\t}\n\t\t\t\t.dryrun-banner {\n\t\t\t\t\tbackground-color: #ff9800;\n\t\t\t\t\tcolor: white;\n\t\t\t\t\ttext-align: center;\n\t\t\t\t\tpadding: 0.5rem;\n\t\t\t\t\tposition: fixed;\n\t\t\t\t\ttop: 0;\n\t\t\t\t\tleft: 0;\n\t\t\t\t\tright: 0;\n\t\t\t\t\tz-index: 1000;\n\t\t\t\t\tfont-weight: bold;\n\t\t\t\t}\n\t\t\t\tbody.dryrun-active {\n\t\t\t\t\tpadding-top: 2.5rem;\n\t\t\t\t}\n\t\t\t\t.sidebar {\n\t\t\t\t\twidth: 250px;\n\t\t\t\t\tbackground-color: #f5f5f5;\n\t\t\t\t\tborder-right: 1px solid #ddd;\n\t\t\t\t\tpadding: 1rem;\n\t\t\t\t\toverflow-y: auto;\n\t\t\t\t}\n\t\t\t\t.sidebar h2 {\n\t\t\t\t\tmargin-top: 0;\n\t\t\t\t\tfont-size: 1.2rem;\n\t\t\t\t}\n\t\t\t\t.main-content {\n\t\t\t\t\tflex: 1;\n\t\t\t\t\tpadding: 1rem;\n\t\t\t\t\toverflow-y: auto;\n\t\t\t\t}\n\t\t\t\t.dataset-link {\n\t\t\t\t\tdisplay: flex;\n\t\t\t\t\talign-items: flex-start;\n\t\t\t\t\tpadding: 0.5rem;\n\t\t\t\t\ttext-decoration: none;\n\t\t\t\t\tcolor: #333;\n\t\t\t\t\tborder-radius: 4px;\n\t\t\t\t\tmargin-bottom: 0.25rem;\n\t\t\t\t\tgap: 0.5rem;\n\t\t\t\t}\n\t\t\t\t.dataset-link:hover, .dataset-link.active {\n\t\t\t\t\tbackground-color: #e0e0e0;\n\t\t\t\t}\n\t\t\t\t.dataset-link .status {\n\t\t\t\t\tmargin-left: auto;\n\t\t\t\t\tfont-size: 0.8rem;\n\t\t\t\t\tcolor: #666;\n\t\t\t\t\tflex-shrink: 0;\n\t\t\t\t}\n\t\t\t\t.dataset-link .status.stale {\n\t\t\t\t\tcolor: #f44336;\n\t\t\t\t}\n\t\t\t\t.dataset-info {\n\t\t\t\t\tdisplay: flex;\n\t\t\t\t\tflex-direction: column;\n\t\t\t\t\tgap: 0.2rem;\n\t\t\t\t\tflex-grow: 1;\n\t\t\t\t\tmin-width: 0;\n\t\t\t\t}\n\t\t\t\t.dataset-name {\n\t\t\t\t\tfont-weight: 500;\n\t\t\t\t}\n\t\t\t\t.dataset-size {\n\t\t\t\t\tfont-size: 0.75rem;\n\t\t\t\t\tcolor: #666;\n\t\t\t\t}\n\t\t\t\t.sync-indicator {\n\t\t\t\t\twidth: 12px;\n\t\t\t\t\theight: 12px;\n\t\t\t\t\tborder-radius: 50%;\n\t\t\t\t\tflex-shrink: 0;\n\t\t\t\t\tmargin-top: 0.1rem;\n\t\t\t\t}\n\t\t\t\t.sync-indicator.syncing {\n\t\t\t\t\tbackground: linear-gradient(45deg, #2196f3, #64b5f6);\n\t\t\t\t\tanimation: pulse 1.5s ease-in-out infinite alternate;\n\t\t\t\t}\n\t\t\t\t.sync-indicator.synced {\n\t\t\t\t\tbackground-color: #4caf50;\n\t\t\t\t}\n\t\t\t\t.sync-indicator.stale {\n\t\t\t\t\tbackground-color: #ff9800;\n\t\t\t\t}\n\t\t\t\t@keyframes pulse {\n\t\t\t\t\tfrom { opacity: 0.6; }\n\t\t\t\t\tto { opacity: 1; }\n\t\t\t\t}\n\t\t\t\t@keyframes spin {\n\t\t\t\t\tfrom { transform: rotate(0deg); }\n\t\t\t\t\tto { transform: rotate(360deg); }\n\t\t\t\t}\n\t\t\t\t.step-status {\n\t\t\t\t\tdisplay: inline-block;\n\t\t\t\t\twidth: 16px;\n\t\t\t\t\theight: 16px;\n\t\t\t\t\tmargin-right: 8px;\n\t\t\t\t\tvertical-align: middle;\n\t\t\t\t}\n\t\t\t\t.step-status.pending {\n\t\t\t\t\tborder: 2px solid #ccc;\n\t\t\t\t\tborder-radius: 50%;\n\t\t\t\t}\n\t\t\t\t.step-status.in-progress {\n\t\t\t\t\tborder: 2px solid #2196f3;\n\t\t\t\t\tborder-top: 2px solid transparent;\n\t\t\t\t\tborder-radius: 50%;\n\t\t\t\t\tanimation: spin 1s linear infinite;\n\t\t\t\t}\n\t\t\t\t.step-status.completed::before {\n\t\t\t\t\tcontent: '✓';\n\t\t\t\t\tcolor: #4caf50;\n\t\t\t\t\tfont-weight: bold;\n\t\t\t\t}\n\t\t\t\t.step-status.failed::before {\n\t\t\t\t\tcontent: '✗';\n\t\t\t\t\tcolor: #f44336;\n\t\t\t\t\tfont-weight: bold;\n\t\t\t\t}\n\t\t\t\ttable {\n\t\t\t\t\twidth: 100%;\n\t\t\t\t\tborder-collapse: collapse;\n\t\t\t\t\tmargin-bottom: 1rem;\n\t\t\t\t}\n\t\t\t\tth, td {\n\t\t\t\t\tpadding: .2em 1em;\n\t\t\t\t\ttext-align: left;\n\t\t\t\t\tborder-bottom: 1px solid #ddd;\n\t\t\t\t}\n\t\t\t\tth {\n\t\t\t\t\tfont-weight: bold;\n\t\t\t\t}\n\t\t\t\tth.sortable {\n\t\t\t\t\tcursor: pointer;\n\t\t\t\t\tuser-select: none;\n\t\t\t\t\tposition: relative;\n\t\t\t\t}\n\t\t\t\tth.sortable:hover {\n\t\t\t\t\tbackground-color: #f0f0f0;\n\t\t\t\t}\n\t\t\t\tth.sortable::after {\n\t\t\t\t\tcontent: '↕';\n\t\t\t\t\tposition: absolute;\n\t\t\t\t\tright: 0.5rem;\n\t\t\t\t\topacity: 0.3;\n\t\t\t\t\tfont-size: 0.8em;\n\t\t\t\t}\n\t\t\t\tth.sortable.sort-asc::after {\n\t\t\t\t\tcontent: '↑';\n\t\t\t\t\topacity: 0.8;\n\t\t\t\t}\n\t\t\t\tth.sortable.sort-desc::after {\n\t\t\t\t\tcontent: '↓';\n\t\t\t\t\topacity: 0.8;\n\t\t\t\t}\n\t\t\t\tth.sortable:hover::after {\n\t\t\t\t\topacity: 0.6;\n\t\t\t\t}\n\t\t\t\t.logs {\n\t\t\t\t\tbackground-color: #f9f9f9;\n\t\t\t\t\tpadding: 1rem;\n\t\t\t\t\tborder-radius: 4px;\n\t\t\t\t\tmargin-top: 1rem;\n\t\t\t\t}\n\t\t\t\t.logs h2 {\n\t\t\t\t\tmargin-top: 0;\n\t\t\t\t}\n\t\t\t\t.logs ul {\n\t\t\t\t\tlist-style-type: none;\n\t\t\t\t\tpadding: 0;\n\t\t\t\t\tmargin: 0;\n\t\t\t\t}\n\t\t\t\t.logs li {\n\t\t\t\t\tpadding: 0.25rem 0;\n\t\t\t\t\tfont-family: monospace;\n\t\t\t\t}\n\t\t\t\t.plan-logs {\n\t\t\t\t\tbackground-color: #f0f8ff;\n\t\t\t\t\tpadding: 1rem;\n\t\t\t\t\tborder-radius: 4px;\n\t\t\t\t\tmargin-bottom: 1rem;\n\t\t\t\t}\n\t\t\t\t.plan-logs h3 {\n\t\t\t\t\tmargin-top: 0;\n\t\t\t\t\tfont-size: 1rem;\n\t\t\t\t\tcolor: #2196f3;\n\t\t\t\t}\n\t\t\t\t.plan-logs ul {\n\t\t\t\t\tlist-style-type: none;\n\t\t\t\t\tpadding: 0;\n\t\t\t\t\tmargin: 0;\n\t\t\t\t}\n\t\t\t\t.plan-logs li {\n\t\t\t\t\tpadding: 0.25rem 0;\n\t\t\t\t\tfont-family: monospace;\n\t\t\t\t}\n\t\t\t\t.step-log {\n\t\t\t\t\tbackground-color: #f9f9f9;\n\t\t\t\t}\n\t\t\t\t.log-cell {\n\t\t\t\t\tpadding-left: 2rem !important;\n\t\t\t\t}\n\t\t\t\t.log-message {\n\t\t\t\t\tfont-size: 0.85rem;\n\t\t\t\t\tcolor: #666;\n\t\t\t\t\tfont-family: monospace;\n\t\t\t\t\tdisplay: block;\n\t\t\t\t\tpadding: 0.2rem 0;\n\t\t\t\t}\n\t\t\t\t.snapshot-table th, .snapshot-table td {\n\t\t\t\t\ttext-align: center;\n\t\t\t\t}\n\t\t\t\t.snapshot-present {\n\t\t\t\t\tcolor: #4caf50;\n\t\t\t\t}\n\t\t\t\t.snapshot-absent {\n\t\t\t\t\tcolor: #f44336;\n\t\t\t\t}\n\t\t\t\t.snapshot-doomed {\n\t\t\t\t\tcolor: #ff9800;\n\t\t\t\t}\n\t\t\t\t.retention-override {\n\t\t\t\t\tcolor: #ff9800;\n\t\t\t\t\tfont-weight: 500;\n\t\t\t\t}\n\t\t\t</style></head>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<!doctype html><html><head><title>backupd</title><style>\n\t\t\t\tbody {\n\t\t\t\t\tfont-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif;\n\t\t\t\t\tmargin: 0;\n\t\t\t\t\tpadding: 0;\n\t\t\t\t\tdisplay: flex;\n\t\t\t\t\theight: 100vh;\n\t\t\t\t}\n\t\t\t\t.dryrun-banner {\n\t\t\t\t\tbackground-color: #ff9800;\n\t\t\t\t\tcolor: white;\n\t\t\t\t\ttext-align: center;\n\t\t\t\t\tpadding: 0.5rem;\n\t\t\t\t\tposition: fixed;\n\t\t\t\t\ttop: 0;\n\t\t\t\t\tleft: 0;\n\t\t\t\t\tright: 0;\n\t\t\t\t\tz-index: 1000;\n\t\t\t\t\tfont-weight: bold;\n\t\t\t\t}\n\t\t\t\tbody.dryrun-active {\n\t\t\t\t\tpadding-top: 2.5rem;\n\t\t\t\t}\n\t\t\t\t.paused-banner {\n\t\t\t\t\tbackground-color: #607d8b;\n\t\t\t\t\tcolor: white;\n\t\t\t\t\ttext-align: center;\n\t\t\t\t\tpadding: 0.5rem;\n\t\t\t\t\tposition: fixed;\n\t\t\t\t\ttop: 0;\n\t\t\t\t\tleft: 0;\n\t\t\t\t\tright: 0;\n\t\t\t\t\tz-index: 1000;\n\t\t\t\t\tfont-weight: bold;\n\t\t\t\t}\n\t\t\t\tbody.paused-active {\n\t\t\t\t\tpadding-top: 2.5rem;\n\t\t\t\t}\n\t\t\t\tbody.dryrun-active .paused-banner {\n\t\t\t\t\ttop: 2.5rem;\n\t\t\t\t}\n\t\t\t\tbody.dryrun-active.paused-active {\n\t\t\t\t\tpadding-top: 5rem;\n\t\t\t\t}\n\t\t\t\t.controls {\n\t\t\t\t\tdisplay: flex;\n\t\t\t\t\tflex-direction: column;\n\t\t\t\t\tgap: 0.4rem;\n\t\t\t\t\tmargin: 0.5rem 0 1rem 0;\n\t\t\t\t}\n\t\t\t\t.controls .snapshot-row {\n\t\t\t\t\tdisplay: flex;\n\t\t\t\t\tgap: 0.4rem;\n\t\t\t\t}\n\t\t\t\t.controls .snapshot-row select {\n\t\t\t\t\tflex: 1;\n\t\t\t\t\tmin-width: 0;\n\t\t\t\t}\n\t\t\t\t.btn {\n\t\t\t\t\tpadding: 0.35rem 0.7rem;\n\t\t\t\t\tborder: 1px solid #bbb;\n\t\t\t\t\tborder-radius: 4px;\n\t\t\t\t\tbackground-color: white;\n\t\t\t\t\tcursor: pointer;\n\t\t\t\t\tfont-size: 0.85rem;\n\t\t\t\t}\n\t\t\t\t.btn:hover {\n\t\t\t\t\tbackground-color: #eee;\n\t\t\t\t}\n\t\t\t\t.btn.warn {\n\t\t\t\t\tborder-color: #607d8b;\n\t\t\t\t\tcolor: #607d8b;\n\t\t\t\t\tfont-weight: 500;\n\t\t\t\t}\n\t\t\t\t.dataset-controls {\n\t\t\t\t\tdisplay: flex;\n\t\t\t\t\tgap: 0.5rem;\n\t\t\t\t\tmargin-bottom: 1rem;\n\t\t\t\t}\n\t\t\t\t.paused-label {\n\t\t\t\t\tcolor: #607d8b;\n\t\t\t\t\tfont-weight: 500;\n\t\t\t\t}\n\t\t\t\t.cycle-ok {\n\t\t\t\t\tcolor: #4caf50;\n\t\t\t\t\tfont-weight: bold;\n\t\t\t\t}\n\t\t\t\t.cycle-failed {\n\t\t\t\t\tcolor: #f44336;\n\t\t\t\t\tfont-weight: bold;\n\t\t\t\t}\n\t\t\t\t.cycle-paused {\n\t\t\t\t\tcolor: #607d8b;\n\t\t\t\t\tfont-weight: bold;\n\t\t\t\t}\n\t\t\t\t#config-editor {\n\t\t\t\t\twidth: 100%;\n\t\t\t\t\tmin-height: 24rem;\n\t\t\t\t\tfont-family: monospace;\n\t\t\t\t\tfont-size: 0.9rem;\n\t\t\t\t\tpadding: 0.75rem;\n\t\t\t\t\tborder: 1px solid #ccc;\n\t\t\t\t\tborder-radius: 4px;\n\t\t\t\t\tbox-sizing: border-box;\n\t\t\t\t\tresize: vertical;\n\t\t\t\t}\n\t\t\t\t.config-actions {\n\t\t\t\t\tdisplay: flex;\n\t\t\t\t\tgap: 0.5rem;\n\t\t\t\t\tmargin: 0.75rem 0;\n\t\t\t\t}\n\t\t\t\t.config-error {\n\t\t\t\t\tbackground-color: #ffebee;\n\t\t\t\t\tcolor: #c62828;\n\t\t\t\t\tpadding: 0.75rem;\n\t\t\t\t\tborder-radius: 4px;\n\t\t\t\t\twhite-space: pre-wrap;\n\t\t\t\t\tfont-family: monospace;\n\t\t\t\t\tfont-size: 0.85rem;\n\t\t\t\t}\n\t\t\t\t.impact-note {\n\t\t\t\t\tcolor: #666;\n\t\t\t\t\tfont-size: 0.9rem;\n\t\t\t\t}\n\t\t\t\t.sidebar {\n\t\t\t\t\twidth: 250px;\n\t\t\t\t\tbackground-color: #f5f5f5;\n\t\t\t\t\tborder-right: 1px solid #ddd;\n\t\t\t\t\tpadding: 1rem;\n\t\t\t\t\toverflow-y: auto;\n\t\t\t\t}\n\t\t\t\t.sidebar h2 {\n\t\t\t\t\tmargin-top: 0;\n\t\t\t\t\tfont-size: 1.2rem;\n\t\t\t\t}\n\t\t\t\t.main-content {\n\t\t\t\t\tflex: 1;\n\t\t\t\t\tpadding: 1rem;\n\t\t\t\t\toverflow-y: auto;\n\t\t\t\t}\n\t\t\t\t.dataset-link {\n\t\t\t\t\tdisplay: flex;\n\t\t\t\t\talign-items: flex-start;\n\t\t\t\t\tpadding: 0.5rem;\n\t\t\t\t\ttext-decoration: none;\n\t\t\t\t\tcolor: #333;\n\t\t\t\t\tborder-radius: 4px;\n\t\t\t\t\tmargin-bottom: 0.25rem;\n\t\t\t\t\tgap: 0.5rem;\n\t\t\t\t}\n\t\t\t\t.dataset-link:hover, .dataset-link.active {\n\t\t\t\t\tbackground-color: #e0e0e0;\n\t\t\t\t}\n\t\t\t\t.dataset-link .status {\n\t\t\t\t\tmargin-left: auto;\n\t\t\t\t\tfont-size: 0.8rem;\n\t\t\t\t\tcolor: #666;\n\t\t\t\t\tflex-shrink: 0;\n\t\t\t\t}\n\t\t\t\t.dataset-link .status.stale {\n\t\t\t\t\tcolor: #f44336;\n\t\t\t\t}\n\t\t\t\t.dataset-info {\n\t\t\t\t\tdisplay: flex;\n\t\t\t\t\tflex-direction: column;\n\t\t\t\t\tgap: 0.2rem;\n\t\t\t\t\tflex-grow: 1;\n\t\t\t\t\tmin-width: 0;\n\t\t\t\t}\n\t\t\t\t.dataset-name {\n\t\t\t\t\tfont-weight: 500;\n\t\t\t\t}\n\t\t\t\t.dataset-size {\n\t\t\t\t\tfont-size: 0.75rem;\n\t\t\t\t\tcolor: #666;\n\t\t\t\t}\n\t\t\t\t.sync-indicator {\n\t\t\t\t\twidth: 12px;\n\t\t\t\t\theight: 12px;\n\t\t\t\t\tborder-radius: 50%;\n\t\t\t\t\tflex-shrink: 0;\n\t\t\t\t\tmargin-top: 0.1rem;\n\t\t\t\t}\n\t\t\t\t.sync-indicator.syncing {\n\t\t\t\t\tbackground: linear-gradient(45deg, #2196f3, #64b5f6);\n\t\t\t\t\tanimation: pulse 1.5s ease-in-out infinite alternate;\n\t\t\t\t}\n\t\t\t\t.sync-indicator.synced {\n\t\t\t\t\tbackground-color: #4caf50;\n\t\t\t\t}\n\t\t\t\t.sync-indicator.stale {\n\t\t\t\t\tbackground-color: #ff9800;\n\t\t\t\t}\n\t\t\t\t.sync-indicator.paused {\n\t\t\t\t\tbackground-color: #9e9e9e;\n\t\t\t\t}\n\t\t\t\t@keyframes pulse {\n\t\t\t\t\tfrom { opacity: 0.6; }\n\t\t\t\t\tto { opacity: 1; }\n\t\t\t\t}\n\t\t\t\t@keyframes spin {\n\t\t\t\t\tfrom { transform: rotate(0deg); }\n\t\t\t\t\tto { transform: rotate(360deg); }\n\t\t\t\t}\n\t\t\t\t.step-status {\n\t\t\t\t\tdisplay: inline-block;\n\t\t\t\t\twidth: 16px;\n\t\t\t\t\theight: 16px;\n\t\t\t\t\tmargin-right: 8px;\n\t\t\t\t\tvertical-align: middle;\n\t\t\t\t}\n\t\t\t\t.step-status.pending {\n\t\t\t\t\tborder: 2px solid #ccc;\n\t\t\t\t\tborder-radius: 50%;\n\t\t\t\t}\n\t\t\t\t.step-status.in-progress {\n\t\t\t\t\tborder: 2px solid #2196f3;\n\t\t\t\t\tborder-top: 2px solid transparent;\n\t\t\t\t\tborder-radius: 50%;\n\t\t\t\t\tanimation: spin 1s linear infinite;\n\t\t\t\t}\n\t\t\t\t.step-status.completed::before {\n\t\t\t\t\tcontent: '✓';\n\t\t\t\t\tcolor: #4caf50;\n\t\t\t\t\tfont-weight: bold;\n\t\t\t\t}\n\t\t\t\t.step-status.failed::before {\n\t\t\t\t\tcontent: '✗';\n\t\t\t\t\tcolor: #f44336;\n\t\t\t\t\tfont-weight: bold;\n\t\t\t\t}\n\t\t\t\ttable {\n\t\t\t\t\twidth: 100%;\n\t\t\t\t\tborder-collapse: collapse;\n\t\t\t\t\tmargin-bottom: 1rem;\n\t\t\t\t}\n\t\t\t\tth, td {\n\t\t\t\t\tpadding: .2em 1em;\n\t\t\t\t\ttext-align: left;\n\t\t\t\t\tborder-bottom: 1px solid #ddd;\n\t\t\t\t}\n\t\t\t\tth {\n\t\t\t\t\tfont-weight: bold;\n\t\t\t\t}\n\t\t\t\tth.sortable {\n\t\t\t\t\tcursor: pointer;\n\t\t\t\t\tuser-select: none;\n\t\t\t\t\tposition: relative;\n\t\t\t\t}\n\t\t\t\tth.sortable:hover {\n\t\t\t\t\tbackground-color: #f0f0f0;\n\t\t\t\t}\n\t\t\t\tth.sortable::after {\n\t\t\t\t\tcontent: '↕';\n\t\t\t\t\tposition: absolute;\n\t\t\t\t\tright: 0.5rem;\n\t\t\t\t\topacity: 0.3;\n\t\t\t\t\tfont-size: 0.8em;\n\t\t\t\t}\n\t\t\t\tth.sortable.sort-asc::after {\n\t\t\t\t\tcontent: '↑';\n\t\t\t\t\topacity: 0.8;\n\t\t\t\t}\n\t\t\t\tth.sortable.sort-desc::after {\n\t\t\t\t\tcontent: '↓';\n\t\t\t\t\topacity: 0.8;\n\t\t\t\t}\n\t\t\t\tth.sortable:hover::after {\n\t\t\t\t\topacity: 0.6;\n\t\t\t\t}\n\t\t\t\t.logs {\n\t\t\t\t\tbackground-color: #f9f9f9;\n\t\t\t\t\tpadding: 1rem;\n\t\t\t\t\tborder-radius: 4px;\n\t\t\t\t\tmargin-top: 1rem;\n\t\t\t\t}\n\t\t\t\t.logs h2 {\n\t\t\t\t\tmargin-top: 0;\n\t\t\t\t}\n\t\t\t\t.logs ul {\n\t\t\t\t\tlist-style-type: none;\n\t\t\t\t\tpadding: 0;\n\t\t\t\t\tmargin: 0;\n\t\t\t\t}\n\t\t\t\t.logs li {\n\t\t\t\t\tpadding: 0.25rem 0;\n\t\t\t\t\tfont-family: monospace;\n\t\t\t\t}\n\t\t\t\t.plan-logs {\n\t\t\t\t\tbackground-color: #f0f8ff;\n\t\t\t\t\tpadding: 1rem;\n\t\t\t\t\tborder-radius: 4px;\n\t\t\t\t\tmargin-bottom: 1rem;\n\t\t\t\t}\n\t\t\t\t.plan-logs h3 {\n\t\t\t\t\tmargin-top: 0;\n\t\t\t\t\tfont-size: 1rem;\n\t\t\t\t\tcolor: #2196f3;\n\t\t\t\t}\n\t\t\t\t.plan-logs ul {\n\t\t\t\t\tlist-style-type: none;\n\t\t\t\t\tpadding: 0;\n\t\t\t\t\tmargin: 0;\n\t\t\t\t}\n\t\t\t\t.plan-logs li {\n\t\t\t\t\tpadding: 0.25rem 0;\n\t\t\t\t\tfont-family: monospace;\n\t\t\t\t}\n\t\t\t\t.step-log {\n\t\t\t\t\tbackground-color: #f9f9f9;\n\t\t\t\t}\n\t\t\t\t.log-cell {\n\t\t\t\t\tpadding-left: 2rem !important;\n\t\t\t\t}\n\t\t\t\t.log-message {\n\t\t\t\t\tfont-size: 0.85rem;\n\t\t\t\t\tcolor: #666;\n\t\t\t\t\tfont-family: monospace;\n\t\t\t\t\tdisplay: block;\n\t\t\t\t\tpadding: 0.2rem 0;\n\t\t\t\t}\n\t\t\t\t.snapshot-table th, .snapshot-table td {\n\t\t\t\t\ttext-align: center;\n\t\t\t\t}\n\t\t\t\t.snapshot-present {\n\t\t\t\t\tcolor: #4caf50;\n\t\t\t\t}\n\t\t\t\t.snapshot-absent {\n\t\t\t\t\tcolor: #f44336;\n\t\t\t\t}\n\t\t\t\t.snapshot-doomed {\n\t\t\t\t\tcolor: #ff9800;\n\t\t\t\t}\n\t\t\t\t.retention-override {\n\t\t\t\t\tcolor: #ff9800;\n\t\t\t\t\tfont-weight: 500;\n\t\t\t\t}\n\t\t\t</style></head>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var2 = []any{templ.KV("dryrun-active", dryrun)}
+		var templ_7745c5c3_Var2 = []any{templ.KV("dryrun-active", dryrun), templ.KV("paused-active", conf.Paused)}
 		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var2...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
@@ -70,7 +72,13 @@ func index(state *model.Model, globalLogs []logger.LogEntry, syncStatus *sync.St
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<div class=\"sidebar\"><h2>System</h2>")
+		if conf.Paused {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<div class=\"paused-banner\">PAUSED - State is refreshed and planned, but nothing executes</div>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<div class=\"sidebar\"><h2>System</h2>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -79,7 +87,7 @@ func index(state *model.Model, globalLogs []logger.LogEntry, syncStatus *sync.St
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<a href=\"/global\" class=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<a href=\"/global\" class=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -92,53 +100,90 @@ func index(state *model.Model, globalLogs []logger.LogEntry, syncStatus *sync.St
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "\"><div class=\"dataset-info\"><div class=\"dataset-name\">Global Overview</div></div></a><h2>Datasets</h2>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "\"><div class=\"dataset-info\"><div class=\"dataset-name\">Global Overview</div></div></a> ")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var6 = []any{"dataset-link", templ.KV("active", dataset == "config")}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var6...)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<a href=\"/config\" class=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var7 string
+		templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(templ.CSSClasses(templ_7745c5c3_Var6).String())
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 1, Col: 0}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "\"><div class=\"dataset-info\"><div class=\"dataset-name\">Config</div></div></a><div class=\"controls\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if conf.Paused {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<button class=\"btn warn\" data-api=\"/api/resume\">Resume all</button> ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		} else {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "<button class=\"btn\" data-api=\"/api/pause\" data-confirm=\"Pause all execution? State keeps refreshing, but no transfers or deletions run, and the dead-man's-snitch ping is withheld.\">Pause all</button> ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<button class=\"btn\" data-api=\"/api/sync\">Sync now</button><div class=\"snapshot-row\"><select id=\"snapshot-periodicity\"><option value=\"daily\">daily</option> <option value=\"weekly\">weekly</option> <option value=\"monthly\">monthly</option> <option value=\"yearly\">yearly</option></select> <button class=\"btn\" id=\"snapshot-btn\">Snapshot</button></div></div><h2>Datasets</h2>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		for _, ds := range state.ListDatasets() {
-			templ_7745c5c3_Err = renderDatasetLink(ds, state.Datasets[ds], syncStatus, dataset).Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = renderDatasetLink(ds, state.Datasets[ds], syncStatus, conf, dataset).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "</div><div class=\"main-content\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "</div><div class=\"main-content\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if dataset == "global" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<h1>backupd Overview</h1><table><thead><tr><th class=\"sortable\">dataset</th><th class=\"sortable\">staleness</th><th>retention</th><th>sync status</th><th>local</th><th class=\"sortable\">local disk</th><th class=\"sortable\">local logical</th><th>remote</th><th class=\"sortable\">remote disk</th><th class=\"sortable\">remote logical</th></tr></thead> <tbody>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<h1>backupd Overview</h1><table><thead><tr><th class=\"sortable\">dataset</th><th class=\"sortable\">staleness</th><th>retention</th><th>sync status</th><th>local</th><th class=\"sortable\">local disk</th><th class=\"sortable\">local logical</th><th>remote</th><th class=\"sortable\">remote disk</th><th class=\"sortable\">remote logical</th></tr></thead> <tbody>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			for _, ds := range state.ListDatasets() {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "<tr><td>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "<tr><td>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var6 string
-				templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(ds.String())
+				var templ_7745c5c3_Var8 string
+				templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(ds.String())
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 289, Col: 26}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 420, Col: 26}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "</td><td>")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var7 string
-				templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(state.Datasets[ds].Staleness().Truncate(time.Minute).String())
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 290, Col: 76}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "</td><td>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "</td><td>")
+				var templ_7745c5c3_Var9 string
+				templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(state.Datasets[ds].Staleness().Truncate(time.Minute).String())
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 421, Col: 76}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "</td><td>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -146,254 +191,472 @@ func index(state *model.Model, globalLogs []logger.LogEntry, syncStatus *sync.St
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "</td><td>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "</td><td>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = renderSyncIndicator(ds, state.Datasets[ds], syncStatus).Render(ctx, templ_7745c5c3_Buffer)
+				templ_7745c5c3_Err = renderSyncIndicator(ds, state.Datasets[ds], syncStatus, conf.PausedFor(ds.Path())).Render(ctx, templ_7745c5c3_Buffer)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "</td><td><code>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var8 string
-				templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(state.Datasets[ds].Current.LocalString())
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 296, Col: 61}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "</code></td><td><code>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var9 string
-				templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(state.Datasets[ds].Metrics.LocalUsedString())
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 297, Col: 65}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "</code></td><td><code>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "</td><td><code>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var10 string
-				templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(state.Datasets[ds].Metrics.LocalLogicalString())
+				templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(state.Datasets[ds].Current.LocalString())
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 298, Col: 68}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 427, Col: 61}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "</code></td><td><code>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "</code></td><td><code>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var11 string
-				templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(state.Datasets[ds].Current.RemoteString())
+				templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(state.Datasets[ds].Metrics.LocalUsedString())
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 299, Col: 62}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 428, Col: 65}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "</code></td><td><code>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "</code></td><td><code>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var12 string
-				templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(state.Datasets[ds].Metrics.RemoteUsedString())
+				templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(state.Datasets[ds].Metrics.LocalLogicalString())
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 300, Col: 66}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 429, Col: 68}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "</code></td><td><code>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "</code></td><td><code>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var13 string
-				templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(state.Datasets[ds].Metrics.RemoteLogicalString())
+				templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(state.Datasets[ds].Current.RemoteString())
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 301, Col: 69}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 430, Col: 62}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "</code></td></tr>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "</code></td><td><code>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var14 string
+				templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(state.Datasets[ds].Metrics.RemoteUsedString())
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 431, Col: 66}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "</code></td><td><code>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var15 string
+				templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(state.Datasets[ds].Metrics.RemoteLogicalString())
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 432, Col: 69}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "</code></td></tr>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "</tbody></table> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "</tbody></table>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if cycles := hist.Cycles(); len(cycles) > 0 {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "<h2>Cycle History</h2><table><thead><tr><th>Started</th><th>Duration</th><th>Result</th><th>Datasets</th><th>Detail</th></tr></thead> <tbody>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				for _, c := range cycles {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "<tr><td>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var16 string
+					templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(c.StartedAt.Format(time.DateTime))
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 452, Col: 49}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "</td><td>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var17 string
+					templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(c.Duration().Round(time.Second).String())
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 453, Col: 56}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "</td><td>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					if c.Paused {
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "<span class=\"cycle-paused\">paused</span>")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+					} else if c.OK {
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "<span class=\"cycle-ok\">ok</span>")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+					} else {
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "<span class=\"cycle-failed\">failed</span>")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "</td><td>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var18 string
+					templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprint(c.Datasets))
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 463, Col: 38}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "</td><td>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					if c.Error != "" {
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "<code>")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						var templ_7745c5c3_Var19 string
+						templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs(c.Error)
+						if templ_7745c5c3_Err != nil {
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 466, Col: 27}
+						}
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "</code>")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+					} else if len(c.Failures) > 0 {
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "<code>failed: ")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						var templ_7745c5c3_Var20 string
+						templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinStringErrs(strings.Join(c.Failures, ", "))
+						if templ_7745c5c3_Err != nil {
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 468, Col: 58}
+						}
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "</code>")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "</td></tr>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "</tbody></table>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "  ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			if len(globalLogs) > 0 {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "<section class=\"logs\"><h2>Global Logs</h2><ul>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "<section class=\"logs\"><h2>Global Logs</h2><ul>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				for _, log := range globalLogs {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "<li><code>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<li><code>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var14 string
-					templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(log.LogAt.Format(time.DateTime))
+					var templ_7745c5c3_Var21 string
+					templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(log.LogAt.Format(time.DateTime))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 312, Col: 52}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 482, Col: 52}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, " :: ")
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var15 string
-					templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(log.Log)
-					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 312, Col: 67}
-					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, " :: ")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "</code></li>")
+					var templ_7745c5c3_Var22 string
+					templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.JoinStringErrs(log.Log)
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 482, Col: 67}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var22))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "</code></li>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "</ul></section>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "</ul></section>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
+		} else if dataset == "config" {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "<h1>Config</h1><p class=\"impact-note\">Editing <code>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var23 string
+			templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(conf.Path)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 490, Col: 31}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "</code>. Preview validates the file and shows what would change — per dataset — before anything is written. Saving applies immediately: retention, pause, and interval changes take effect without a restart.</p><textarea id=\"config-editor\" spellcheck=\"false\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var24 string
+			templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(string(conf.Raw))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 495, Col: 71}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var24))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "</textarea><div class=\"config-actions\"><button class=\"btn\" id=\"config-preview\">Preview changes</button> <button class=\"btn warn\" id=\"config-save\">Save &amp; apply</button></div><div id=\"config-impacts\"></div>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "<h1>Dataset: ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "<h1>Dataset: ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var16 string
-			templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(dataset)
+			var templ_7745c5c3_Var25 string
+			templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(dataset)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 318, Col: 27}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 502, Col: 27}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "</h1>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "</h1>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			if ds, ok := state.Datasets[model.DatasetName(dataset)]; ok {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "<div><h2>Status</h2><table><tr><th>Local snapshots</th><td><code>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "<div><div class=\"dataset-controls\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var17 string
-				templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(ds.Current.LocalString())
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 325, Col: 45}
+				if conf.SubtreePaused(dataset) {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "<button class=\"btn warn\" data-api=\"")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var26 string
+					templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs("/api/resume?dataset=" + dataset)
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 507, Col: 77}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "\">Resume dataset</button> ")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				} else if dataset != "" {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "<button class=\"btn\" data-api=\"")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var27 string
+					templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinStringErrs("/api/pause?dataset=" + dataset)
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 509, Col: 71}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "\" data-confirm=\"")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var28 string
+					templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs("Pause syncing for " + dataset + " and everything under it?")
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 509, Col: 149}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "\">Pause dataset</button> ")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "</code></td></tr><tr><th>Local disk size</th><td><code>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var18 string
-				templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinStringErrs(ds.Metrics.LocalUsedString())
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 329, Col: 49}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "</code></td></tr><tr><th>Local logical size</th><td><code>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var19 string
-				templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs(ds.Metrics.LocalLogicalString())
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 333, Col: 52}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "</code></td></tr><tr><th>Remote snapshots</th><td><code>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var20 string
-				templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinStringErrs(ds.Current.RemoteString())
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 337, Col: 46}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "</code></td></tr><tr><th>Remote disk size</th><td><code>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var21 string
-				templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(ds.Metrics.RemoteUsedString())
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 341, Col: 50}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "<button class=\"btn\" data-api=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "</code></td></tr><tr><th>Remote logical size</th><td><code>")
+				var templ_7745c5c3_Var29 string
+				templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs("/api/sync?dataset=" + dataset)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 511, Col: 69}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var29))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var22 string
-				templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.JoinStringErrs(ds.Metrics.RemoteLogicalString())
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 345, Col: 53}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var22))
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "\">Sync now</button></div><h2>Status</h2><table><tr><th>Local snapshots</th><td><code>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "</code></td></tr><tr><th>Staleness</th><td>")
+				var templ_7745c5c3_Var30 string
+				templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinStringErrs(ds.Current.LocalString())
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 517, Col: 45}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var30))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var23 string
-				templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(ds.Staleness().Truncate(time.Minute).String())
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 349, Col: 60}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, "</code></td></tr><tr><th>Local disk size</th><td><code>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "</td></tr><tr><th>Retention</th><td>")
+				var templ_7745c5c3_Var31 string
+				templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.JoinStringErrs(ds.Metrics.LocalUsedString())
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 521, Col: 49}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var31))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, "</code></td></tr><tr><th>Local logical size</th><td><code>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var32 string
+				templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.JoinStringErrs(ds.Metrics.LocalLogicalString())
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 525, Col: 52}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var32))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 64, "</code></td></tr><tr><th>Remote snapshots</th><td><code>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var33 string
+				templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.JoinStringErrs(ds.Current.RemoteString())
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 529, Col: 46}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var33))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 65, "</code></td></tr><tr><th>Remote disk size</th><td><code>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var34 string
+				templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.JoinStringErrs(ds.Metrics.RemoteUsedString())
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 533, Col: 50}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var34))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 66, "</code></td></tr><tr><th>Remote logical size</th><td><code>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var35 string
+				templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.JoinStringErrs(ds.Metrics.RemoteLogicalString())
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 537, Col: 53}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var35))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 67, "</code></td></tr><tr><th>Staleness</th><td>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var36 string
+				templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.JoinStringErrs(ds.Staleness().Truncate(time.Minute).String())
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 541, Col: 60}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var36))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 68, "</td></tr><tr><th>Retention</th><td>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -401,76 +664,120 @@ func index(state *model.Model, globalLogs []logger.LogEntry, syncStatus *sync.St
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "</td></tr></table>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 69, "</td></tr>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				if conf.PausedFor(dataset) {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 70, "<tr><th>Paused</th><td>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					if conf.Paused {
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 71, "<span class=\"paused-label\">yes (global pause)</span>")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+					} else {
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 72, "<span class=\"paused-label\">yes</span>")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 73, "</td></tr>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				}
+				if lastSuccess, ok := hist.LastSuccess(model.DatasetName(dataset)); ok {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 74, "<tr><th>Last successful sync</th><td>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var37 string
+					templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.JoinStringErrs(lastSuccess.Format(time.DateTime))
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 564, Col: 49}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var37))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 75, "</td></tr>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 76, "</table>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				if ds.Plan != nil && len(ds.Plan.Steps) > 0 {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "<h2>Sync Plan</h2> ")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 77, "<h2>Sync Plan</h2> ")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					if ds.Logs != nil && len(ds.Logs.GetLogs()) > 0 {
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "<div class=\"plan-logs\"><h3>Plan Setup</h3><ul>")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 78, "<div class=\"plan-logs\"><h3>Plan Setup</h3><ul>")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						for _, log := range ds.Logs.GetLogs() {
-							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "<li><code>")
+							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 79, "<li><code>")
 							if templ_7745c5c3_Err != nil {
 								return templ_7745c5c3_Err
 							}
-							var templ_7745c5c3_Var24 string
-							templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(log.LogAt.Format("15:04:05"))
+							var templ_7745c5c3_Var38 string
+							templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(log.LogAt.Format("15:04:05"))
 							if templ_7745c5c3_Err != nil {
-								return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 366, Col: 52}
+								return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 576, Col: 52}
 							}
-							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var24))
-							if templ_7745c5c3_Err != nil {
-								return templ_7745c5c3_Err
-							}
-							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, " ")
+							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var38))
 							if templ_7745c5c3_Err != nil {
 								return templ_7745c5c3_Err
 							}
-							var templ_7745c5c3_Var25 string
-							templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(log.Log)
-							if templ_7745c5c3_Err != nil {
-								return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 366, Col: 64}
-							}
-							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
+							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 80, " ")
 							if templ_7745c5c3_Err != nil {
 								return templ_7745c5c3_Err
 							}
-							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "</code></li>")
+							var templ_7745c5c3_Var39 string
+							templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.JoinStringErrs(log.Log)
+							if templ_7745c5c3_Err != nil {
+								return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 576, Col: 64}
+							}
+							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var39))
+							if templ_7745c5c3_Err != nil {
+								return templ_7745c5c3_Err
+							}
+							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 81, "</code></li>")
 							if templ_7745c5c3_Err != nil {
 								return templ_7745c5c3_Err
 							}
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "</ul></div>")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 82, "</ul></div>")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, " <table><thead><tr><th>#</th><th>Status</th><th>Operation</th><th>Started</th><th>Stopped</th><th>Duration</th></tr></thead> <tbody>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 83, " <table><thead><tr><th>#</th><th>Status</th><th>Operation</th><th>Started</th><th>Stopped</th><th>Duration</th></tr></thead> <tbody>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					for i, step := range ds.Plan.Steps {
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<tr><td>")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 84, "<tr><td>")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						var templ_7745c5c3_Var26 string
-						templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprint(i + 1))
+						var templ_7745c5c3_Var40 string
+						templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprint(i + 1))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 385, Col: 35}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 595, Col: 35}
 						}
-						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var40))
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "</td><td>")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 85, "</td><td>")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
@@ -478,124 +785,124 @@ func index(state *model.Model, globalLogs []logger.LogEntry, syncStatus *sync.St
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "</td><td><code>")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 86, "</td><td><code>")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						var templ_7745c5c3_Var27 string
-						templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinStringErrs(step.String())
+						var templ_7745c5c3_Var41 string
+						templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.JoinStringErrs(step.String())
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 389, Col: 37}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 599, Col: 37}
 						}
-						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var41))
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "</code></td><td>")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 87, "</code></td><td>")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						if step.StartedAt != nil {
-							var templ_7745c5c3_Var28 string
-							templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(step.StartedAt.Format("15:04:05"))
+							var templ_7745c5c3_Var42 string
+							templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.JoinStringErrs(step.StartedAt.Format("15:04:05"))
 							if templ_7745c5c3_Err != nil {
-								return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 392, Col: 49}
+								return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 602, Col: 49}
 							}
-							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
+							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var42))
 							if templ_7745c5c3_Err != nil {
 								return templ_7745c5c3_Err
 							}
 						} else {
-							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "-")
+							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 88, "-")
 							if templ_7745c5c3_Err != nil {
 								return templ_7745c5c3_Err
 							}
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "</td><td>")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 89, "</td><td>")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						if step.StoppedAt != nil {
-							var templ_7745c5c3_Var29 string
-							templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs(step.StoppedAt.Format("15:04:05"))
+							var templ_7745c5c3_Var43 string
+							templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.JoinStringErrs(step.StoppedAt.Format("15:04:05"))
 							if templ_7745c5c3_Err != nil {
-								return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 399, Col: 49}
+								return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 609, Col: 49}
 							}
-							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var29))
+							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var43))
 							if templ_7745c5c3_Err != nil {
 								return templ_7745c5c3_Err
 							}
 						} else {
-							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "-")
+							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 90, "-")
 							if templ_7745c5c3_Err != nil {
 								return templ_7745c5c3_Err
 							}
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "</td><td>")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 91, "</td><td>")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						if dur := step.Duration(); dur > 0 {
-							var templ_7745c5c3_Var30 string
-							templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinStringErrs(dur.Round(time.Millisecond).String())
+							var templ_7745c5c3_Var44 string
+							templ_7745c5c3_Var44, templ_7745c5c3_Err = templ.JoinStringErrs(dur.Round(time.Millisecond).String())
 							if templ_7745c5c3_Err != nil {
-								return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 406, Col: 52}
+								return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 616, Col: 52}
 							}
-							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var30))
+							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var44))
 							if templ_7745c5c3_Err != nil {
 								return templ_7745c5c3_Err
 							}
 						} else {
-							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "-")
+							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 92, "-")
 							if templ_7745c5c3_Err != nil {
 								return templ_7745c5c3_Err
 							}
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "</td></tr> ")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 93, "</td></tr> ")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						if step.Logs != nil && len(step.Logs.GetLogs()) > 0 {
 							for _, logEntry := range step.Logs.GetLogs() {
-								templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "<tr class=\"step-log\"><td></td><td colspan=\"5\" class=\"log-cell\"><code class=\"log-message\">")
+								templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 94, "<tr class=\"step-log\"><td></td><td colspan=\"5\" class=\"log-cell\"><code class=\"log-message\">")
 								if templ_7745c5c3_Err != nil {
 									return templ_7745c5c3_Err
 								}
-								var templ_7745c5c3_Var31 string
-								templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.JoinStringErrs(logEntry.LogAt.Format("15:04:05"))
+								var templ_7745c5c3_Var45 string
+								templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.JoinStringErrs(logEntry.LogAt.Format("15:04:05"))
 								if templ_7745c5c3_Err != nil {
-									return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 418, Col: 76}
+									return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 628, Col: 76}
 								}
-								_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var31))
-								if templ_7745c5c3_Err != nil {
-									return templ_7745c5c3_Err
-								}
-								templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, " ")
+								_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var45))
 								if templ_7745c5c3_Err != nil {
 									return templ_7745c5c3_Err
 								}
-								var templ_7745c5c3_Var32 string
-								templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.JoinStringErrs(logEntry.Log)
-								if templ_7745c5c3_Err != nil {
-									return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 418, Col: 93}
-								}
-								_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var32))
+								templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 95, " ")
 								if templ_7745c5c3_Err != nil {
 									return templ_7745c5c3_Err
 								}
-								templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "</code></td></tr>")
+								var templ_7745c5c3_Var46 string
+								templ_7745c5c3_Var46, templ_7745c5c3_Err = templ.JoinStringErrs(logEntry.Log)
+								if templ_7745c5c3_Err != nil {
+									return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 628, Col: 93}
+								}
+								_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var46))
+								if templ_7745c5c3_Err != nil {
+									return templ_7745c5c3_Err
+								}
+								templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 96, "</code></td></tr>")
 								if templ_7745c5c3_Err != nil {
 									return templ_7745c5c3_Err
 								}
 							}
 						}
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "</tbody></table>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 97, "</tbody></table>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "<h2>Snapshots</h2><table class=\"snapshot-table\"><thead><tr><th>Snapshot</th><th class=\"sortable\">Created</th><th>Local</th><th>Remote</th><th class=\"sortable\">Size</th></tr></thead> <tbody>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 98, "<h2>Snapshots</h2><table class=\"snapshot-table\"><thead><tr><th>Snapshot</th><th class=\"sortable\">Created</th><th>Local</th><th>Remote</th><th class=\"sortable\">Size</th></tr></thead> <tbody>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -603,18 +910,18 @@ func index(state *model.Model, globalLogs []logger.LogEntry, syncStatus *sync.St
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "</tbody></table></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 99, "</tbody></table></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "<p>Dataset not found.</p>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 100, "<p>Dataset not found.</p>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, "</div><script>\n\t\t\t// Table sorting functionality\n\t\t\tfunction makeSortable(table) {\n\t\t\t\tconst headers = table.querySelectorAll('th.sortable');\n\t\t\t\tconsole.log('Found sortable headers:', headers.length);\n\t\t\t\theaders.forEach((header, index) => {\n\t\t\t\t\tconst actualColumnIndex = Array.from(table.querySelectorAll('th')).indexOf(header);\n\t\t\t\t\tconsole.log(`Header ${index} (${header.textContent.trim()}) is at column ${actualColumnIndex}`);\n\t\t\t\t\theader.addEventListener('click', () => sortTable(table, actualColumnIndex));\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction sortTable(table, column) {\n\t\t\t\tconst tbody = table.querySelector('tbody');\n\t\t\t\tconst rows = Array.from(tbody.querySelectorAll('tr'));\n\t\t\t\tconst header = table.querySelectorAll('th')[column];\n\t\t\t\tconst headerText = header.textContent.trim().toLowerCase();\n\n\t\t\t\t// Special handling for dataset column only in the main overview table\n\t\t\t\t// (not in the snapshot table)\n\t\t\t\tif (column === 0 && headerText === 'dataset') {\n\t\t\t\t\t// Dataset column: toggle between name-length and lexical\n\t\t\t\t\tconst isLexical = header.classList.contains('sort-asc');\n\n\t\t\t\t\t// Remove previous sort classes\n\t\t\t\t\ttable.querySelectorAll('th').forEach(th => {\n\t\t\t\t\t\tth.classList.remove('sort-asc', 'sort-desc');\n\t\t\t\t\t});\n\n\t\t\t\t\tif (isLexical) {\n\t\t\t\t\t\t// Switch to name-length sort (default state, no indicator)\n\t\t\t\t\t\trows.sort((a, b) => {\n\t\t\t\t\t\t\tconst aVal = a.cells[0].textContent.trim();\n\t\t\t\t\t\t\tconst bVal = b.cells[0].textContent.trim();\n\n\t\t\t\t\t\t\t// Always keep <root> at the top\n\t\t\t\t\t\t\tif (aVal === '<root>') return -1;\n\t\t\t\t\t\t\tif (bVal === '<root>') return 1;\n\n\t\t\t\t\t\t\tif (aVal.length === bVal.length) {\n\t\t\t\t\t\t\t\treturn aVal.localeCompare(bVal);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\treturn aVal.length - bVal.length;\n\t\t\t\t\t\t});\n\t\t\t\t\t} else {\n\t\t\t\t\t\t// Switch to lexical sort (show ascending indicator)\n\t\t\t\t\t\theader.classList.add('sort-asc');\n\t\t\t\t\t\trows.sort((a, b) => {\n\t\t\t\t\t\t\tconst aVal = a.cells[0].textContent.trim();\n\t\t\t\t\t\t\tconst bVal = b.cells[0].textContent.trim();\n\n\t\t\t\t\t\t\t// Always keep <root> at the top\n\t\t\t\t\t\t\tif (aVal === '<root>') return -1;\n\t\t\t\t\t\t\tif (bVal === '<root>') return 1;\n\n\t\t\t\t\t\t\treturn aVal.localeCompare(bVal);\n\t\t\t\t\t\t});\n\t\t\t\t\t}\n\t\t\t\t} else {\n\t\t\t\t\t// Other columns: normal asc/desc toggle\n\t\t\t\t\tconst isAsc = !header.classList.contains('sort-asc');\n\n\t\t\t\t\t// Remove previous sort classes\n\t\t\t\t\ttable.querySelectorAll('th').forEach(th => {\n\t\t\t\t\t\tth.classList.remove('sort-asc', 'sort-desc');\n\t\t\t\t\t});\n\n\t\t\t\t\t// Add current sort class\n\t\t\t\t\theader.classList.add(isAsc ? 'sort-asc' : 'sort-desc');\n\n\t\t\t\t\t// Sort rows\n\t\t\t\t\trows.sort((a, b) => {\n\t\t\t\t\t\tlet aVal = a.cells[column].textContent.trim();\n\t\t\t\t\t\tlet bVal = b.cells[column].textContent.trim();\n\n\t\t\t\t\t\t// Debug: log values for problematic columns\n\t\t\t\t\t\tif (column === 4 || column === 5) {\n\t\t\t\t\t\t\tconsole.log(`Column ${column}: \"${aVal}\" vs \"${bVal}\"`);\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\t// Handle dashes (no data)\n\t\t\t\t\t\tif (aVal === '-' && bVal === '-') return 0;\n\t\t\t\t\t\tif (aVal === '-') return isAsc ? 1 : -1;\n\t\t\t\t\t\tif (bVal === '-') return isAsc ? -1 : 1;\n\n\t\t\t\t\t\t// Check if values are sizes (contain 'B', 'KB', 'MB', etc.)\n\t\t\t\t\t\t// More flexible regex to handle whitespace and formatting\n\t\t\t\t\t\tif ((aVal.match(/\\d+(\\.\\d+)?\\s*[KMGTPE]?B/i) || aVal === '-') &&\n\t\t\t\t\t\t    (bVal.match(/\\d+(\\.\\d+)?\\s*[KMGTPE]?B/i) || bVal === '-')) {\n\t\t\t\t\t\t\treturn compareSize(aVal, bVal) * (isAsc ? 1 : -1);\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\t// Check if values are dates\n\t\t\t\t\t\tif (aVal.match(/\\d{4}-\\d{2}-\\d{2}/) && bVal.match(/\\d{4}-\\d{2}-\\d{2}/)) {\n\t\t\t\t\t\t\treturn (new Date(aVal) - new Date(bVal)) * (isAsc ? 1 : -1);\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\t// Check if values are numbers\n\t\t\t\t\t\tconst aNum = parseFloat(aVal.replace(/[^0-9.-]/g, ''));\n\t\t\t\t\t\tconst bNum = parseFloat(bVal.replace(/[^0-9.-]/g, ''));\n\t\t\t\t\t\tif (!isNaN(aNum) && !isNaN(bNum)) {\n\t\t\t\t\t\t\treturn (aNum - bNum) * (isAsc ? 1 : -1);\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\t// Default string comparison\n\t\t\t\t\t\treturn aVal.localeCompare(bVal) * (isAsc ? 1 : -1);\n\t\t\t\t\t});\n\t\t\t\t}\n\n\t\t\t\t// Append sorted rows\n\t\t\t\trows.forEach(row => tbody.appendChild(row));\n\t\t\t}\n\n\t\t\tfunction compareSize(a, b) {\n\t\t\t\tconst units = { 'B': 1, 'KB': 1024, 'MB': 1024**2, 'GB': 1024**3, 'TB': 1024**4, 'PB': 1024**5, 'EB': 1024**6 };\n\n\t\t\t\tfunction parseSize(str) {\n\t\t\t\t\tconst match = str.match(/([\\d.]+)\\s*([KMGTPE]?B)/);\n\t\t\t\t\tif (!match) return 0;\n\t\t\t\t\treturn parseFloat(match[1]) * (units[match[2]] || 1);\n\t\t\t\t}\n\n\t\t\t\treturn parseSize(a) - parseSize(b);\n\t\t\t}\n\n\t\t\t// Initialize sortable tables\n\t\t\tdocument.addEventListener('DOMContentLoaded', function() {\n\t\t\t\tdocument.querySelectorAll('table').forEach(makeSortable);\n\t\t\t});\n\n\t\t\t// Long-polling for state changes\n\t\t\tasync function poll() {\n\t\t\t\twhile (true) {\n\t\t\t\t\ttry {\n\t\t\t\t\t\tconst response = await fetch('/poll');\n\t\t\t\t\t\tif (response.ok) {\n\t\t\t\t\t\t\t// State changed, refresh the page\n\t\t\t\t\t\t\twindow.location.reload();\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\t// Timeout, poll again immediately\n\t\t\t\t\t} catch (error) {\n\t\t\t\t\t\t// Connection error, retry after a delay\n\t\t\t\t\t\tawait new Promise(resolve => setTimeout(resolve, 5000));\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t}\n\n\t\t\t// Start polling when the page loads\n\t\t\tdocument.addEventListener('DOMContentLoaded', function() {\n\t\t\t\tpoll();\n\t\t\t});\n\t\t</script></body></html>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 101, "</div><script>\n\t\t\t// Table sorting functionality\n\t\t\tfunction makeSortable(table) {\n\t\t\t\tconst headers = table.querySelectorAll('th.sortable');\n\t\t\t\tconsole.log('Found sortable headers:', headers.length);\n\t\t\t\theaders.forEach((header, index) => {\n\t\t\t\t\tconst actualColumnIndex = Array.from(table.querySelectorAll('th')).indexOf(header);\n\t\t\t\t\tconsole.log(`Header ${index} (${header.textContent.trim()}) is at column ${actualColumnIndex}`);\n\t\t\t\t\theader.addEventListener('click', () => sortTable(table, actualColumnIndex));\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction sortTable(table, column) {\n\t\t\t\tconst tbody = table.querySelector('tbody');\n\t\t\t\tconst rows = Array.from(tbody.querySelectorAll('tr'));\n\t\t\t\tconst header = table.querySelectorAll('th')[column];\n\t\t\t\tconst headerText = header.textContent.trim().toLowerCase();\n\n\t\t\t\t// Special handling for dataset column only in the main overview table\n\t\t\t\t// (not in the snapshot table)\n\t\t\t\tif (column === 0 && headerText === 'dataset') {\n\t\t\t\t\t// Dataset column: toggle between name-length and lexical\n\t\t\t\t\tconst isLexical = header.classList.contains('sort-asc');\n\n\t\t\t\t\t// Remove previous sort classes\n\t\t\t\t\ttable.querySelectorAll('th').forEach(th => {\n\t\t\t\t\t\tth.classList.remove('sort-asc', 'sort-desc');\n\t\t\t\t\t});\n\n\t\t\t\t\tif (isLexical) {\n\t\t\t\t\t\t// Switch to name-length sort (default state, no indicator)\n\t\t\t\t\t\trows.sort((a, b) => {\n\t\t\t\t\t\t\tconst aVal = a.cells[0].textContent.trim();\n\t\t\t\t\t\t\tconst bVal = b.cells[0].textContent.trim();\n\n\t\t\t\t\t\t\t// Always keep <root> at the top\n\t\t\t\t\t\t\tif (aVal === '<root>') return -1;\n\t\t\t\t\t\t\tif (bVal === '<root>') return 1;\n\n\t\t\t\t\t\t\tif (aVal.length === bVal.length) {\n\t\t\t\t\t\t\t\treturn aVal.localeCompare(bVal);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\treturn aVal.length - bVal.length;\n\t\t\t\t\t\t});\n\t\t\t\t\t} else {\n\t\t\t\t\t\t// Switch to lexical sort (show ascending indicator)\n\t\t\t\t\t\theader.classList.add('sort-asc');\n\t\t\t\t\t\trows.sort((a, b) => {\n\t\t\t\t\t\t\tconst aVal = a.cells[0].textContent.trim();\n\t\t\t\t\t\t\tconst bVal = b.cells[0].textContent.trim();\n\n\t\t\t\t\t\t\t// Always keep <root> at the top\n\t\t\t\t\t\t\tif (aVal === '<root>') return -1;\n\t\t\t\t\t\t\tif (bVal === '<root>') return 1;\n\n\t\t\t\t\t\t\treturn aVal.localeCompare(bVal);\n\t\t\t\t\t\t});\n\t\t\t\t\t}\n\t\t\t\t} else {\n\t\t\t\t\t// Other columns: normal asc/desc toggle\n\t\t\t\t\tconst isAsc = !header.classList.contains('sort-asc');\n\n\t\t\t\t\t// Remove previous sort classes\n\t\t\t\t\ttable.querySelectorAll('th').forEach(th => {\n\t\t\t\t\t\tth.classList.remove('sort-asc', 'sort-desc');\n\t\t\t\t\t});\n\n\t\t\t\t\t// Add current sort class\n\t\t\t\t\theader.classList.add(isAsc ? 'sort-asc' : 'sort-desc');\n\n\t\t\t\t\t// Sort rows\n\t\t\t\t\trows.sort((a, b) => {\n\t\t\t\t\t\tlet aVal = a.cells[column].textContent.trim();\n\t\t\t\t\t\tlet bVal = b.cells[column].textContent.trim();\n\n\t\t\t\t\t\t// Debug: log values for problematic columns\n\t\t\t\t\t\tif (column === 4 || column === 5) {\n\t\t\t\t\t\t\tconsole.log(`Column ${column}: \"${aVal}\" vs \"${bVal}\"`);\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\t// Handle dashes (no data)\n\t\t\t\t\t\tif (aVal === '-' && bVal === '-') return 0;\n\t\t\t\t\t\tif (aVal === '-') return isAsc ? 1 : -1;\n\t\t\t\t\t\tif (bVal === '-') return isAsc ? -1 : 1;\n\n\t\t\t\t\t\t// Check if values are sizes (contain 'B', 'KB', 'MB', etc.)\n\t\t\t\t\t\t// More flexible regex to handle whitespace and formatting\n\t\t\t\t\t\tif ((aVal.match(/\\d+(\\.\\d+)?\\s*[KMGTPE]?B/i) || aVal === '-') &&\n\t\t\t\t\t\t    (bVal.match(/\\d+(\\.\\d+)?\\s*[KMGTPE]?B/i) || bVal === '-')) {\n\t\t\t\t\t\t\treturn compareSize(aVal, bVal) * (isAsc ? 1 : -1);\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\t// Check if values are dates\n\t\t\t\t\t\tif (aVal.match(/\\d{4}-\\d{2}-\\d{2}/) && bVal.match(/\\d{4}-\\d{2}-\\d{2}/)) {\n\t\t\t\t\t\t\treturn (new Date(aVal) - new Date(bVal)) * (isAsc ? 1 : -1);\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\t// Check if values are numbers\n\t\t\t\t\t\tconst aNum = parseFloat(aVal.replace(/[^0-9.-]/g, ''));\n\t\t\t\t\t\tconst bNum = parseFloat(bVal.replace(/[^0-9.-]/g, ''));\n\t\t\t\t\t\tif (!isNaN(aNum) && !isNaN(bNum)) {\n\t\t\t\t\t\t\treturn (aNum - bNum) * (isAsc ? 1 : -1);\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\t// Default string comparison\n\t\t\t\t\t\treturn aVal.localeCompare(bVal) * (isAsc ? 1 : -1);\n\t\t\t\t\t});\n\t\t\t\t}\n\n\t\t\t\t// Append sorted rows\n\t\t\t\trows.forEach(row => tbody.appendChild(row));\n\t\t\t}\n\n\t\t\tfunction compareSize(a, b) {\n\t\t\t\tconst units = { 'B': 1, 'KB': 1024, 'MB': 1024**2, 'GB': 1024**3, 'TB': 1024**4, 'PB': 1024**5, 'EB': 1024**6 };\n\n\t\t\t\tfunction parseSize(str) {\n\t\t\t\t\tconst match = str.match(/([\\d.]+)\\s*([KMGTPE]?B)/);\n\t\t\t\t\tif (!match) return 0;\n\t\t\t\t\treturn parseFloat(match[1]) * (units[match[2]] || 1);\n\t\t\t\t}\n\n\t\t\t\treturn parseSize(a) - parseSize(b);\n\t\t\t}\n\n\t\t\t// Initialize sortable tables\n\t\t\tdocument.addEventListener('DOMContentLoaded', function() {\n\t\t\t\tdocument.querySelectorAll('table').forEach(makeSortable);\n\t\t\t});\n\n\t\t\t// Control buttons: any element with data-api posts to that\n\t\t\t// endpoint, optionally confirming first. The page refreshes via\n\t\t\t// the state-change poll.\n\t\t\tdocument.addEventListener('click', async function(e) {\n\t\t\t\tconst btn = e.target.closest('button[data-api]');\n\t\t\t\tif (!btn) return;\n\t\t\t\tif (btn.dataset.confirm && !confirm(btn.dataset.confirm)) return;\n\t\t\t\tbtn.disabled = true;\n\t\t\t\ttry {\n\t\t\t\t\tconst res = await fetch(btn.dataset.api, { method: 'POST' });\n\t\t\t\t\tif (!res.ok) alert(await res.text());\n\t\t\t\t} catch (err) {\n\t\t\t\t\talert(err);\n\t\t\t\t} finally {\n\t\t\t\t\tbtn.disabled = false;\n\t\t\t\t}\n\t\t\t});\n\n\t\t\tdocument.addEventListener('DOMContentLoaded', function() {\n\t\t\t\tconst snapshotBtn = document.getElementById('snapshot-btn');\n\t\t\t\tif (snapshotBtn) {\n\t\t\t\t\tsnapshotBtn.addEventListener('click', async function() {\n\t\t\t\t\t\tconst periodicity = document.getElementById('snapshot-periodicity').value;\n\t\t\t\t\t\tif (!confirm(`Create a recursive ${periodicity} snapshot?`)) return;\n\t\t\t\t\t\tsnapshotBtn.disabled = true;\n\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\tconst res = await fetch(`/api/snapshot?periodicity=${periodicity}`, { method: 'POST' });\n\t\t\t\t\t\t\tif (!res.ok) alert(await res.text());\n\t\t\t\t\t\t} catch (err) {\n\t\t\t\t\t\t\talert(err);\n\t\t\t\t\t\t} finally {\n\t\t\t\t\t\t\tsnapshotBtn.disabled = false;\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\t\t\t\t}\n\t\t\t});\n\n\t\t\t// Config editor: preview renders the per-dataset impact of the\n\t\t\t// edited config without writing anything; save previews first and\n\t\t\t// asks for confirmation when the change schedules deletions.\n\t\t\tasync function previewConfig() {\n\t\t\t\tconst body = document.getElementById('config-editor').value;\n\t\t\t\tconst el = document.getElementById('config-impacts');\n\t\t\t\tlet res;\n\t\t\t\ttry {\n\t\t\t\t\tres = await fetch('/api/config/preview', { method: 'POST', body });\n\t\t\t\t} catch (err) {\n\t\t\t\t\tel.innerHTML = '<pre class=\"config-error\"></pre>';\n\t\t\t\t\tel.querySelector('pre').textContent = String(err);\n\t\t\t\t\treturn null;\n\t\t\t\t}\n\t\t\t\tif (!res.ok) {\n\t\t\t\t\tel.innerHTML = '<pre class=\"config-error\"></pre>';\n\t\t\t\t\tel.querySelector('pre').textContent = await res.text();\n\t\t\t\t\treturn null;\n\t\t\t\t}\n\t\t\t\tconst data = await res.json();\n\t\t\t\trenderImpacts(data.impacts);\n\t\t\t\treturn data.impacts;\n\t\t\t}\n\n\t\t\tfunction renderImpacts(impacts) {\n\t\t\t\tconst el = document.getElementById('config-impacts');\n\t\t\t\tif (!impacts.length) {\n\t\t\t\t\tel.innerHTML = '<p class=\"impact-note\">Valid config. No dataset’s retention target changes.</p>';\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tconst rows = impacts.map(i => {\n\t\t\t\t\tconst cells = [\n\t\t\t\t\t\ti.dataset,\n\t\t\t\t\t\ti.retentionOld === i.retentionNew ? i.retentionNew : `${i.retentionOld} → ${i.retentionNew}`,\n\t\t\t\t\t\ti.pausedOld === i.pausedNew ? (i.pausedNew ? 'paused' : '') : (i.pausedNew ? '→ paused' : '→ resumed'),\n\t\t\t\t\t\ti.localDeletions,\n\t\t\t\t\t\ti.remoteDeletions,\n\t\t\t\t\t\ti.transfers,\n\t\t\t\t\t];\n\t\t\t\t\treturn '<tr>' + cells.map(c => `<td>${escapeHtml(String(c))}</td>`).join('') + '</tr>';\n\t\t\t\t}).join('');\n\t\t\t\tel.innerHTML = '<h2>Impact</h2><table><thead><tr>'\n\t\t\t\t\t+ '<th>dataset</th><th>retention</th><th>pause</th>'\n\t\t\t\t\t+ '<th>local deletions</th><th>remote deletions</th><th>transfers</th>'\n\t\t\t\t\t+ '</tr></thead><tbody>' + rows + '</tbody></table>';\n\t\t\t}\n\n\t\t\tfunction escapeHtml(s) {\n\t\t\t\tconst div = document.createElement('div');\n\t\t\t\tdiv.textContent = s;\n\t\t\t\treturn div.innerHTML;\n\t\t\t}\n\n\t\t\tdocument.addEventListener('DOMContentLoaded', function() {\n\t\t\t\tconst previewBtn = document.getElementById('config-preview');\n\t\t\t\tconst saveBtn = document.getElementById('config-save');\n\t\t\t\tif (previewBtn) previewBtn.addEventListener('click', previewConfig);\n\t\t\t\tif (saveBtn) saveBtn.addEventListener('click', async function() {\n\t\t\t\t\tconst impacts = await previewConfig();\n\t\t\t\t\tif (impacts === null) return;\n\t\t\t\t\tconst deletions = impacts.reduce((n, i) => n + i.localDeletions + i.remoteDeletions, 0);\n\t\t\t\t\tlet msg = 'Save and apply this config?';\n\t\t\t\t\tif (impacts.length) {\n\t\t\t\t\t\tmsg = `Save and apply? ${impacts.length} dataset(s) affected; ${deletions} snapshot(s) become scheduled for deletion.`;\n\t\t\t\t\t}\n\t\t\t\t\tif (!confirm(msg)) return;\n\t\t\t\t\tsaveBtn.disabled = true;\n\t\t\t\t\ttry {\n\t\t\t\t\t\tconst res = await fetch('/api/config', { method: 'PUT', body: document.getElementById('config-editor').value });\n\t\t\t\t\t\tif (!res.ok) {\n\t\t\t\t\t\t\talert(await res.text());\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\twindow.location.reload();\n\t\t\t\t\t} finally {\n\t\t\t\t\t\tsaveBtn.disabled = false;\n\t\t\t\t\t}\n\t\t\t\t});\n\t\t\t});\n\n\t\t\t// Long-polling for state changes\n\t\t\tasync function poll() {\n\t\t\t\twhile (true) {\n\t\t\t\t\ttry {\n\t\t\t\t\t\tconst response = await fetch('/poll');\n\t\t\t\t\t\tif (response.ok) {\n\t\t\t\t\t\t\t// State changed, refresh the page\n\t\t\t\t\t\t\twindow.location.reload();\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\t// Timeout, poll again immediately\n\t\t\t\t\t} catch (error) {\n\t\t\t\t\t\t// Connection error, retry after a delay\n\t\t\t\t\t\tawait new Promise(resolve => setTimeout(resolve, 5000));\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t}\n\n\t\t\t// Start polling when the page loads — except on the config page,\n\t\t\t// where a reload would clobber an in-progress edit.\n\t\t\tdocument.addEventListener('DOMContentLoaded', function() {\n\t\t\t\tif (window.location.pathname !== '/config') {\n\t\t\t\t\tpoll();\n\t\t\t\t}\n\t\t\t});\n\t\t</script></body></html>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -622,7 +929,7 @@ func index(state *model.Model, globalLogs []logger.LogEntry, syncStatus *sync.St
 	})
 }
 
-func renderDatasetLink(ds model.DatasetName, dataset *model.Dataset, syncStatus *sync.Status, currentDataset string) templ.Component {
+func renderDatasetLink(ds model.DatasetName, dataset *model.Dataset, syncStatus *sync.Status, conf *config.Config, currentDataset string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -638,65 +945,65 @@ func renderDatasetLink(ds model.DatasetName, dataset *model.Dataset, syncStatus 
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var33 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var33 == nil {
-			templ_7745c5c3_Var33 = templ.NopComponent
+		templ_7745c5c3_Var47 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var47 == nil {
+			templ_7745c5c3_Var47 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
 		if ds.String() == "<root>" {
-			var templ_7745c5c3_Var34 = []any{"dataset-link", templ.KV("active", ds.String() == currentDataset)}
-			templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var34...)
+			var templ_7745c5c3_Var48 = []any{"dataset-link", templ.KV("active", ds.String() == currentDataset)}
+			templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var48...)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, "<a href=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 102, "<a href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var35 templ.SafeURL
-			templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/root"))
+			var templ_7745c5c3_Var49 templ.SafeURL
+			templ_7745c5c3_Var49, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/root"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 611, Col: 34}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 941, Col: 34}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var35))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 64, "\" class=\"")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var49))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var36 string
-			templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.JoinStringErrs(templ.CSSClasses(templ_7745c5c3_Var34).String())
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 103, "\" class=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var50 string
+			templ_7745c5c3_Var50, templ_7745c5c3_Err = templ.JoinStringErrs(templ.CSSClasses(templ_7745c5c3_Var48).String())
 			if templ_7745c5c3_Err != nil {
 				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 1, Col: 0}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var36))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var50))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 65, "\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 104, "\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = renderSyncIndicator(ds, dataset, syncStatus).Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = renderSyncIndicator(ds, dataset, syncStatus, conf.PausedFor(ds.Path())).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 66, "<div class=\"dataset-info\"><div class=\"dataset-name\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 105, "<div class=\"dataset-info\"><div class=\"dataset-name\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var37 string
-			templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.JoinStringErrs(ds.String())
+			var templ_7745c5c3_Var51 string
+			templ_7745c5c3_Var51, templ_7745c5c3_Err = templ.JoinStringErrs(ds.String())
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 614, Col: 43}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 944, Col: 43}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var37))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var51))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 67, "</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 106, "</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -704,103 +1011,103 @@ func renderDatasetLink(ds model.DatasetName, dataset *model.Dataset, syncStatus 
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 68, "</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 107, "</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var38 = []any{"status", templ.KV("stale", dataset.Staleness() > time.Minute*10)}
-			templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var38...)
+			var templ_7745c5c3_Var52 = []any{"status", templ.KV("stale", dataset.Staleness() > time.Minute*10)}
+			templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var52...)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 69, "<span class=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 108, "<span class=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var39 string
-			templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.JoinStringErrs(templ.CSSClasses(templ_7745c5c3_Var38).String())
+			var templ_7745c5c3_Var53 string
+			templ_7745c5c3_Var53, templ_7745c5c3_Err = templ.JoinStringErrs(templ.CSSClasses(templ_7745c5c3_Var52).String())
 			if templ_7745c5c3_Err != nil {
 				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 1, Col: 0}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var39))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var53))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 70, "\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 109, "\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var40 string
-			templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.JoinStringErrs(dataset.Staleness().Truncate(time.Minute).String())
+			var templ_7745c5c3_Var54 string
+			templ_7745c5c3_Var54, templ_7745c5c3_Err = templ.JoinStringErrs(dataset.Staleness().Truncate(time.Minute).String())
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 618, Col: 56}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 948, Col: 56}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var40))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var54))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 71, "</span></a>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 110, "</span></a>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 72, "  ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 111, "  ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var41 = []any{"dataset-link", templ.KV("active", ds.String() == currentDataset)}
-			templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var41...)
+			var templ_7745c5c3_Var55 = []any{"dataset-link", templ.KV("active", ds.String() == currentDataset)}
+			templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var55...)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 73, "<a href=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 112, "<a href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var42 templ.SafeURL
-			templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/" + ds.String()[1:]))
+			var templ_7745c5c3_Var56 templ.SafeURL
+			templ_7745c5c3_Var56, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/" + ds.String()[1:]))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 624, Col: 48}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 954, Col: 48}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var42))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 74, "\" class=\"")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var56))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var43 string
-			templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.JoinStringErrs(templ.CSSClasses(templ_7745c5c3_Var41).String())
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 113, "\" class=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var57 string
+			templ_7745c5c3_Var57, templ_7745c5c3_Err = templ.JoinStringErrs(templ.CSSClasses(templ_7745c5c3_Var55).String())
 			if templ_7745c5c3_Err != nil {
 				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 1, Col: 0}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var43))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var57))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 75, "\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 114, "\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = renderSyncIndicator(ds, dataset, syncStatus).Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = renderSyncIndicator(ds, dataset, syncStatus, conf.PausedFor(ds.Path())).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 76, "<div class=\"dataset-info\"><div class=\"dataset-name\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 115, "<div class=\"dataset-info\"><div class=\"dataset-name\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var44 string
-			templ_7745c5c3_Var44, templ_7745c5c3_Err = templ.JoinStringErrs(ds.String())
+			var templ_7745c5c3_Var58 string
+			templ_7745c5c3_Var58, templ_7745c5c3_Err = templ.JoinStringErrs(ds.String())
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 627, Col: 43}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 957, Col: 43}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var44))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var58))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 77, "</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 116, "</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -808,42 +1115,42 @@ func renderDatasetLink(ds model.DatasetName, dataset *model.Dataset, syncStatus 
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 78, "</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 117, "</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var45 = []any{"status", templ.KV("stale", dataset.Staleness() > time.Minute*10)}
-			templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var45...)
+			var templ_7745c5c3_Var59 = []any{"status", templ.KV("stale", dataset.Staleness() > time.Minute*10)}
+			templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var59...)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 79, "<span class=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 118, "<span class=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var46 string
-			templ_7745c5c3_Var46, templ_7745c5c3_Err = templ.JoinStringErrs(templ.CSSClasses(templ_7745c5c3_Var45).String())
+			var templ_7745c5c3_Var60 string
+			templ_7745c5c3_Var60, templ_7745c5c3_Err = templ.JoinStringErrs(templ.CSSClasses(templ_7745c5c3_Var59).String())
 			if templ_7745c5c3_Err != nil {
 				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 1, Col: 0}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var46))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var60))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 80, "\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 119, "\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var47 string
-			templ_7745c5c3_Var47, templ_7745c5c3_Err = templ.JoinStringErrs(dataset.Staleness().Truncate(time.Minute).String())
+			var templ_7745c5c3_Var61 string
+			templ_7745c5c3_Var61, templ_7745c5c3_Err = templ.JoinStringErrs(dataset.Staleness().Truncate(time.Minute).String())
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 631, Col: 56}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 961, Col: 56}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var47))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var61))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 81, "</span></a>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 120, "</span></a>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -852,7 +1159,7 @@ func renderDatasetLink(ds model.DatasetName, dataset *model.Dataset, syncStatus 
 	})
 }
 
-func renderSyncIndicator(ds model.DatasetName, dataset *model.Dataset, syncStatus *sync.Status) templ.Component {
+func renderSyncIndicator(ds model.DatasetName, dataset *model.Dataset, syncStatus *sync.Status, paused bool) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -868,23 +1175,28 @@ func renderSyncIndicator(ds model.DatasetName, dataset *model.Dataset, syncStatu
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var48 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var48 == nil {
-			templ_7745c5c3_Var48 = templ.NopComponent
+		templ_7745c5c3_Var62 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var62 == nil {
+			templ_7745c5c3_Var62 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
 		if syncStatus.IsSyncing(ds) {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 82, "<span class=\"sync-indicator syncing\" title=\"Currently syncing\"></span>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 121, "<span class=\"sync-indicator syncing\" title=\"Currently syncing\"></span>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		} else if paused {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 122, "<span class=\"sync-indicator paused\" title=\"Paused\"></span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else if dataset.Staleness() > time.Minute*10 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 83, "<span class=\"sync-indicator stale\" title=\"Stale - needs sync\"></span>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 123, "<span class=\"sync-indicator stale\" title=\"Stale - needs sync\"></span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 84, "<span class=\"sync-indicator synced\" title=\"Up to date\"></span>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 124, "<span class=\"sync-indicator synced\" title=\"Up to date\"></span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -909,66 +1221,66 @@ func renderDatasetSize(dataset *model.Dataset) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var49 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var49 == nil {
-			templ_7745c5c3_Var49 = templ.NopComponent
+		templ_7745c5c3_Var63 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var63 == nil {
+			templ_7745c5c3_Var63 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 85, "<div class=\"dataset-size\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 125, "<div class=\"dataset-size\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if dataset.Metrics.HasLocal {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 86, "Local: ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 126, "Local: ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var50 string
-			templ_7745c5c3_Var50, templ_7745c5c3_Err = templ.JoinStringErrs(dataset.Metrics.LocalSize.HumanizedUsed())
+			var templ_7745c5c3_Var64 string
+			templ_7745c5c3_Var64, templ_7745c5c3_Err = templ.JoinStringErrs(dataset.Metrics.LocalSize.HumanizedUsed())
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 650, Col: 53}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 982, Col: 53}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var50))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var64))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 87, " ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 127, " ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
 		if dataset.Metrics.HasRemote {
 			if dataset.Metrics.HasLocal {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 88, "<br>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 128, "<br>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 89, " Remote: ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 129, " Remote: ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var51 string
-			templ_7745c5c3_Var51, templ_7745c5c3_Err = templ.JoinStringErrs(dataset.Metrics.RemoteSize.HumanizedUsed())
+			var templ_7745c5c3_Var65 string
+			templ_7745c5c3_Var65, templ_7745c5c3_Err = templ.JoinStringErrs(dataset.Metrics.RemoteSize.HumanizedUsed())
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 656, Col: 55}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 988, Col: 55}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var51))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var65))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 90, " ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 130, " ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
 		if !dataset.Metrics.HasLocal && !dataset.Metrics.HasRemote {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 91, "No size info")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 131, "No size info")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 92, "</div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 132, "</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -992,29 +1304,29 @@ func renderStepStatus(status model.StepStatus) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var52 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var52 == nil {
-			templ_7745c5c3_Var52 = templ.NopComponent
+		templ_7745c5c3_Var66 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var66 == nil {
+			templ_7745c5c3_Var66 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
 		switch status {
 		case model.StepPending:
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 93, "<span class=\"step-status pending\" title=\"Pending\"></span>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 133, "<span class=\"step-status pending\" title=\"Pending\"></span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		case model.StepInProgress:
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 94, "<span class=\"step-status in-progress\" title=\"In Progress\"></span>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 134, "<span class=\"step-status in-progress\" title=\"In Progress\"></span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		case model.StepCompleted:
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 95, "<span class=\"step-status completed\" title=\"Completed\"></span>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 135, "<span class=\"step-status completed\" title=\"Completed\"></span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		case model.StepFailed:
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 96, "<span class=\"step-status failed\" title=\"Failed\"></span>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 136, "<span class=\"step-status failed\" title=\"Failed\"></span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1039,40 +1351,40 @@ func snapshotRows(ds *model.Dataset) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var53 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var53 == nil {
-			templ_7745c5c3_Var53 = templ.NopComponent
+		templ_7745c5c3_Var67 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var67 == nil {
+			templ_7745c5c3_Var67 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
 		if ds.Current != nil {
 			for snap := range ds.Current.Local.Union(ds.Current.Remote).AllDesc() {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 97, "<tr><td>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 137, "<tr><td>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var54 string
-				templ_7745c5c3_Var54, templ_7745c5c3_Err = templ.JoinStringErrs(snap.Name)
+				var templ_7745c5c3_Var68 string
+				templ_7745c5c3_Var68, templ_7745c5c3_Err = templ.JoinStringErrs(snap.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 682, Col: 19}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 1014, Col: 19}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var54))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 98, "</td><td>")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var68))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var55 string
-				templ_7745c5c3_Var55, templ_7745c5c3_Err = templ.JoinStringErrs(snap.Time().Format(time.DateTime))
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 683, Col: 43}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var55))
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 138, "</td><td>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 99, "</td><td>")
+				var templ_7745c5c3_Var69 string
+				templ_7745c5c3_Var69, templ_7745c5c3_Err = templ.JoinStringErrs(snap.Time().Format(time.DateTime))
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 1015, Col: 43}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var69))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 139, "</td><td>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1080,7 +1392,7 @@ func snapshotRows(ds *model.Dataset) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 100, "</td><td>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 140, "</td><td>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1088,20 +1400,20 @@ func snapshotRows(ds *model.Dataset) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 101, "</td><td><code>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 141, "</td><td><code>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var56 string
-				templ_7745c5c3_Var56, templ_7745c5c3_Err = templ.JoinStringErrs(snap.SizeString())
+				var templ_7745c5c3_Var70 string
+				templ_7745c5c3_Var70, templ_7745c5c3_Err = templ.JoinStringErrs(snap.SizeString())
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 690, Col: 33}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 1022, Col: 33}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var56))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var70))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 102, "</code></td></tr>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 142, "</code></td></tr>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1130,30 +1442,30 @@ func snapshotPresence(current bool, inTarget bool, hasTarget bool) templ.Compone
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var57 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var57 == nil {
-			templ_7745c5c3_Var57 = templ.NopComponent
+		templ_7745c5c3_Var71 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var71 == nil {
+			templ_7745c5c3_Var71 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
 		if current {
 			if hasTarget && !inTarget {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 103, "<span class=\"snapshot-doomed\" title=\"Present; scheduled for deletion\">✓</span>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 143, "<span class=\"snapshot-doomed\" title=\"Present; scheduled for deletion\">✓</span>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 104, "<span class=\"snapshot-present\">✓</span>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 144, "<span class=\"snapshot-present\">✓</span>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
 		} else if inTarget {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 105, "<span class=\"snapshot-absent\" title=\"Missing; scheduled for transfer\">✗</span>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 145, "<span class=\"snapshot-absent\" title=\"Missing; scheduled for transfer\">✗</span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 106, "<span>-</span>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 146, "<span>-</span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1178,31 +1490,31 @@ func renderRetention(conf *config.Config, dataset string) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var58 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var58 == nil {
-			templ_7745c5c3_Var58 = templ.NopComponent
+		templ_7745c5c3_Var72 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var72 == nil {
+			templ_7745c5c3_Var72 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
 		if _, override := conf.OverrideFor(dataset); override != nil {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 107, "<code class=\"retention-override\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 147, "<code class=\"retention-override\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var59 string
-			templ_7745c5c3_Var59, templ_7745c5c3_Err = templ.JoinStringErrs(conf.RetentionDescription(dataset))
+			var templ_7745c5c3_Var73 string
+			templ_7745c5c3_Var73, templ_7745c5c3_Err = templ.JoinStringErrs(conf.RetentionDescription(dataset))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 715, Col: 71}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `index.templ`, Line: 1047, Col: 71}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var59))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var73))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 108, "</code>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 148, "</code>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 109, "<code>default</code>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 149, "<code>default</code>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

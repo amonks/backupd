@@ -10,8 +10,13 @@ Key features:
 - Automated ZFS snapshot replication with intelligent planning
 - Type-based retention policies with configurable limits
 - Real-time web dashboard for monitoring and control
+- Pause and resume — globally or per dataset subtree — persisted in the config file
+- Config editing from the dashboard, with validation and a per-dataset impact preview before anything is written
+- Hot config reload: retention, pause, and interval changes apply without a restart
+- Sync-on-demand (full cycle or single dataset) via UI, API, or CLI
+- Cycle history: the last 50 sync cycles with outcomes and per-dataset last-success times
 - Resumable transfers with progress tracking
-- RESTful API for snapshot creation
+- RESTful API for control and state inspection
 - Dead Man's Snitch integration for external monitoring
 - Dry-run mode for safe testing
 - Atomic state management for consistency
@@ -106,6 +111,21 @@ Configuration is loaded from one of the following locations (in order of precede
 # Get your snitch ID from https://deadmanssnitch.com
 snitch_id = "your-snitch-id"
 
+# Optional: pause all execution. State is still refreshed and plans are
+# still generated (the dashboard shows what would happen), but no
+# transfers or deletions run, and the snitch ping is withheld so a
+# forgotten pause eventually trips the dead man's switch. The dashboard's
+# pause button edits this setting.
+#paused = true
+
+# Optional: duration between sync cycles (default "1h")
+#interval = "1h"
+
+# Optional: HTTP listen address (default "0.0.0.0:8888"). Bind to a
+# tailnet/VPN address to restrict access to the dashboard and its
+# control API.
+#listen = "0.0.0.0:8888"
+
 [local]
 # Root dataset to backup (all child datasets included)
 root = "tank/data"
@@ -146,6 +166,10 @@ yearly = 2       # Keep 2 most recent yearly snapshots
 # {daily = 1}, this yields "keep the latest backed up, but no history":
 # each day's snapshot transfers, becomes the new sync point, and its
 # predecessor is deleted from both locations on the next cycle.
+#
+# paused = true pauses execution for the subtree. Unlike retention, pause
+# accumulates across matching prefixes: pausing /a pauses /a/b even if
+# /a/b has its own retention override.
 [overrides."/scratch"]
 keep_baseline = false
 [overrides."/scratch".local.policy]
@@ -209,8 +233,19 @@ yearly = 5
 
 - `-debug <dataset>`: Debug a specific dataset (performs refresh and plan but no transfers)
 - `-logfile <path>`: Log to a file instead of stdout (recommended for production)
-- `-addr <address>`: Server address for the web interface (default: "0.0.0.0:8888")
+- `-addr <address>`: Server address for the web interface (overrides the config `listen` setting; default: "0.0.0.0:8888")
 - `-dryrun`: Refresh state but don't execute transfers or deletions (preview mode)
+
+### Subcommands
+
+Subcommands are thin wrappers over the running daemon's control API:
+
+```bash
+backupd snapshot <periodicity>   # Create a recursive snapshot
+backupd pause [dataset]          # Pause execution (all, or one subtree)
+backupd resume [dataset]         # Resume execution (all, or one subtree)
+backupd sync [dataset]           # Sync now (full cycle, or one dataset)
+```
 
 ### Basic Usage
 
@@ -231,7 +266,11 @@ sudo backupd -debug tank/dataset
 sudo backupd -addr 127.0.0.1:9999
 
 # Create a snapshot via API
-curl -X POST "http://localhost:8888/snapshot?periodicity=daily"
+curl -X POST "http://localhost:8888/api/snapshot?periodicity=daily"
+
+# Pause the /tm subtree, then resume it
+sudo backupd pause /tm
+sudo backupd resume /tm
 ```
 
 ### Setting Up as a Daemon
@@ -321,32 +360,45 @@ systemctl status backupd
 
 ### Web UI Endpoints
 
-The web interface provides real-time monitoring:
-- **Global view**: http://localhost:8888/global - Overview of all datasets
+The web interface provides real-time monitoring and control:
+- **Global view**: http://localhost:8888/global - Overview of all datasets, cycle history, and global controls (pause/resume, sync now, snapshot)
+- **Config editor**: http://localhost:8888/config - Edit the config file with validation and a per-dataset impact preview before saving
 - **Root dataset**: http://localhost:8888/root - Root dataset status
-- **Specific dataset**: http://localhost:8888/dataset-name - Individual dataset details
+- **Specific dataset**: http://localhost:8888/dataset-name - Individual dataset details, with per-dataset pause and sync-now controls
 - **Automatic redirect**: http://localhost:8888/ → /global
+
+The dashboard is unauthenticated: anyone who can reach the listen
+address can pause backups and edit the config. Use the `listen` config
+setting to bind to a private (e.g. VPN/tailnet) address.
 
 ### REST API Endpoints
 
-#### Create Snapshot
-```
-POST /snapshot?periodicity=<type>
-```
-Creates a new recursive snapshot for the configured local root dataset.
+| Method | Path                        | Description |
+|--------|-----------------------------|-------------|
+| POST   | `/api/pause?dataset=`       | Pause execution; omit `dataset` for a global pause. Persisted to the config file. |
+| POST   | `/api/resume?dataset=`      | Resume execution; omit `dataset` to clear the global pause. |
+| POST   | `/api/sync?dataset=`        | Sync now; omit `dataset` to start a full cycle immediately. |
+| POST   | `/api/snapshot?periodicity=`| Create a recursive snapshot of the local root. |
+| GET    | `/api/config`               | The raw config file (TOML). |
+| POST   | `/api/config/preview`       | Validate a config (request body) and report its per-dataset impact without writing. |
+| PUT    | `/api/config`               | Validate, atomically save, and hot-apply a config (request body). |
+| GET    | `/api/state`                | JSON state summary: datasets, pause/sync status, plan progress, cycle history. |
 
-**Parameters:**
-- `periodicity`: Snapshot type (e.g., "hourly", "daily", "weekly")
+Pause semantics: a paused dataset (or a globally paused daemon) is still
+refreshed and replanned every cycle — the dashboard keeps showing what
+*would* happen — but no transfers or deletions execute. A pause arriving
+mid-plan takes effect at the next step boundary: the in-flight ZFS
+operation finishes, and remaining steps stay pending. While globally
+paused, the Dead Man's Snitch ping is withheld, so a forgotten pause
+eventually raises an external alert.
 
-**Example:**
-```bash
-curl -X POST "http://localhost:8888/snapshot?periodicity=hourly"
-```
-
-**Response:**
-- 200 OK: Snapshot created successfully
-- 400 Bad Request: Missing periodicity parameter
-- 500 Internal Server Error: Creation failed
+Config editing: `PUT /api/config` validates strictly (unknown keys are
+rejected, so typos like `dialy` surface immediately), writes atomically
+(temp file + rename), and applies the result in memory — retention,
+pause, interval, and snitch changes take effect without a restart.
+Changes to the local/remote roots or SSH endpoint still require a
+restart, and are logged as such. Hand-edits to the config file are
+picked up at the start of each cycle.
 
 ## Snapshot Naming Format and Policy Resolution
 
