@@ -3,6 +3,8 @@ package status
 import (
 	"testing"
 	"time"
+
+	"monks.co/backupd/model"
 )
 
 func at(tr *Tracker, t time.Time) *Tracker {
@@ -114,6 +116,70 @@ func TestProgress(t *testing.T) {
 	tr.StartStep(2, 2, "delete")
 	if tr.Get().Transfer != nil {
 		t.Fatal("expected StartStep to clear the transfer")
+	}
+}
+
+// TestQueue: the tracker records each cycle's dataset queue so the UI
+// can answer "where in the cycle are we" — which datasets are done,
+// which is active, which remain.
+func TestQueue(t *testing.T) {
+	tr := New(nil)
+	t0 := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
+
+	at(tr, t0).StartCycle()
+	if q := tr.Get().Queue; q != nil {
+		t.Fatalf("expected no queue right after StartCycle, got %+v", q)
+	}
+
+	tr.SetQueue([]model.DatasetName{"/a", "/b", "/c"})
+	q := tr.Get().Queue
+	if len(q) != 3 {
+		t.Fatalf("expected 3 queue entries, got %+v", q)
+	}
+	for i, want := range []model.DatasetName{"/a", "/b", "/c"} {
+		if q[i].Dataset != want || q[i].State != QueueWaiting {
+			t.Fatalf("entry %d: expected %s waiting, got %+v", i, want, q[i])
+		}
+	}
+
+	// StartDataset marks the matching entry active.
+	tr.StartDataset("/a")
+	q = tr.Get().Queue
+	if q[0].State != QueueActive {
+		t.Fatalf("expected /a active, got %+v", q)
+	}
+
+	// FinishDataset records the outcome.
+	tr.FinishDataset("/a", QueueDone)
+	tr.StartDataset("/b")
+	tr.FinishDataset("/b", QueueFailed)
+	tr.StartDataset("/c")
+	tr.FinishDataset("/c", QueueSkipped)
+	q = tr.Get().Queue
+	if q[0].State != QueueDone || q[1].State != QueueFailed || q[2].State != QueueSkipped {
+		t.Fatalf("expected done/failed/skipped, got %+v", q)
+	}
+
+	// The queue survives the between-cycle wait (the UI may show the
+	// completed cycle) and is cleared by the next StartCycle.
+	tr.Wait(t0.Add(time.Hour), 0)
+	if q := tr.Get().Queue; len(q) != 3 {
+		t.Fatalf("expected Wait to preserve the queue, got %+v", q)
+	}
+	tr.StartCycle()
+	if q := tr.Get().Queue; q != nil {
+		t.Fatalf("expected StartCycle to clear the queue, got %+v", q)
+	}
+
+	// A single-dataset sync outside a full cycle appends its own entry.
+	tr.StartDataset("/solo")
+	q = tr.Get().Queue
+	if len(q) != 1 || q[0].Dataset != "/solo" || q[0].State != QueueActive {
+		t.Fatalf("expected a self-appended active entry, got %+v", q)
+	}
+	tr.FinishDataset("/solo", QueueDone)
+	if q := tr.Get().Queue; q[0].State != QueueDone {
+		t.Fatalf("expected /solo done, got %+v", q)
 	}
 }
 

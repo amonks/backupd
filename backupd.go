@@ -34,6 +34,9 @@ type Backupd struct {
 	versionCh  chan struct{}
 	syncNow    chan syncRequest
 	history    *history.History
+	// boot anchors "since boot" judgments (e.g. how overdue the snitch
+	// ping is before any ping has happened).
+	boot time.Time
 
 	// resume is env.Resume, injectable for tests.
 	resume func(context.Context, *logger.Logger, model.DatasetName, string) error
@@ -74,6 +77,7 @@ func NewWithEnv(conf *config.Config, addr string, dryrun bool, e env.Interface) 
 		versionCh:  make(chan struct{}, 1),
 		syncNow:    make(chan syncRequest, 16),
 		history:    history.New(),
+		boot:       time.Now(),
 	}
 	b.activity = status.New(b.notifyStateChange)
 	b.resume = e.Resume
@@ -138,6 +142,11 @@ func (b *Backupd) idle(ctx context.Context, d time.Duration, failures int) error
 		b.globalLogs.Printf("sync requested for '%s'", req.dataset)
 		if err := b.syncDataset(ctx, req.dataset); err != nil {
 			b.globalLogs.Printf("sync error for '%s': %s", req.dataset, err)
+			b.activity.FinishDataset(req.dataset, status.QueueFailed)
+		} else if b.conf.Deref().PausedFor(req.dataset.Path()) {
+			b.activity.FinishDataset(req.dataset, status.QueueSkipped)
+		} else {
+			b.activity.FinishDataset(req.dataset, status.QueueDone)
 		}
 		remaining = time.Until(deadline)
 	}
@@ -263,8 +272,11 @@ func (b *Backupd) Sync(ctx context.Context) error {
 			cycleErr = err.Error()
 			b.globalLogs.Printf("error refreshing all datasets and plans: %s", err)
 		} else {
-			// Then, for each dataset: refresh, replan, resync
-			for _, ds := range b.state.Deref().ListDatasets() {
+			// Then, for each dataset: refresh, replan, resync. The queue
+			// lets the UI answer "where in the cycle are we".
+			names := b.state.Deref().ListDatasets()
+			b.activity.SetQueue(names)
+			for _, ds := range names {
 				if err := ctx.Err(); err != nil {
 					return err
 				}
@@ -275,12 +287,19 @@ func (b *Backupd) Sync(ctx context.Context) error {
 				// Resync with the updated plan
 				b.globalLogs.Printf("syncing '%s'", ds)
 				if err := b.syncDataset(ctx, ds); err != nil {
+					if ctx.Err() != nil {
+						return ctx.Err()
+					}
 					allOK = false
 					failures = append(failures, ds.String())
 					err := fmt.Errorf("syncing '%s': %w", ds, err)
 					// Log to both global and dataset-specific logs
 					b.globalLogs.Printf("sync error; skipping dataset: %s", err)
-					// Also log to dataset-specific location if needed
+					b.activity.FinishDataset(ds, status.QueueFailed)
+				} else if b.conf.Deref().PausedFor(ds.Path()) {
+					b.activity.FinishDataset(ds, status.QueueSkipped)
+				} else {
+					b.activity.FinishDataset(ds, status.QueueDone)
 				}
 			}
 

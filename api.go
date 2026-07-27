@@ -12,6 +12,7 @@ import (
 	"monks.co/backupd/config"
 	"monks.co/backupd/history"
 	"monks.co/backupd/model"
+	"monks.co/backupd/view"
 )
 
 // handler builds the full HTTP mux: the HTML dashboard, the long-poll
@@ -255,39 +256,91 @@ func (b *Backupd) handleConfigPut(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, map[string]any{"ok": true})
 }
 
+// The JSON state summary serializes the same view.System the HTML
+// renders from, so scripts and humans can never disagree about what
+// the system says.
+
+type apiIssue struct {
+	Kind     string `json:"kind"`
+	Severity string `json:"severity"`
+	// Dataset is the affected dataset's path (empty string is the root
+	// dataset); absent for system-level issues.
+	Dataset *string    `json:"dataset,omitempty"`
+	Summary string     `json:"summary"`
+	Detail  string     `json:"detail,omitempty"`
+	Since   *time.Time `json:"since,omitempty"`
+}
+
+type apiFulfillment struct {
+	Periodicity string `json:"periodicity"`
+	LocalHave   int    `json:"localHave"`
+	LocalWant   int    `json:"localWant"`
+	RemoteHave  int    `json:"remoteHave"`
+	RemoteWant  int    `json:"remoteWant"`
+}
+
 type apiDatasetState struct {
-	Name             string     `json:"name"`
-	Verdict          string     `json:"verdict"`
-	Reason           string     `json:"reason,omitempty"`
-	Paused           bool       `json:"paused"`
-	Syncing          bool       `json:"syncing"`
-	StalenessSeconds int64      `json:"stalenessSeconds"`
-	LocalSnapshots   int        `json:"localSnapshots"`
-	RemoteSnapshots  int        `json:"remoteSnapshots"`
-	PlanSteps        int        `json:"planSteps"`
-	PlanCompleted    int        `json:"planCompleted"`
-	PlanFailed       int        `json:"planFailed"`
-	PendingDeletions int        `json:"pendingDeletions"`
-	PendingTransfers int        `json:"pendingTransfers"`
-	LastSuccess      *time.Time `json:"lastSuccess,omitempty"`
-	LastFailure      *time.Time `json:"lastFailure,omitempty"`
-	LastError        string     `json:"lastError,omitempty"`
+	Name               string           `json:"name"`
+	Path               string           `json:"path"`
+	Health             string           `json:"health"`
+	Reason             string           `json:"reason,omitempty"`
+	Syncing            bool             `json:"syncing"`
+	Paused             bool             `json:"paused"`
+	SnapshottedSeconds *int64           `json:"snapshottedSeconds,omitempty"`
+	BackedUpSeconds    *int64           `json:"backedUpSeconds,omitempty"`
+	DepthSeconds       *int64           `json:"depthSeconds,omitempty"`
+	LagSeconds         int64            `json:"lagSeconds"`
+	SnapshotsStale     bool             `json:"snapshotsStale,omitempty"`
+	BackupStale        bool             `json:"backupStale,omitempty"`
+	Unreplicated       bool             `json:"unreplicated,omitempty"`
+	LocalSnapshots     int              `json:"localSnapshots"`
+	RemoteSnapshots    int              `json:"remoteSnapshots"`
+	LocalUsedBytes     int64            `json:"localUsedBytes,omitempty"`
+	RemoteUsedBytes    int64            `json:"remoteUsedBytes,omitempty"`
+	PendingDeletions   int              `json:"pendingDeletions"`
+	PendingTransfers   int              `json:"pendingTransfers"`
+	PlanSteps          int              `json:"planSteps"`
+	PlanCompleted      int              `json:"planCompleted"`
+	Retention          string           `json:"retention"`
+	Fulfillment        []apiFulfillment `json:"fulfillment,omitempty"`
+	LastSuccess        *time.Time       `json:"lastSuccess,omitempty"`
+	LastFailure        *time.Time       `json:"lastFailure,omitempty"`
+	LastError          string           `json:"lastError,omitempty"`
+}
+
+type apiCycleProgress struct {
+	Total    int    `json:"total"`
+	Position int    `json:"position"`
+	Done     int    `json:"done"`
+	Failed   int    `json:"failed"`
+	Skipped  int    `json:"skipped"`
+	Active   string `json:"active,omitempty"`
 }
 
 type apiActivity struct {
-	Phase               string     `json:"phase"`
-	Dataset             string     `json:"dataset,omitempty"`
-	Step                int        `json:"step,omitempty"`
-	Steps               int        `json:"steps,omitempty"`
-	Operation           string     `json:"operation,omitempty"`
-	Until               *time.Time `json:"until,omitempty"`
-	ConsecutiveFailures int        `json:"consecutiveFailures,omitempty"`
-	TransferPercent     *float64   `json:"transferPercent,omitempty"`
-	TransferRate        *float64   `json:"transferRateBytesPerSec,omitempty"`
+	Phase               string           `json:"phase"`
+	Dataset             string           `json:"dataset,omitempty"`
+	Step                int              `json:"step,omitempty"`
+	Steps               int              `json:"steps,omitempty"`
+	Operation           string           `json:"operation,omitempty"`
+	Until               *time.Time       `json:"until,omitempty"`
+	ConsecutiveFailures int              `json:"consecutiveFailures,omitempty"`
+	TransferPercent     *float64         `json:"transferPercent,omitempty"`
+	TransferRate        *float64         `json:"transferRateBytesPerSec,omitempty"`
+	Cycle               apiCycleProgress `json:"cycle"`
+}
+
+func secondsPtr(has bool, d time.Duration) *int64 {
+	if !has {
+		return nil
+	}
+	s := int64(d.Seconds())
+	return &s
 }
 
 func (b *Backupd) handleState(w http.ResponseWriter, req *http.Request) {
 	d := b.pageData("")
+	sys := d.Sys
 
 	act := apiActivity{
 		Phase:               d.Activity.Phase.String(),
@@ -296,6 +349,16 @@ func (b *Backupd) handleState(w http.ResponseWriter, req *http.Request) {
 		Steps:               d.Activity.Steps,
 		Operation:           d.Activity.Operation,
 		ConsecutiveFailures: d.Activity.ConsecutiveFailures,
+		Cycle: apiCycleProgress{
+			Total:    sys.Cycle.Total,
+			Position: sys.Cycle.Position,
+			Done:     sys.Cycle.Done,
+			Failed:   sys.Cycle.Failed,
+			Skipped:  sys.Cycle.Skipped,
+		},
+	}
+	if sys.Cycle.HasActive {
+		act.Cycle.Active = sys.Cycle.Active.String()
 	}
 	if !d.Activity.Until.IsZero() {
 		act.Until = &d.Activity.Until
@@ -306,19 +369,40 @@ func (b *Backupd) handleState(w http.ResponseWriter, req *http.Request) {
 		act.TransferRate = &x.Rate
 	}
 
+	issues := []apiIssue{}
+	for _, issue := range sys.Issues {
+		out := apiIssue{
+			Kind:     string(issue.Kind),
+			Severity: issue.Severity.String(),
+			Summary:  issue.Summary,
+			Detail:   issue.Detail,
+		}
+		if issue.Dataset != nil {
+			path := issue.Dataset.Path()
+			out.Dataset = &path
+		}
+		if !issue.Since.IsZero() {
+			since := issue.Since
+			out.Since = &since
+		}
+		issues = append(issues, out)
+	}
+
 	resp := struct {
 		Verdict  string            `json:"verdict"`
 		Reason   string            `json:"reason,omitempty"`
 		Paused   bool              `json:"paused"`
 		Dryrun   bool              `json:"dryrun"`
+		Issues   []apiIssue        `json:"issues"`
 		Activity apiActivity       `json:"activity"`
 		Datasets []apiDatasetState `json:"datasets"`
 		Cycles   []history.Cycle   `json:"cycles"`
 	}{
-		Verdict:  d.System.Verdict.String(),
-		Reason:   d.System.Reason,
+		Verdict:  sys.Verdict.String(),
+		Reason:   sys.Reason,
 		Paused:   d.Conf.Paused,
 		Dryrun:   d.Dryrun,
+		Issues:   issues,
 		Activity: act,
 		Datasets: []apiDatasetState{},
 		Cycles:   d.Cycles,
@@ -327,32 +411,39 @@ func (b *Backupd) handleState(w http.ResponseWriter, req *http.Request) {
 		resp.Cycles = []history.Cycle{}
 	}
 
-	for _, dv := range d.Views {
-		ds := d.State.GetDataset(dv.Name)
+	for _, dv := range sys.Datasets {
 		out := apiDatasetState{
-			Name:             dv.Name.String(),
-			Verdict:          dv.Verdict.String(),
-			Reason:           dv.Reason,
-			Paused:           d.Conf.PausedFor(dv.Name.Path()),
-			Syncing:          dv.Verdict == VerdictSyncing,
-			StalenessSeconds: int64(dv.Lag.Seconds()),
-			PendingDeletions: dv.PendingDeletions,
-			PendingTransfers: dv.PendingTransfers,
+			Name:               dv.Name.String(),
+			Path:               dv.Name.Path(),
+			Health:             dv.Health.String(),
+			Reason:             dv.Reason,
+			Syncing:            dv.Syncing,
+			Paused:             dv.Paused,
+			SnapshottedSeconds: secondsPtr(dv.HasLocal, dv.Snapshotted),
+			BackedUpSeconds:    secondsPtr(dv.HasRemote, dv.BackedUp),
+			DepthSeconds:       secondsPtr(dv.HasRemote, dv.Depth),
+			LagSeconds:         int64(dv.Lag.Seconds()),
+			SnapshotsStale:     dv.SnapshotsStale,
+			BackupStale:        dv.BackupStale,
+			Unreplicated:       dv.Unreplicated,
+			LocalSnapshots:     dv.LocalCount,
+			RemoteSnapshots:    dv.RemoteCount,
+			LocalUsedBytes:     dv.LocalUsed,
+			RemoteUsedBytes:    dv.RemoteUsed,
+			PendingDeletions:   dv.PendingDeletions,
+			PendingTransfers:   dv.PendingTransfers,
+			PlanSteps:          dv.StepsTotal,
+			PlanCompleted:      dv.StepsDone,
+			Retention:          dv.Retention,
 		}
-		if ds != nil && ds.Current != nil {
-			out.LocalSnapshots = ds.Current.Local.Len()
-			out.RemoteSnapshots = ds.Current.Remote.Len()
-		}
-		if ds != nil && ds.Plan != nil {
-			out.PlanSteps = len(ds.Plan.Steps)
-			for _, step := range ds.Plan.Steps {
-				switch step.Status {
-				case model.StepCompleted:
-					out.PlanCompleted++
-				case model.StepFailed:
-					out.PlanFailed++
-				}
-			}
+		for _, row := range dv.Fulfillment {
+			out.Fulfillment = append(out.Fulfillment, apiFulfillment{
+				Periodicity: row.Periodicity,
+				LocalHave:   row.LocalHave,
+				LocalWant:   row.LocalWant,
+				RemoteHave:  row.RemoteHave,
+				RemoteWant:  row.RemoteWant,
+			})
 		}
 		if !dv.LastSuccess.IsZero() {
 			at := dv.LastSuccess
@@ -382,30 +473,25 @@ func (b *Backupd) handlePoll(w http.ResponseWriter, req *http.Request) {
 }
 
 // pageData assembles one consistent snapshot of everything the
-// dashboard shows: raw state plus the derived per-dataset and system
-// verdicts.
+// dashboard shows: the raw state plus the derived view.System.
 func (b *Backupd) pageData(page string) pageData {
 	state := b.state.Deref()
 	conf := b.conf.Deref()
-
-	var views []DatasetView
-	byName := map[model.DatasetName]DatasetView{}
-	if state != nil {
-		for _, name := range state.ListDatasets() {
-			dv := datasetView(name, state.GetDataset(name), conf, b.history, b.activity)
-			views = append(views, dv)
-			byName[name] = dv
-		}
-	}
+	activity := b.activity.Get()
 
 	return pageData{
-		Page:       page,
-		State:      state,
-		Conf:       conf,
-		Activity:   b.activity.Get(),
-		Views:      views,
-		ViewByName: byName,
-		System:     systemView(state, conf, b.history, b.activity, views),
+		Page:     page,
+		State:    state,
+		Conf:     conf,
+		Activity: activity,
+		Sys: view.Compute(view.Input{
+			State:    state,
+			Conf:     conf,
+			History:  b.history,
+			Activity: activity,
+			Now:      time.Now(),
+			Boot:     b.boot,
+		}),
 		Cycles:     b.history.Cycles(),
 		Ops:        b.history.Ops(),
 		GlobalLogs: b.globalLogs.GetLogs(),

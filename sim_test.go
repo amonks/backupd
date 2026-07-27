@@ -17,6 +17,7 @@ import (
 	"monks.co/backupd/model"
 	"monks.co/backupd/sim"
 	"monks.co/backupd/status"
+	"monks.co/backupd/view"
 )
 
 // These tests run the complete daemon — sync loop, planner, resume
@@ -289,6 +290,142 @@ func TestSimPausedCycleExecutesNothing(t *testing.T) {
 	}
 }
 
+// computeView derives the dashboard state from a live daemon exactly
+// the way the HTTP layer does, with the clock pinned by the caller.
+func computeView(b *Backupd, at time.Time) view.System {
+	return view.Compute(view.Input{
+		State:    b.state.Deref(),
+		Conf:     b.conf.Deref(),
+		History:  b.history,
+		Activity: b.activity.Get(),
+		Now:      at,
+		Boot:     at.Add(-time.Minute),
+	})
+}
+
+// TestSimDashboardInvariants drives the real daemon over the sim and
+// asserts that what the dashboard would say tracks the truth: a
+// converged fleet reads all-clear with the backed-up age equal to the
+// newest remote snapshot's age; a remote outage reads as a failing
+// system with a cycle issue; recovery clears it.
+func TestSimDashboardInvariants(t *testing.T) {
+	s := sim.New()
+	now := time.Now()
+	a := simSnap("/foo", "daily-a", now.Add(-3*time.Hour).Unix())
+	b_ := simSnap("/foo", "daily-b", now.Add(-2*time.Hour).Unix())
+	c := simSnap("/foo", "daily-c", now.Add(-time.Hour).Unix())
+	s.SeedLocal("/foo", a, b_, c)
+	s.SeedRemote("/foo", a)
+
+	conf := simConf(map[string]int{"daily": 3}, map[string]int{"daily": 3}, true)
+	b := newSimBackupd(conf, s)
+	runCycles(t, b, 2)
+
+	sys := computeView(b, now)
+	if sys.Verdict != view.SystemOK || len(sys.Issues) != 0 {
+		t.Fatalf("expected a quiet ok system after convergence, got %s %+v", sys.Verdict, sys.Issues)
+	}
+	ds, ok := sys.Get("/foo")
+	if !ok || ds.Health != view.HealthOK {
+		t.Fatalf("expected /foo ok, got %+v", ds)
+	}
+	// Ground truth: the dashboard's backed-up age is the sim's newest
+	// remote snapshot's age, to the second.
+	newestRemote := s.Inventory("/foo").Remote.Newest()
+	if want := now.Sub(newestRemote.Time()); ds.BackedUp != want {
+		t.Errorf("backed-up age %s != sim ground truth %s", ds.BackedUp, want)
+	}
+	// The cycle queue accounts for every dataset, all done.
+	queue := b.activity.Get().Queue
+	if len(queue) != 1 || queue[0].Dataset != "/foo" || queue[0].State != status.QueueDone {
+		t.Errorf("expected a completed one-dataset queue, got %+v", queue)
+	}
+
+	// A remote outage: the next cycle fails, and the dashboard says so.
+	s.SetRemoteDown(true)
+	runCycles(t, b, 1)
+	sys = computeView(b, now)
+	if sys.Verdict != view.SystemFailing {
+		t.Fatalf("expected failing during the outage, got %s (%s)", sys.Verdict, sys.Reason)
+	}
+	found := false
+	for _, issue := range sys.Issues {
+		if issue.Kind == view.IssueCycleFailing && issue.Severity == view.Critical {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected a critical cycle-failing issue, got %+v", sys.Issues)
+	}
+
+	// Recovery: the next successful cycle clears the verdict.
+	s.SetRemoteDown(false)
+	runCycles(t, b, 1)
+	sys = computeView(b, now)
+	if sys.Verdict != view.SystemOK || len(sys.Issues) != 0 {
+		t.Fatalf("expected recovery to clear the issues, got %s %+v", sys.Verdict, sys.Issues)
+	}
+}
+
+// TestSimFailingDatasetSurfaces: a dataset whose receives fail
+// persistently shows up as failing (with the error), raises exactly
+// one failing issue, and is marked failed in the cycle queue — while a
+// healthy sibling stays ok.
+func TestSimFailingDatasetSurfaces(t *testing.T) {
+	s := sim.New()
+	now := time.Now()
+	mk := func(ds model.DatasetName, name string, agoHours int) *model.Snapshot {
+		return simSnap(ds, name, now.Add(-time.Duration(agoHours)*time.Hour).Unix())
+	}
+	s.SeedLocal("/ok", mk("/ok", "daily-a", 3), mk("/ok", "daily-b", 1))
+	s.SeedRemote("/ok", mk("/ok", "daily-a", 3))
+	s.SeedLocal("/bad", mk("/bad", "daily-a", 3), mk("/bad", "daily-b", 1))
+	s.SeedRemote("/bad", mk("/bad", "daily-a", 3))
+	s.SetDatasetError("/bad", "invalid backup stream (checksum mismatch)")
+
+	conf := simConf(map[string]int{"daily": 2}, map[string]int{"daily": 2}, true)
+	b := newSimBackupd(conf, s)
+	runCycles(t, b, 1)
+
+	sys := computeView(b, now)
+	bad, _ := sys.Get("/bad")
+	if bad.Health != view.HealthFailing || !strings.Contains(bad.Reason, "checksum mismatch") {
+		t.Fatalf("expected /bad failing with the error, got %s (%s)", bad.Health, bad.Reason)
+	}
+	okDS, _ := sys.Get("/ok")
+	if okDS.Health != view.HealthOK {
+		t.Fatalf("expected /ok to stay ok, got %s (%s)", okDS.Health, okDS.Reason)
+	}
+	failing := 0
+	for _, issue := range sys.Issues {
+		if issue.Kind == view.IssueFailing {
+			failing++
+			if issue.Dataset == nil || *issue.Dataset != "/bad" {
+				t.Errorf("failing issue names %v, want /bad", issue.Dataset)
+			}
+		}
+	}
+	if failing != 1 {
+		t.Errorf("expected exactly one failing issue, got %d", failing)
+	}
+	states := map[model.DatasetName]status.QueueState{}
+	for _, e := range b.activity.Get().Queue {
+		states[e.Dataset] = e.State
+	}
+	if states["/bad"] != status.QueueFailed || states["/ok"] != status.QueueDone {
+		t.Errorf("expected /bad failed and /ok done in the queue, got %+v", states)
+	}
+
+	// Clearing the fault heals the dataset on the next cycle.
+	s.SetDatasetError("/bad", "")
+	runCycles(t, b, 1)
+	sys = computeView(b, now)
+	bad, _ = sys.Get("/bad")
+	if bad.Health != view.HealthOK {
+		t.Fatalf("expected /bad to recover, got %s (%s)", bad.Health, bad.Reason)
+	}
+}
+
 // TestRapidSimConvergence is the end-to-end property: for arbitrary
 // pool states and policies, a few real sync cycles land every dataset
 // on the planner's fixed point, after which a further cycle performs no
@@ -372,6 +509,16 @@ func TestRapidSimConvergence(t *testing.T) {
 		runCycles(t, b, 1)
 		if muts := s.Mutations(); len(muts) != 0 {
 			t.Fatalf("expected a converged cycle to mutate nothing, got %v\n%s", muts, s)
+		}
+
+		// And the dashboard agrees: a converged fleet has nothing failing
+		// and nothing behind (staleness may legitimately fire — the
+		// generated snapshots have arbitrary ages).
+		sys := computeView(b, time.Unix(20*3600, 0))
+		for _, ds := range sys.Datasets {
+			if ds.Health == view.HealthFailing || ds.Health == view.HealthBehind {
+				t.Fatalf("converged dataset %s reads %s (%s)", ds.Name, ds.Health, ds.Reason)
+			}
 		}
 	})
 }

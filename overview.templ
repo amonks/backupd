@@ -6,21 +6,132 @@ import (
 	"time"
 
 	"monks.co/backupd/config"
-	"monks.co/backupd/model"
+	"monks.co/backupd/status"
+	"monks.co/backupd/view"
 )
 
-// overview is the fleet page: every dataset's health at a glance, then
-// what the daemon has done recently (executed operations and cycle
-// outcomes), with raw logs demoted to a collapsible section.
+// overview is the operator's landing page, ordered by session
+// frequency: what needs attention (or all clear), what is happening
+// right now, the fleet's assurance table, then the record of what the
+// daemon has done, with raw logs collapsed at the bottom.
 templ overview(d pageData) {
 	<h1>Overview</h1>
+	@attentionSection(d)
+	@nowSection(d)
+	@fleetTable(d)
+	@recordSection(d)
+	if len(d.GlobalLogs) > 0 {
+		<details class="logs">
+			<summary>Global logs ({ fmt.Sprint(len(d.GlobalLogs)) })</summary>
+			<ul>
+				for _, log := range d.GlobalLogs {
+					<li>{ log.LogAt.Format(time.DateTime) } :: { log.Log }</li>
+				}
+			</ul>
+		</details>
+	}
+}
+
+// attentionSection leads with the typed issue list — everything wrong,
+// worst first, each with its remedy inline — or an explicit all-clear.
+templ attentionSection(d pageData) {
+	if len(d.Sys.Issues) == 0 {
+		<p class="all-clear">All clear — every dataset is snapshotted, replicated, and within policy.</p>
+	} else {
+		<div class="issues">
+			for _, issue := range d.Sys.Issues {
+				@issueCard(issue)
+			}
+		</div>
+	}
+}
+
+templ issueCard(issue view.Issue) {
+	<div class={ "issue", "issue-" + issue.Severity.String() }>
+		<span class={ "chip", "chip-" + issue.Severity.String() }>{ issue.Severity.String() }</span>
+		if issue.Dataset != nil {
+			<a href={ templ.SafeURL(datasetHref(*issue.Dataset)) }>{ issue.Dataset.String() }</a>
+		}
+		<span class="issue-summary">{ issue.Summary }</span>
+		if !issue.Since.IsZero() {
+			<span class="issue-since" title={ exactTime(issue.Since) }>since { fmtAgo(issue.Since) }</span>
+		}
+		@issueAction(issue)
+		if issue.Detail != "" {
+			<span class="issue-detail">{ issue.Detail }</span>
+		}
+	</div>
+}
+
+// issueAction offers the remedy next to the problem: resume what is
+// paused, retry what is failing.
+templ issueAction(issue view.Issue) {
+	switch issue.Kind {
+		case view.IssuePaused:
+			if issue.Dataset == nil {
+				<button class="btn small warn" data-api="/api/resume">Resume all</button>
+			} else {
+				<button class="btn small warn" data-api={ "/api/resume?dataset=" + issue.Dataset.Path() }>Resume</button>
+			}
+		case view.IssueFailing, view.IssueStaleBackup, view.IssueUnreplicated:
+			if issue.Dataset != nil {
+				<button class="btn small" data-api={ "/api/sync?dataset=" + issue.Dataset.Path() }>Sync now</button>
+			}
+		case view.IssueCycleFailing:
+			<button class="btn small" data-api="/api/sync">Sync now</button>
+	}
+}
+
+// nowSection answers "where in the cycle are we": the queue as a dot
+// per dataset while a cycle runs, the countdown while waiting.
+templ nowSection(d pageData) {
+	{{ c := d.Sys.Cycle }}
+	switch d.Activity.Phase {
+		case status.Refreshing:
+			<div class="now"><span class="spinner"></span> refreshing datasets from ZFS…</div>
+		case status.Syncing:
+			<div class="now">
+				if c.Total > 0 {
+					<span>dataset { fmt.Sprint(c.Position) } of { fmt.Sprint(c.Total) }</span>
+					<span class="qdots">
+						for _, e := range c.Entries {
+							<span class={ "qdot", "qdot-" + e.State.String() } title={ e.Dataset.String() + ": " + e.State.String() }></span>
+						}
+					</span>
+				}
+				<span>{ activityLabel(d.Activity, c) }</span>
+			</div>
+		case status.Idle:
+			<div class="now">
+				<span>next cycle <span class="countdown" data-until={ fmt.Sprint(d.Activity.Until.UnixMilli()) }>{ fmtUntil(d.Activity.Until) }</span> (at { d.Activity.Until.Format("15:04") })</span>
+				@lastCycleNote(d)
+			</div>
+		case status.BackingOff:
+			<div class="now">
+				<span class="error-text">{ activityLabel(d.Activity, c) }</span>
+				<span>retrying <span class="countdown" data-until={ fmt.Sprint(d.Activity.Until.UnixMilli()) }>{ fmtUntil(d.Activity.Until) }</span></span>
+			</div>
+	}
+}
+
+templ lastCycleNote(d pageData) {
+	if c := d.Sys.LastCycle; c != nil && c.OK && !c.Paused {
+		<span class="muted">last cycle finished { fmtAgo(c.StoppedAt) } in { c.Duration().Round(time.Second).String() }</span>
+	}
+}
+
+// fleetTable is the assurance table: for every dataset, is it healthy,
+// when was it last snapshotted (are snapshots being taken?), when was
+// it last backed up (the recovery point), what work is queued, and
+// what it holds and costs on each side.
+templ fleetTable(d pageData) {
 	<table id="fleet">
 		<thead>
 			<tr>
 				<th class="sortable">dataset</th>
 				<th>status</th>
-				<th class="sortable num">lag</th>
-				<th class="sortable">last success</th>
+				<th class="sortable num" title="Age of the newest local snapshot">snapshotted</th>
+				<th class="sortable num" title="Age of the newest remote snapshot — the recovery point">backed up</th>
 				<th>pending</th>
 				<th class="sortable num">local</th>
 				<th class="sortable num">remote</th>
@@ -28,11 +139,68 @@ templ overview(d pageData) {
 			</tr>
 		</thead>
 		<tbody>
-			for _, dv := range d.Views {
+			for _, dv := range d.Sys.Datasets {
 				@fleetRow(d, dv)
 			}
 		</tbody>
 	</table>
+}
+
+templ fleetRow(d pageData, dv view.Dataset) {
+	<tr>
+		<td><a href={ templ.SafeURL(datasetHref(dv.Name)) }>{ dv.Name.String() }</a></td>
+		<td>
+			@healthChip(dv)
+		</td>
+		<td class="num" data-sort={ ageSort(dv.HasLocal, dv.Snapshotted) }>
+			@ageCell(dv.HasLocal, dv.Snapshotted, dv.SnapshotsStale, "no snapshots")
+		</td>
+		<td class="num" data-sort={ ageSort(dv.HasRemote, dv.BackedUp) }>
+			@ageCell(dv.HasRemote, dv.BackedUp, dv.BackupStale, "never")
+		</td>
+		<td>
+			if s := dv.PendingSummary(); s != "" {
+				{ s }
+			} else {
+				<span class="muted">—</span>
+			}
+		</td>
+		<td class="num" data-sort={ fmt.Sprint(dv.LocalUsed) }>
+			{ fmt.Sprint(dv.LocalCount) } · { fmtBytes(dv.LocalUsed) }
+		</td>
+		<td class="num" data-sort={ fmt.Sprint(dv.RemoteUsed) }>
+			{ fmt.Sprint(dv.RemoteCount) } · { fmtBytes(dv.RemoteUsed) }
+		</td>
+		<td>
+			@renderRetention(d.Conf, dv.Name.Path())
+		</td>
+	</tr>
+}
+
+// ageSort keys age columns for sorting: missing sides sort past the
+// oldest present ones.
+func ageSort(has bool, age time.Duration) string {
+	if !has {
+		return fmt.Sprint(int64(1) << 62)
+	}
+	return fmt.Sprint(int64(age.Seconds()))
+}
+
+// ageCell renders an age with staleness highlighting, or the absent
+// label ("never", "no snapshots").
+templ ageCell(has bool, age time.Duration, stale bool, absent string) {
+	if !has {
+		<span class="error-text">{ absent }</span>
+	} else if stale {
+		<span class="stale-text">{ fmtCompactDuration(age) }</span>
+	} else {
+		{ fmtCompactDuration(age) }
+	}
+}
+
+// recordSection is the account of what the daemon has done: executed
+// operations, then cycle outcomes.
+templ recordSection(d pageData) {
 	if len(d.Ops) > 0 {
 		<h2>Recent Activity</h2>
 		<table>
@@ -112,79 +280,6 @@ templ overview(d pageData) {
 			</tbody>
 		</table>
 	}
-	if len(d.GlobalLogs) > 0 {
-		<details class="logs">
-			<summary>Global logs ({ fmt.Sprint(len(d.GlobalLogs)) })</summary>
-			<ul>
-				for _, log := range d.GlobalLogs {
-					<li>{ log.LogAt.Format(time.DateTime) } :: { log.Log }</li>
-				}
-			</ul>
-		</details>
-	}
-}
-
-templ fleetRow(d pageData, dv DatasetView) {
-	<tr>
-		<td><a href={ templ.SafeURL(datasetHref(dv.Name)) }>{ dv.Name.String() }</a></td>
-		<td>
-			@verdictChip(dv)
-		</td>
-		<td class="num" data-sort={ fmt.Sprint(int64(dv.Lag.Seconds())) }>
-			if dv.Lag > 0 {
-				{ fmtCompactDuration(dv.Lag) }
-			} else {
-				<span class="muted">—</span>
-			}
-		</td>
-		<td data-sort={ fmt.Sprint(dv.LastSuccess.Unix()) } title={ exactTime(dv.LastSuccess) }>{ fmtAgo(dv.LastSuccess) }</td>
-		<td>
-			if s := dv.PendingSummary(); s != "" {
-				{ s }
-			} else {
-				<span class="muted">—</span>
-			}
-		</td>
-		@sideCell(d.State.GetDataset(dv.Name), model.Local)
-		@sideCell(d.State.GetDataset(dv.Name), model.Remote)
-		<td>
-			@renderRetention(d.Conf, dv.Name.Path())
-		</td>
-	</tr>
-}
-
-// sideCell shows one side's snapshot count and on-disk size, sortable
-// by size.
-templ sideCell(ds *model.Dataset, loc model.Location) {
-	<td class="num" data-sort={ fmt.Sprint(sideUsed(ds, loc)) }>
-		{ fmt.Sprint(sideCount(ds, loc)) } · { fmtBytes(sideUsed(ds, loc)) }
-	</td>
-}
-
-func sideCount(ds *model.Dataset, loc model.Location) int {
-	if ds == nil || ds.Current == nil {
-		return 0
-	}
-	if loc == model.Local {
-		return ds.Current.Local.Len()
-	}
-	return ds.Current.Remote.Len()
-}
-
-func sideUsed(ds *model.Dataset, loc model.Location) int64 {
-	if ds == nil {
-		return 0
-	}
-	if loc == model.Local {
-		if !ds.Metrics.HasLocal {
-			return 0
-		}
-		return ds.Metrics.LocalSize.Used
-	}
-	if !ds.Metrics.HasRemote {
-		return 0
-	}
-	return ds.Metrics.RemoteSize.Used
 }
 
 func exactTime(t time.Time) string {

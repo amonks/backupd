@@ -7,6 +7,7 @@ import (
 	"github.com/dustin/go-humanize"
 
 	"monks.co/backupd/status"
+	"monks.co/backupd/view"
 )
 
 // Formatting helpers for the dashboard templates.
@@ -31,29 +32,15 @@ func fmtAgo(t time.Time) string {
 // fmtCompactDuration renders a duration in its two most significant
 // units: "<1m", "42m", "3h12m", "2d4h".
 func fmtCompactDuration(d time.Duration) string {
-	if d < 0 {
-		d = -d
+	return view.CompactDuration(d)
+}
+
+// plural renders "1 cycle" / "3 cycles".
+func plural(n int, noun string) string {
+	if n == 1 {
+		return fmt.Sprintf("1 %s", noun)
 	}
-	switch {
-	case d < time.Minute:
-		return "<1m"
-	case d < time.Hour:
-		return fmt.Sprintf("%dm", int(d.Minutes()))
-	case d < 24*time.Hour:
-		h := int(d.Hours())
-		m := int(d.Minutes()) - h*60
-		if m == 0 {
-			return fmt.Sprintf("%dh", h)
-		}
-		return fmt.Sprintf("%dh%dm", h, m)
-	default:
-		days := int(d.Hours()) / 24
-		h := int(d.Hours()) - days*24
-		if h == 0 {
-			return fmt.Sprintf("%dd", days)
-		}
-		return fmt.Sprintf("%dd%dh", days, h)
-	}
+	return fmt.Sprintf("%d %ss", n, noun)
 }
 
 // fmtUntil renders a future time as a countdown ("in 42m"); past
@@ -89,8 +76,8 @@ func transferLabel(x status.Transfer) string {
 }
 
 // activityLabel is the status strip's one-line description of what the
-// daemon is doing right now.
-func activityLabel(a status.Activity) string {
+// daemon is doing right now, including where in the cycle it is.
+func activityLabel(a status.Activity, c view.CycleProgress) string {
 	switch a.Phase {
 	case status.Starting:
 		return "starting up"
@@ -98,6 +85,9 @@ func activityLabel(a status.Activity) string {
 		return "refreshing datasets from ZFS"
 	case status.Syncing:
 		label := fmt.Sprintf("syncing %s", a.Dataset)
+		if c.Total > 1 && c.HasActive {
+			label += fmt.Sprintf(" (%d of %d)", c.Position, c.Total)
+		}
 		if a.Steps > 0 {
 			label += fmt.Sprintf(" — step %d of %d: %s", a.Step, a.Steps, a.Operation)
 		}

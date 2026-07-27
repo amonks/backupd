@@ -361,13 +361,17 @@ func TestPageRendering(t *testing.T) {
 	}
 }
 
-// TestPageShowsVerdictsAndActivity: the new dashboard surfaces — status
-// strip, fleet verdicts, recent activity feed — render from real state.
+// TestPageShowsVerdictsAndActivity: the dashboard surfaces — status
+// strip, issue cards, fleet health, recent activity feed — render from
+// real state. Snapshots are given fresh timestamps because health is
+// derived from inventory ages against the wall clock.
 func TestPageShowsVerdictsAndActivity(t *testing.T) {
 	local, remote := steadyStateExecutors()
 	b, _ := newAPITestBackupd(t, local, remote)
-	b.state.Swap(model.AddLocalDataset("/foo", []*model.Snapshot{snapA, snapB}, nil))
-	b.state.Swap(model.AddRemoteDataset("/foo", []*model.Snapshot{snapA}, nil))
+	freshA := testSnap("daily-a", time.Now().Add(-26*time.Hour).Unix())
+	freshB := testSnap("daily-b", time.Now().Add(-time.Hour).Unix())
+	b.state.Swap(model.AddLocalDataset("/foo", []*model.Snapshot{freshA, freshB}, nil))
+	b.state.Swap(model.AddRemoteDataset("/foo", []*model.Snapshot{freshA}, nil))
 	b.history.RecordCycle(history.Cycle{OK: true, Datasets: 1})
 	b.history.RecordDatasetFailure("/foo", time.Now(), "remote out of space")
 	b.history.RecordOp(history.Op{At: time.Now(), Dataset: "/foo", Operation: "transfer range x", Duration: time.Second})
@@ -380,33 +384,83 @@ func TestPageShowsVerdictsAndActivity(t *testing.T) {
 	body := w.Body.String()
 	for _, want := range []string{
 		"FAILING",             // system verdict (failing dataset) — rendered upper-case
-		"remote out of space", // per-dataset failure reason
+		"remote out of space", // the failure error, in the issue card and fleet reason
+		"issue-critical",      // the issue card, severity-styled
 		"Recent Activity",     // op feed
 		"transfer range x",    // the recorded op
-		"chip-failing",        // fleet verdict chip
+		"chip-failing",        // fleet health chip
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected global page to contain %q", want)
 		}
 	}
 
-	// After a newer success, the dataset (and system) settle back to ok.
+	// After a newer success, the dataset (and system) settle back to ok,
+	// and the overview says all clear.
 	b.history.RecordDatasetSuccess("/foo", time.Now().Add(time.Minute))
 	body = do(t, h, "GET", "/global", "").Body.String()
 	if strings.Contains(body, "FAILING") {
 		t.Error("expected system verdict to recover after a newer success")
 	}
+	if !strings.Contains(body, "All clear") {
+		t.Error("expected the all-clear banner with no issues")
+	}
 
-	// The dataset page shows the failure record and plan facts.
+	// The dataset page shows the recovery sentence, assurance facts,
+	// and the run record.
 	w = do(t, h, "GET", "/foo", "")
 	if w.Code != http.StatusOK {
 		t.Fatalf("dataset: expected 200, got %d", w.Code)
 	}
 	body = w.Body.String()
-	for _, want := range []string{"Last failure", "remote out of space", "Replication lag", "Snapshots"} {
+	for _, want := range []string{
+		"could be restored as of", // recovery sentence
+		"Snapshotted",             // assurance facts
+		"Backed up",
+		"behind local)",       // lag as derived detail
+		"Last sync run",       // run record
+		"remote out of space", // the last failure's error stays visible
+		"Retention Fulfillment",
+		"Snapshots",
+	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected dataset page to contain %q", want)
 		}
+	}
+}
+
+// TestPageShowsStaleAndUnreplicated: the assurance-driven states render
+// as issues even though no run has ever failed — the dashboard derives
+// them from the inventory alone.
+func TestPageShowsStaleAndUnreplicated(t *testing.T) {
+	local, remote := steadyStateExecutors()
+	b, _ := newAPITestBackupd(t, local, remote)
+	// /stale: fresh local snapshots, remote 5 days behind (policy is
+	// daily, so the 2×24h grace is blown).
+	staleOld := testSnap("daily-old", time.Now().Add(-5*24*time.Hour).Unix())
+	staleNew := testSnap("daily-new", time.Now().Add(-time.Hour).Unix())
+	b.state.Swap(model.AddLocalDataset("/stale", []*model.Snapshot{staleOld, staleNew}, nil))
+	b.state.Swap(model.AddRemoteDataset("/stale", []*model.Snapshot{staleOld}, nil))
+	// /new: never replicated.
+	b.state.Swap(model.AddLocalDataset("/new", []*model.Snapshot{staleNew}, nil))
+	h := b.handler()
+
+	body := do(t, h, "GET", "/global", "").Body.String()
+	for _, want := range []string{
+		"FAILING",            // both conditions are critical
+		"never replicated",   // the unreplicated issue
+		"backup 5d old",      // the stale-backup issue
+		"chip-atrisk",        // fleet health chip
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected global page to contain %q", want)
+		}
+	}
+
+	// The unreplicated dataset's page leads with the warning sentence.
+	body = do(t, h, "GET", "/new", "").Body.String()
+	if !strings.Contains(body, "never been replicated") {
+		t.Error("expected the unreplicated recovery sentence")
 	}
 }
 

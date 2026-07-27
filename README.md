@@ -9,11 +9,19 @@ A daemon for managing ZFS snapshot backups with local and remote targets.
 Key features:
 - Automated ZFS snapshot replication with intelligent planning
 - Type-based retention policies with configurable limits
-- Real-time web dashboard built around operator questions: a status
-  strip with a system verdict (ok / failing / paused) and a live
-  activity line (current phase, dataset, plan step, transfer progress
-  with throughput and ETA, next-cycle countdown), per-dataset health
-  verdicts with reasons, and a feed of recently executed operations
+- Real-time web dashboard built around operator questions. Assurance
+  is derived from ground truth: every dataset shows when it was last
+  snapshotted and last backed up (the recovery point) straight from the
+  snapshot inventory, so the answers survive restarts. The overview
+  leads with a typed issue list — failing syncs, never-replicated or
+  stale backups, stalled snapshotting, cycle failures, an overdue
+  snitch, forgotten pauses — each with severity, error detail, and its
+  remedy button inline, or an explicit "all clear". A status strip
+  shows the system verdict (ok / attention / failing / paused) and a
+  live activity line (cycle position "dataset 4 of 12", plan step,
+  transfer progress with throughput and ETA, next-cycle countdown).
+  Dataset pages answer "what could I recover?" in plain language and
+  compare retention policy against what each side actually holds
 - Pause and resume — globally or per dataset subtree — persisted in the config file
 - Config editing from the dashboard, with validation and a per-dataset impact preview before anything is written
 - Hot config reload: retention, pause, and interval changes apply without a restart
@@ -394,7 +402,7 @@ setting to bind to a private (e.g. VPN/tailnet) address.
 | GET    | `/api/config`               | The raw config file (TOML). |
 | POST   | `/api/config/preview`       | Validate a config (request body) and report its per-dataset impact without writing. |
 | PUT    | `/api/config`               | Validate, atomically save, and hot-apply a config (request body). |
-| GET    | `/api/state`                | JSON state summary: datasets, pause/sync status, plan progress, cycle history. |
+| GET    | `/api/state`                | JSON state summary, serialized from the same derivation layer the HTML renders: system verdict and issues, activity with cycle progress, per-dataset health/ages/fulfillment, cycle history. |
 
 Pause semantics: a paused dataset (or a globally paused daemon) is still
 refreshed and replanned every cycle — the dashboard keeps showing what
@@ -583,8 +591,12 @@ The application uses a clear domain-driven design with the following core entiti
   pair of pools with transfers, resume tokens, and fault injection —
   used by `-sim` mode and the end-to-end test suite
 - `config/`: TOML configuration parsing and validation
-- `status/`: Live activity tracking (sync phase, current step, transfer
-  progress)
+- `view/`: The pure derivation layer between raw state and every UI
+  claim — dataset health, staleness, typed issues, the system verdict,
+  cycle progress. HTML and JSON both render from it, so they cannot
+  disagree, and every judgment call is property-tested
+- `status/`: Live activity tracking (sync phase, cycle queue, current
+  step, transfer progress)
 - `history/`: Cycle outcomes, per-dataset success/failure, executed ops
 - `logger/`: Buffered in-memory operation logs
 - `atom/`: Thread-safe state management

@@ -46,6 +46,9 @@ type Sim struct {
 	remoteDown    bool
 	remoteFull    bool
 	interruptFrac float64 // 0 = don't interrupt; else fraction of the next transfer to complete
+	// failDatasets makes transfers into specific datasets fail
+	// persistently while everything else works.
+	failDatasets map[model.DatasetName]string
 
 	mutations []string
 }
@@ -63,9 +66,10 @@ var _ env.Interface = &Sim{}
 
 func New() *Sim {
 	return &Sim{
-		local:  map[model.DatasetName]*dataset{},
-		remote: map[model.DatasetName]*dataset{},
-		Now:    time.Now,
+		local:        map[model.DatasetName]*dataset{},
+		remote:       map[model.DatasetName]*dataset{},
+		failDatasets: map[model.DatasetName]string{},
+		Now:          time.Now,
 	}
 }
 
@@ -121,6 +125,19 @@ func (s *Sim) SetRemoteFull(full bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.remoteFull = full
+}
+
+// SetDatasetError makes every transfer or resume into name fail with
+// msg — a dataset-specific receive problem while everything else keeps
+// working. An empty msg clears the fault.
+func (s *Sim) SetDatasetError(name model.DatasetName, msg string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if msg == "" {
+		delete(s.failDatasets, name)
+		return
+	}
+	s.failDatasets[name] = msg
 }
 
 // InterruptNextTransfer makes the next transfer stop after the given
@@ -285,6 +302,10 @@ func (s *Sim) Resume(ctx context.Context, l *logger.Logger, name model.DatasetNa
 		s.mu.Unlock()
 		return fmt.Errorf("'to' command error: exit status 1 (cannot receive resume stream: out of space)")
 	}
+	if msg, faulty := s.failDatasets[name]; faulty {
+		s.mu.Unlock()
+		return fmt.Errorf("%s", msg)
+	}
 	s.mu.Unlock()
 
 	total := transferSize(end)
@@ -418,6 +439,11 @@ func (s *Sim) transfer(ctx context.Context, l *logger.Logger, name model.Dataset
 	if s.remoteFull {
 		s.mu.Unlock()
 		return fmt.Errorf("'to' command error: exit status 1 (cannot receive: out of space)")
+	}
+
+	if msg, faulty := s.failDatasets[name]; faulty {
+		s.mu.Unlock()
+		return fmt.Errorf("%s", msg)
 	}
 
 	interrupt := s.interruptFrac

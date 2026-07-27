@@ -9,19 +9,20 @@ import (
 	"monks.co/backupd/logger"
 	"monks.co/backupd/model"
 	"monks.co/backupd/status"
+	"monks.co/backupd/view"
 )
 
 // pageData is everything a dashboard render needs, assembled once per
-// request in handlePage. Templates read from it and from the derived
-// DatasetView/SystemView values; they do no derivation of their own.
+// request in handlePage. All judgment — verdicts, issues, staleness,
+// cycle progress — arrives pre-derived in Sys (the view package);
+// templates only lay it out. State/Conf/logs are carried for the
+// detail surfaces (plans, snapshot grids, raw config, logs).
 type pageData struct {
 	Page       string // "global", "config", or a dataset path ("" is the root dataset)
 	State      *model.Model
 	Conf       *config.Config
 	Activity   status.Activity
-	Views      []DatasetView
-	ViewByName map[model.DatasetName]DatasetView
-	System     SystemView
+	Sys        view.System
 	Cycles     []history.Cycle
 	Ops        []history.Op
 	GlobalLogs []logger.LogEntry
@@ -60,17 +61,17 @@ templ page(d pageData) {
 templ statusStrip(d pageData) {
 	<header class="strip">
 		<div class="strip-cell strip-verdict">
-			<span class={ "chip", "chip-" + d.System.Verdict.Class() }>{ strings.ToUpper(d.System.Verdict.String()) }</span>
+			<span class={ "chip", "chip-" + d.Sys.Verdict.Class() }>{ strings.ToUpper(d.Sys.Verdict.String()) }</span>
 			if d.Dryrun {
 				<span class="chip chip-dryrun" title="No transfers or deletions will occur">DRY RUN</span>
 			}
-			if d.System.Reason != "" {
-				<span class="strip-reason">{ d.System.Reason }</span>
+			if d.Sys.Reason != "" {
+				<span class="strip-reason">{ d.Sys.Reason }</span>
 			}
 		</div>
 		<div class="strip-cell strip-activity">
 			<span class={ "phase-dot", "dot-" + phaseClass(d.Activity.Phase) }></span>
-			<span>{ activityLabel(d.Activity) }</span>
+			<span>{ activityLabel(d.Activity, d.Sys.Cycle) }</span>
 			if !d.Activity.Until.IsZero() && (d.Activity.Phase == status.Idle || d.Activity.Phase == status.BackingOff) {
 				<span class="countdown" data-until={ fmt.Sprint(d.Activity.Until.UnixMilli()) }>{ fmtUntil(d.Activity.Until) }</span>
 			}
@@ -80,23 +81,27 @@ templ statusStrip(d pageData) {
 			}
 		</div>
 		<div class="strip-cell strip-facts">
-			if d.System.LastCycle != nil {
-				<span class="strip-fact" title={ "started " + d.System.LastCycle.StartedAt.Format("2006-01-02 15:04:05") }>
+			if d.Sys.LastCycle != nil {
+				<span class="strip-fact" title={ "started " + d.Sys.LastCycle.StartedAt.Format("2006-01-02 15:04:05") }>
 					last cycle:&nbsp;
-					if d.System.LastCycle.Paused {
+					if d.Sys.LastCycle.Paused {
 						<span class="cycle-paused">paused</span>
-					} else if d.System.LastCycle.OK {
+					} else if d.Sys.LastCycle.OK {
 						<span class="cycle-ok">ok</span>
 					} else {
 						<span class="cycle-failed">failed</span>
 					}
 				</span>
 			}
-			if d.Conf.SnitchID != "" {
-				<span class="strip-fact">snitch: { fmtAgo(d.System.LastSnitch) }</span>
+			if d.Sys.SnitchConfigured {
+				if d.Sys.SnitchOverdue {
+					<span class="strip-fact error-text" title="No successful ping within twice the sync interval">snitch: overdue ({ fmtAgo(d.Sys.LastSnitch) })</span>
+				} else {
+					<span class="strip-fact">snitch: { fmtAgo(d.Sys.LastSnitch) }</span>
+				}
 			}
-			<span class="strip-fact">{ fmt.Sprint(d.System.Datasets) } datasets</span>
-			<span class="strip-fact">{ fmtBytes(d.System.LocalUsed) } local · { fmtBytes(d.System.RemoteUsed) } remote</span>
+			<span class="strip-fact">{ fmt.Sprint(d.Sys.DatasetCount) } datasets</span>
+			<span class="strip-fact">{ fmtBytes(d.Sys.LocalUsed) } local · { fmtBytes(d.Sys.RemoteUsed) } remote</span>
 		</div>
 	</header>
 }
@@ -138,18 +143,23 @@ templ sidebar(d pageData) {
 			</div>
 		</div>
 		<div class="side-heading">Datasets</div>
-		for _, dv := range d.Views {
+		for _, dv := range d.Sys.Datasets {
 			@sidebarLink(d, dv)
 		}
 	</nav>
 }
 
-templ sidebarLink(d pageData, dv DatasetView) {
+// sidebarLink shows one dataset: health dot (pulsing while its plan
+// executes), name, and how old its backup is — the recovery point,
+// the one number worth scanning the fleet for.
+templ sidebarLink(d pageData, dv view.Dataset) {
 	<a href={ templ.SafeURL(datasetHref(dv.Name)) } class={ "dataset-link", templ.KV("active", dv.Name.Path() == d.Page && d.Page != "global" && d.Page != "config") }>
-		<span class={ "dot", "dot-" + dv.Verdict.Class() } title={ dv.Verdict.String() + reasonSuffix(dv.Reason) }></span>
+		<span class={ "dot", "dot-" + dv.Health.Class(), templ.KV("pulsing", dv.Syncing) } title={ dv.Health.String() + reasonSuffix(dv.Reason) }></span>
 		<span class="dataset-name">{ dv.Name.String() }</span>
-		if dv.Lag > 0 {
-			<span class="dataset-lag" title="Replication lag: newest local snapshot vs newest remote">{ fmtCompactDuration(dv.Lag) }</span>
+		if dv.HasRemote {
+			<span class={ "dataset-age", templ.KV("error-text", dv.BackupStale) } title={ "backed up " + fmtAgo(dv.NewestRemote) }>{ fmtCompactDuration(dv.BackedUp) }</span>
+		} else if dv.HasLocal {
+			<span class="dataset-age error-text" title="Never replicated">never</span>
 		}
 	</a>
 }
@@ -170,11 +180,24 @@ func reasonSuffix(reason string) string {
 	return ": " + reason
 }
 
-templ verdictChip(dv DatasetView) {
-	<span class={ "chip", "chip-" + dv.Verdict.Class() }>{ dv.Verdict.String() }</span>
+// healthChip renders a dataset's health with its reason, plus a
+// spinner while the dataset's plan is executing — health and activity
+// are orthogonal, so both show.
+templ healthChip(dv view.Dataset) {
+	<span class={ "chip", "chip-" + dv.Health.Class() }>{ dv.Health.String() }</span>
+	if dv.Syncing {
+		<span class="spinner" title={ syncingTitle(dv) }></span>
+	}
 	if dv.Reason != "" {
 		<span class="chip-reason" title={ dv.Reason }>{ dv.Reason }</span>
 	}
+}
+
+func syncingTitle(dv view.Dataset) string {
+	if dv.Steps > 0 {
+		return fmt.Sprintf("syncing — step %d of %d", dv.Step, dv.Steps)
+	}
+	return "syncing"
 }
 
 templ styles() {
@@ -190,6 +213,8 @@ templ styles() {
 			--paused-bg: #eceff1;
 			--failing: #c62828;
 			--failing-bg: #ffebee;
+			--atrisk: #d84315;
+			--atrisk-bg: #fbe9e7;
 			--unknown: #757575;
 			--unknown-bg: #f5f5f5;
 			--border: #e0e0e0;
@@ -235,8 +260,12 @@ templ styles() {
 		.chip-pending { background: var(--pending-bg); color: var(--pending); }
 		.chip-paused { background: var(--paused-bg); color: var(--paused); }
 		.chip-failing { background: var(--failing-bg); color: var(--failing); }
+		.chip-atrisk { background: var(--atrisk-bg); color: var(--atrisk); }
 		.chip-unknown { background: var(--unknown-bg); color: var(--unknown); }
 		.chip-dryrun { background: #fff8e1; color: #b26a00; border: 1px solid #ffe082; }
+		.chip-info { background: var(--paused-bg); color: var(--paused); }
+		.chip-warning { background: var(--pending-bg); color: var(--pending); }
+		.chip-critical { background: var(--failing-bg); color: var(--failing); }
 		.chip-reason {
 			color: var(--muted);
 			font-size: 0.85rem;
@@ -261,9 +290,20 @@ templ styles() {
 		.dot-pending { background: var(--pending); }
 		.dot-paused { background: var(--paused); }
 		.dot-failing { background: var(--failing); }
+		.dot-atrisk { background: var(--atrisk); }
 		.dot-unknown { background: var(--unknown); }
+		.dot.pulsing { animation: pulse 1.2s ease-in-out infinite alternate; }
 		@keyframes pulse { from { opacity: 0.4; } to { opacity: 1; } }
 		@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+		.spinner {
+			display: inline-block;
+			width: 12px; height: 12px;
+			border: 2px solid var(--syncing);
+			border-top-color: transparent;
+			border-radius: 50%;
+			animation: spin 1s linear infinite;
+			vertical-align: middle;
+		}
 
 		/* Shell */
 		.shell { display: flex; flex: 1; min-height: 0; }
@@ -296,7 +336,7 @@ templ styles() {
 			color: var(--muted);
 		}
 		.dataset-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-		.dataset-lag { margin-left: auto; font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+		.dataset-age { margin-left: auto; font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
 		.controls { display: flex; flex-direction: column; gap: 0.4rem; margin: 0.75rem 0; }
 		.controls .snapshot-row { display: flex; gap: 0.4rem; }
 		.controls .snapshot-row select { flex: 1; min-width: 0; }
@@ -310,6 +350,7 @@ templ styles() {
 		}
 		.btn:hover { background: #eee; }
 		.btn.warn { border-color: var(--paused); color: var(--paused); font-weight: 500; }
+		.btn.small { padding: 0.15rem 0.5rem; font-size: 0.8rem; }
 
 		/* Content */
 		h1 { font-size: 1.4rem; margin: 0.25rem 0 1rem; }
@@ -325,9 +366,56 @@ templ styles() {
 		th.sortable.sort-desc::after { content: '↓'; opacity: 0.8; }
 		.muted { color: var(--muted); }
 		.error-text { color: var(--failing); }
+		.stale-text { color: var(--atrisk); font-weight: 500; }
 		.cycle-ok { color: var(--ok); font-weight: 600; }
 		.cycle-failed { color: var(--failing); font-weight: 600; }
 		.cycle-paused { color: var(--paused); font-weight: 600; }
+
+		/* Attention (issues) */
+		.all-clear {
+			color: var(--ok);
+			background: var(--ok-bg);
+			padding: 0.6rem 0.9rem;
+			border-radius: 4px;
+			margin: 0 0 1rem;
+		}
+		.issues { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1rem; }
+		.issue {
+			display: flex;
+			align-items: baseline;
+			gap: 0.6rem;
+			padding: 0.5rem 0.75rem;
+			border-radius: 4px;
+			border-left: 4px solid var(--unknown);
+			background: #fafafa;
+			flex-wrap: wrap;
+		}
+		.issue-critical { border-left-color: var(--failing); background: var(--failing-bg); }
+		.issue-warning { border-left-color: var(--pending); background: var(--pending-bg); }
+		.issue-info { border-left-color: var(--paused); background: var(--paused-bg); }
+		.issue-summary { font-weight: 600; }
+		.issue-since { color: var(--muted); font-size: 0.85rem; }
+		.issue-detail { flex-basis: 100%; font-size: 0.85rem; color: #444; font-family: monospace; white-space: pre-wrap; }
+		.issue .btn { margin-left: auto; }
+
+		/* Now (cycle progress) */
+		.now {
+			display: flex;
+			align-items: center;
+			gap: 0.75rem;
+			margin-bottom: 1rem;
+			color: var(--muted);
+			flex-wrap: wrap;
+		}
+		.qdots { display: inline-flex; gap: 3px; align-items: center; }
+		.qdot { width: 8px; height: 8px; border-radius: 2px; display: inline-block; background: #ddd; }
+		.qdot-done { background: var(--ok); }
+		.qdot-failed { background: var(--failing); }
+		.qdot-skipped { background: var(--paused); }
+		.qdot-active { background: var(--syncing); animation: pulse 1.2s ease-in-out infinite alternate; }
+
+		/* Fulfillment */
+		.shortfall { color: var(--pending); font-weight: 600; }
 
 		/* Plan steps */
 		.step-status { display: inline-block; width: 14px; height: 14px; vertical-align: middle; }
@@ -339,6 +427,11 @@ templ styles() {
 		.log-message { font-size: 0.8rem; color: var(--muted); font-family: monospace; display: block; padding: 0.1rem 0 0.1rem 2rem; }
 		.step-progress td { border-bottom: none; padding-left: 2rem; }
 		.step-progress progress { width: 16rem; }
+
+		/* Recovery sentence */
+		.recovery { margin: 0 0 1rem; max-width: 60rem; }
+		.recovery b { font-weight: 600; }
+		.recovery.atrisk { color: var(--atrisk); }
 
 		/* Snapshot grid */
 		.snapshot-table th, .snapshot-table td { text-align: center; }

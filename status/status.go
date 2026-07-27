@@ -74,6 +74,45 @@ func (t Transfer) ETA() (time.Duration, bool) {
 	return time.Duration(float64(t.Total-t.Sent) / t.Rate * float64(time.Second)), true
 }
 
+// QueueState is one dataset's place in the current cycle.
+type QueueState int
+
+const (
+	// QueueWaiting: not yet reached this cycle.
+	QueueWaiting QueueState = iota
+	// QueueActive: its plan is executing now.
+	QueueActive
+	// QueueDone: synced successfully.
+	QueueDone
+	// QueueFailed: its sync returned an error.
+	QueueFailed
+	// QueueSkipped: paused, so nothing was executed.
+	QueueSkipped
+)
+
+func (s QueueState) String() string {
+	switch s {
+	case QueueWaiting:
+		return "waiting"
+	case QueueActive:
+		return "active"
+	case QueueDone:
+		return "done"
+	case QueueFailed:
+		return "failed"
+	case QueueSkipped:
+		return "skipped"
+	default:
+		return "unknown"
+	}
+}
+
+// QueueEntry is one dataset in the cycle's queue.
+type QueueEntry struct {
+	Dataset model.DatasetName
+	State   QueueState
+}
+
 // Activity is one consistent snapshot of the loop's current state.
 type Activity struct {
 	Phase Phase
@@ -95,6 +134,12 @@ type Activity struct {
 	Operation string
 	// Transfer is the in-flight transfer's progress, or nil.
 	Transfer *Transfer
+	// Queue is the current cycle's datasets and where each one stands.
+	// It answers "where in the cycle are we": set after refresh, updated
+	// as datasets are processed, preserved through the between-cycle
+	// wait (the completed cycle remains visible), and cleared when the
+	// next cycle starts. Nil before the first cycle's refresh completes.
+	Queue []QueueEntry
 }
 
 // A Tracker holds the current Activity and notifies on change. Progress
@@ -155,6 +200,34 @@ func (t *Tracker) StartCycle() {
 	})
 }
 
+// SetQueue installs the cycle's dataset queue, all waiting. The sync
+// loop calls it once per cycle, after refresh discovers the datasets.
+func (t *Tracker) SetQueue(datasets []model.DatasetName) {
+	queue := make([]QueueEntry, len(datasets))
+	for i, ds := range datasets {
+		queue[i] = QueueEntry{Dataset: ds}
+	}
+	t.swap(func(a Activity) Activity {
+		a.Queue = queue
+		return a
+	})
+}
+
+// setQueueState returns a copy of the queue with dataset's entry in the
+// given state, appending an entry for a dataset outside the queue (a
+// single-dataset sync-now between cycles).
+func setQueueState(queue []QueueEntry, dataset model.DatasetName, state QueueState) []QueueEntry {
+	out := make([]QueueEntry, len(queue), len(queue)+1)
+	copy(out, queue)
+	for i := range out {
+		if out[i].Dataset == dataset {
+			out[i].State = state
+			return out
+		}
+	}
+	return append(out, QueueEntry{Dataset: dataset, State: state})
+}
+
 // StartDataset marks the beginning of one dataset's sync.
 func (t *Tracker) StartDataset(dataset model.DatasetName) {
 	now := t.now()
@@ -164,6 +237,16 @@ func (t *Tracker) StartDataset(dataset model.DatasetName) {
 		a.Dataset = dataset
 		a.Step, a.Steps, a.Operation = 0, 0, ""
 		a.Transfer = nil
+		a.Queue = setQueueState(a.Queue, dataset, QueueActive)
+		return a
+	})
+}
+
+// FinishDataset records a dataset's cycle outcome: QueueDone,
+// QueueFailed, or QueueSkipped (paused).
+func (t *Tracker) FinishDataset(dataset model.DatasetName, state QueueState) {
+	t.swap(func(a Activity) Activity {
+		a.Queue = setQueueState(a.Queue, dataset, state)
 		return a
 	})
 }
@@ -193,6 +276,7 @@ func (t *Tracker) Wait(until time.Time, failures int) {
 			CycleStarted:        a.CycleStarted,
 			Until:               until,
 			ConsecutiveFailures: failures,
+			Queue:               a.Queue,
 		}
 	})
 }

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"monks.co/backupd/status"
+	"monks.co/backupd/view"
 )
 
 func TestFmtCompactDuration(t *testing.T) {
@@ -40,11 +41,16 @@ func TestTransferLabel(t *testing.T) {
 
 func TestActivityLabel(t *testing.T) {
 	a := status.Activity{Phase: status.Syncing, Dataset: "/foo", Step: 2, Steps: 5, Operation: "transfer x"}
-	if got := activityLabel(a); got != "syncing /foo — step 2 of 5: transfer x" {
+	if got := activityLabel(a, view.CycleProgress{}); got != "syncing /foo — step 2 of 5: transfer x" {
 		t.Errorf("unexpected syncing label %q", got)
 	}
+	// With a cycle queue, the label places the dataset in the cycle.
+	c := view.CycleProgress{Total: 12, Position: 4, HasActive: true, Active: "/foo"}
+	if got := activityLabel(a, c); got != "syncing /foo (4 of 12) — step 2 of 5: transfer x" {
+		t.Errorf("unexpected positioned label %q", got)
+	}
 	a = status.Activity{Phase: status.BackingOff, ConsecutiveFailures: 3}
-	if got := activityLabel(a); got != "3 cycles failed — retrying" {
+	if got := activityLabel(a, view.CycleProgress{}); got != "3 cycles failed — retrying" {
 		t.Errorf("unexpected backoff label %q", got)
 	}
 }

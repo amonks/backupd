@@ -9,9 +9,10 @@ import (
 
 // Demo builds the scenario behind `backupd -sim`: a small fleet of
 // datasets in every interesting state — in sync, backlogged, awaiting
-// an initial transfer, paused with pending work — plus one transfer
-// that will be interrupted mid-stream to demonstrate resume handling.
-// Transfers are paced so progress bars are visible.
+// an initial transfer, paused with pending work, failing with a stale
+// backup — plus one transfer that will be interrupted mid-stream to
+// demonstrate resume handling. Transfers are paced so progress bars
+// are visible.
 func Demo(now time.Time) *Sim {
 	s := New()
 	s.Rate = 48 << 20 // ~48 MB/s: a few hundred MB transfers in seconds
@@ -52,6 +53,12 @@ func Demo(now time.Time) *Sim {
 	dataset("/home", 200<<20, 10, 0)
 	dataset("/tm", 1<<20, 3, 0)            // paused subtree (see demo config)
 	dataset("/tm/lugh", 2<<30, 5, 2)       // paused with pending work it won't do
+
+	// /db's receives fail persistently (a corrupted stream), so its
+	// backlog never drains: the dashboard shows a failing dataset whose
+	// backup keeps aging — the failing and stale-backup issues at once.
+	dataset("/db", 80<<20, 10, 6)
+	s.SetDatasetError("/db", "cannot receive incremental stream: invalid backup stream (checksum mismatch)")
 
 	// /home/thor exists only locally: its whole history awaits an
 	// initial transfer.
