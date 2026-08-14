@@ -19,7 +19,7 @@ func NewSigctxWithCancel() (context.Context, func(err error)) {
 		sigs := make(chan os.Signal, 1)
 		signal.Notify(sigs, syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
 		sig := <-sigs
-		cancel(fmt.Errorf("got signal: %s", sig))
+		cancel(fmt.Errorf("got signal: %s (%w)", sig, context.Canceled))
 	}()
 	return ctx, cancel
 }
