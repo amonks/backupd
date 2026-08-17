@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"monks.co/backupd/config"
@@ -169,42 +170,49 @@ func TestSnitchPingsWhenNotPaused(t *testing.T) {
 // TestSyncNowGlobalWakesIdle: a global sync-now request interrupts the
 // between-cycles wait immediately.
 func TestSyncNowGlobalWakesIdle(t *testing.T) {
-	local, remote := steadyStateExecutors()
-	b := newTestBackupd(testConf(), local, remote)
+	synctest.Test(t, func(t *testing.T) {
+		local, remote := steadyStateExecutors()
+		b := newTestBackupd(testConf(), local, remote)
 
-	if !b.TriggerSync(true, "") {
-		t.Fatal("TriggerSync returned false")
-	}
-	start := time.Now()
-	if err := b.idle(context.Background(), 10*time.Second, 0); err != nil {
-		t.Fatalf("idle: %v", err)
-	}
-	if elapsed := time.Since(start); elapsed > 2*time.Second {
-		t.Errorf("expected idle to wake immediately, took %s", elapsed)
-	}
+		if !b.TriggerSync(true, "") {
+			t.Fatal("TriggerSync returned false")
+		}
+		start := time.Now()
+		if err := b.idle(context.Background(), 10*time.Second, 0); err != nil {
+			t.Fatalf("idle: %v", err)
+		}
+		// On the bubble's fake clock an immediate wake takes exactly zero time.
+		if elapsed := time.Since(start); elapsed != 0 {
+			t.Errorf("expected idle to wake immediately, took %s", elapsed)
+		}
+	})
 }
 
 // TestSyncNowDatasetSyncsDuringIdle: a per-dataset request syncs just that
 // dataset and then keeps waiting out the interval.
 func TestSyncNowDatasetSyncsDuringIdle(t *testing.T) {
-	local, remote := steadyStateExecutors()
-	b := newTestBackupd(testConf(), local, remote)
-	b.state.Swap(model.AddLocalDataset("/foo", []*model.Snapshot{snapA}, nil))
-	b.state.Swap(model.AddRemoteDataset("/foo", []*model.Snapshot{snapA}, nil))
+	synctest.Test(t, func(t *testing.T) {
+		local, remote := steadyStateExecutors()
+		b := newTestBackupd(testConf(), local, remote)
+		b.state.Swap(model.AddLocalDataset("/foo", []*model.Snapshot{snapA}, nil))
+		b.state.Swap(model.AddRemoteDataset("/foo", []*model.Snapshot{snapA}, nil))
 
-	if !b.TriggerSync(false, "/foo") {
-		t.Fatal("TriggerSync returned false")
-	}
-	start := time.Now()
-	if err := b.idle(context.Background(), 300*time.Millisecond, 0); err != nil {
-		t.Fatalf("idle: %v", err)
-	}
-	if elapsed := time.Since(start); elapsed < 250*time.Millisecond {
-		t.Errorf("expected idle to wait out the interval after the dataset sync, returned after %s", elapsed)
-	}
-	if !local.calledMatching("-t snapshot") {
-		t.Errorf("expected the dataset to be refreshed, got calls:\n%s", strings.Join(local.calls, "\n"))
-	}
+		if !b.TriggerSync(false, "/foo") {
+			t.Fatal("TriggerSync returned false")
+		}
+		start := time.Now()
+		if err := b.idle(context.Background(), 300*time.Millisecond, 0); err != nil {
+			t.Fatalf("idle: %v", err)
+		}
+		// The dataset sync consumes no fake time, so idle must wait out
+		// exactly the full interval.
+		if elapsed := time.Since(start); elapsed != 300*time.Millisecond {
+			t.Errorf("expected idle to wait out the interval after the dataset sync, returned after %s", elapsed)
+		}
+		if !local.calledMatching("-t snapshot") {
+			t.Errorf("expected the dataset to be refreshed, got calls:\n%s", strings.Join(local.calls, "\n"))
+		}
+	})
 }
 
 const reloadTestConfig = `[local]
