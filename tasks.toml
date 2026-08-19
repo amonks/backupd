@@ -4,6 +4,24 @@
   watch = ["*.templ"]
   cmd = "go tool templ generate ."
 
+# This module publishes to a public mirror, so `publish-validate` checks it
+# with `GOWORK=off go mod tidy -diff`, and `generate` re-tidies only modules
+# that own a tidy task — see specs/publish.md. Unlike the other published
+# modules' tidy tasks this one does not depend on `templ`: the generated
+# `_templ.go` files are committed, so the import graph tidy sees is already
+# complete, and running `templ` here would rewrite them (this module's
+# committed copies were generated from the repo root rather than the module
+# dir, so their embedded FileNames differ from what the task emits).
+[[task]]
+  id = "tidy"
+  type = "short"
+  cmd = "go mod tidy -e"
+
+[[task]]
+  id = "generate"
+  type = "short"
+  dependencies = ["tidy"]
+
 [[task]]
   id = 'test'
   type = 'short'
