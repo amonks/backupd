@@ -14,10 +14,10 @@ import (
 
 	"monks.co/backupd/config"
 	"monks.co/backupd/history"
-	"monks.co/backupd/logger"
 	"monks.co/backupd/model"
 	"monks.co/backupd/status"
 	"monks.co/backupd/view"
+	"monks.co/pkg/datagrid"
 )
 
 // pageData is everything a dashboard render needs, assembled once per
@@ -26,15 +26,15 @@ import (
 // templates only lay it out. State/Conf/logs are carried for the
 // detail surfaces (plans, snapshot grids, raw config, logs).
 type pageData struct {
-	Page       string // "global", "config", or a dataset path ("" is the root dataset)
-	State      *model.Model
-	Conf       *config.Config
-	Activity   status.Activity
-	Sys        view.System
-	Cycles     []history.Cycle
-	Ops        []history.Op
-	GlobalLogs []logger.LogEntry
-	Dryrun     bool
+	Page     string // "global", "config", or a dataset path ("" is the root dataset)
+	State    *model.Model
+	Conf     *config.Config
+	Activity status.Activity
+	Sys      view.System
+	Cycles   []history.Cycle
+	Ops      []history.Op
+	Events   []history.Event
+	Dryrun   bool
 }
 
 func page(d pageData) templ.Component {
@@ -63,6 +63,10 @@ func page(d pageData) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		templ_7745c5c3_Err = styles().Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = datagrid.Head().Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -171,7 +175,7 @@ func statusStrip(d pageData) templ.Component {
 		var templ_7745c5c3_Var5 string
 		templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(strings.ToUpper(d.Sys.Verdict.String()))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 64, Col: 100}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 65, Col: 100}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 		if templ_7745c5c3_Err != nil {
@@ -195,7 +199,7 @@ func statusStrip(d pageData) templ.Component {
 			var templ_7745c5c3_Var6 string
 			templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(d.Sys.Reason)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 69, Col: 45}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 70, Col: 45}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 			if templ_7745c5c3_Err != nil {
@@ -235,7 +239,7 @@ func statusStrip(d pageData) templ.Component {
 		var templ_7745c5c3_Var9 string
 		templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(activityLabel(d.Activity, d.Sys.Cycle))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 74, Col: 49}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 75, Col: 49}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 		if templ_7745c5c3_Err != nil {
@@ -253,7 +257,7 @@ func statusStrip(d pageData) templ.Component {
 			var templ_7745c5c3_Var10 string
 			templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprint(d.Activity.Until.UnixMilli()))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 76, Col: 81}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 77, Col: 81}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 			if templ_7745c5c3_Err != nil {
@@ -266,7 +270,7 @@ func statusStrip(d pageData) templ.Component {
 			var templ_7745c5c3_Var11 string
 			templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(fmtUntil(d.Activity.Until))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 76, Col: 112}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 77, Col: 112}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
 			if templ_7745c5c3_Err != nil {
@@ -285,7 +289,7 @@ func statusStrip(d pageData) templ.Component {
 			var templ_7745c5c3_Var12 string
 			templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%.1f", d.Activity.Transfer.Percent()))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 79, Col: 82}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 80, Col: 82}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
 			if templ_7745c5c3_Err != nil {
@@ -298,7 +302,7 @@ func statusStrip(d pageData) templ.Component {
 			var templ_7745c5c3_Var13 string
 			templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(transferLabel(*d.Activity.Transfer))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 80, Col: 70}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 81, Col: 70}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 			if templ_7745c5c3_Err != nil {
@@ -321,7 +325,7 @@ func statusStrip(d pageData) templ.Component {
 			var templ_7745c5c3_Var14 string
 			templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs("started " + d.Sys.LastCycle.StartedAt.Format("2006-01-02 15:04:05"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 85, Col: 105}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 86, Col: 105}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
 			if templ_7745c5c3_Err != nil {
@@ -361,7 +365,7 @@ func statusStrip(d pageData) templ.Component {
 				var templ_7745c5c3_Var15 string
 				templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(fmtAgo(d.Sys.LastSnitch))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 98, Col: 142}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 99, Col: 142}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
 				if templ_7745c5c3_Err != nil {
@@ -379,7 +383,7 @@ func statusStrip(d pageData) templ.Component {
 				var templ_7745c5c3_Var16 string
 				templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(fmtAgo(d.Sys.LastSnitch))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 100, Col: 64}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 101, Col: 64}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
 				if templ_7745c5c3_Err != nil {
@@ -398,7 +402,7 @@ func statusStrip(d pageData) templ.Component {
 		var templ_7745c5c3_Var17 string
 		templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprint(d.Sys.DatasetCount))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 103, Col: 60}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 104, Col: 60}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
 		if templ_7745c5c3_Err != nil {
@@ -411,7 +415,7 @@ func statusStrip(d pageData) templ.Component {
 		var templ_7745c5c3_Var18 string
 		templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinStringErrs(fmtBytes(d.Sys.LocalUsed))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 104, Col: 55}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 105, Col: 55}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
 		if templ_7745c5c3_Err != nil {
@@ -424,7 +428,7 @@ func statusStrip(d pageData) templ.Component {
 		var templ_7745c5c3_Var19 string
 		templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs(fmtBytes(d.Sys.RemoteUsed))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 104, Col: 95}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 105, Col: 95}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
 		if templ_7745c5c3_Err != nil {
@@ -587,7 +591,7 @@ func sidebarLink(d pageData, dv view.Dataset) templ.Component {
 		var templ_7745c5c3_Var27 templ.SafeURL
 		templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(datasetHref(dv.Name)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 156, Col: 46}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 157, Col: 46}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
 		if templ_7745c5c3_Err != nil {
@@ -635,7 +639,7 @@ func sidebarLink(d pageData, dv view.Dataset) templ.Component {
 		var templ_7745c5c3_Var31 string
 		templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.JoinStringErrs(dv.Health.String() + reasonSuffix(dv.Reason))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 157, Col: 137}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 158, Col: 137}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var31))
 		if templ_7745c5c3_Err != nil {
@@ -648,7 +652,7 @@ func sidebarLink(d pageData, dv view.Dataset) templ.Component {
 		var templ_7745c5c3_Var32 string
 		templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.JoinStringErrs(dv.Name.String())
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 158, Col: 47}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 159, Col: 47}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var32))
 		if templ_7745c5c3_Err != nil {
@@ -684,7 +688,7 @@ func sidebarLink(d pageData, dv view.Dataset) templ.Component {
 			var templ_7745c5c3_Var35 string
 			templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.JoinStringErrs("backed up " + fmtAgo(dv.NewestRemote))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 160, Col: 119}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 161, Col: 119}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var35))
 			if templ_7745c5c3_Err != nil {
@@ -697,7 +701,7 @@ func sidebarLink(d pageData, dv view.Dataset) templ.Component {
 			var templ_7745c5c3_Var36 string
 			templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.JoinStringErrs(fmtCompactDuration(dv.BackedUp))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 160, Col: 155}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 161, Col: 155}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var36))
 			if templ_7745c5c3_Err != nil {
@@ -786,7 +790,7 @@ func healthChip(dv view.Dataset) templ.Component {
 		var templ_7745c5c3_Var40 string
 		templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.JoinStringErrs(dv.Health.String())
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 187, Col: 73}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 188, Col: 73}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var40))
 		if templ_7745c5c3_Err != nil {
@@ -804,7 +808,7 @@ func healthChip(dv view.Dataset) templ.Component {
 			var templ_7745c5c3_Var41 string
 			templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.JoinStringErrs(syncingTitle(dv))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 189, Col: 48}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 190, Col: 48}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var41))
 			if templ_7745c5c3_Err != nil {
@@ -823,7 +827,7 @@ func healthChip(dv view.Dataset) templ.Component {
 			var templ_7745c5c3_Var42 string
 			templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.JoinStringErrs(dv.Reason)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 192, Col: 45}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 193, Col: 45}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var42))
 			if templ_7745c5c3_Err != nil {
@@ -836,7 +840,7 @@ func healthChip(dv view.Dataset) templ.Component {
 			var templ_7745c5c3_Var43 string
 			templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.JoinStringErrs(dv.Reason)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 192, Col: 59}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/backupd/layout.templ`, Line: 193, Col: 59}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var43))
 			if templ_7745c5c3_Err != nil {
@@ -879,7 +883,7 @@ func styles() templ.Component {
 			templ_7745c5c3_Var44 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 69, "<style>\n\t\t:root {\n\t\t\t--ok: #2e7d32;\n\t\t\t--ok-bg: #e8f5e9;\n\t\t\t--syncing: #1565c0;\n\t\t\t--syncing-bg: #e3f2fd;\n\t\t\t--pending: #ef6c00;\n\t\t\t--pending-bg: #fff3e0;\n\t\t\t--paused: #607d8b;\n\t\t\t--paused-bg: #eceff1;\n\t\t\t--failing: #c62828;\n\t\t\t--failing-bg: #ffebee;\n\t\t\t--atrisk: #d84315;\n\t\t\t--atrisk-bg: #fbe9e7;\n\t\t\t--unknown: #757575;\n\t\t\t--unknown-bg: #f5f5f5;\n\t\t\t--border: #e0e0e0;\n\t\t\t--muted: #757575;\n\t\t}\n\t\t* { box-sizing: border-box; }\n\t\tbody {\n\t\t\tfont-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif;\n\t\t\tmargin: 0;\n\t\t\theight: 100vh;\n\t\t\tdisplay: flex;\n\t\t\tflex-direction: column;\n\t\t\tcolor: #212121;\n\t\t}\n\t\tcode { font-size: 0.9em; }\n\n\t\t/* Status strip */\n\t\t.strip {\n\t\t\tdisplay: flex;\n\t\t\talign-items: center;\n\t\t\tgap: 1.25rem;\n\t\t\tpadding: 0.5rem 1rem;\n\t\t\tborder-bottom: 1px solid var(--border);\n\t\t\tbackground: #fafafa;\n\t\t\tflex-wrap: wrap;\n\t\t}\n\t\t.strip-cell { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }\n\t\t.strip-activity { flex: 1; }\n\t\t.strip-facts { margin-left: auto; gap: 1rem; color: var(--muted); font-size: 0.85rem; }\n\t\t.strip-fact { white-space: nowrap; }\n\t\t.strip-reason { color: var(--muted); font-size: 0.9rem; }\n\t\t.chip {\n\t\t\tdisplay: inline-block;\n\t\t\tpadding: 0.15rem 0.6rem;\n\t\t\tborder-radius: 999px;\n\t\t\tfont-size: 0.75rem;\n\t\t\tfont-weight: 600;\n\t\t\tletter-spacing: 0.03em;\n\t\t\twhite-space: nowrap;\n\t\t}\n\t\t.chip-ok { background: var(--ok-bg); color: var(--ok); }\n\t\t.chip-syncing { background: var(--syncing-bg); color: var(--syncing); }\n\t\t.chip-pending { background: var(--pending-bg); color: var(--pending); }\n\t\t.chip-paused { background: var(--paused-bg); color: var(--paused); }\n\t\t.chip-failing { background: var(--failing-bg); color: var(--failing); }\n\t\t.chip-atrisk { background: var(--atrisk-bg); color: var(--atrisk); }\n\t\t.chip-unknown { background: var(--unknown-bg); color: var(--unknown); }\n\t\t.chip-dryrun { background: #fff8e1; color: #b26a00; border: 1px solid #ffe082; }\n\t\t.chip-info { background: var(--paused-bg); color: var(--paused); }\n\t\t.chip-warning { background: var(--pending-bg); color: var(--pending); }\n\t\t.chip-critical { background: var(--failing-bg); color: var(--failing); }\n\t\t.chip-reason {\n\t\t\tcolor: var(--muted);\n\t\t\tfont-size: 0.85rem;\n\t\t\toverflow: hidden;\n\t\t\ttext-overflow: ellipsis;\n\t\t\twhite-space: nowrap;\n\t\t\tmax-width: 28rem;\n\t\t\tdisplay: inline-block;\n\t\t\tvertical-align: bottom;\n\t\t}\n\t\t.countdown { color: var(--muted); font-variant-numeric: tabular-nums; }\n\t\tprogress { width: 10rem; height: 0.6rem; accent-color: var(--syncing); }\n\t\t.progress-label { color: var(--muted); font-size: 0.85rem; font-variant-numeric: tabular-nums; }\n\t\t.dot, .phase-dot {\n\t\t\twidth: 10px; height: 10px;\n\t\t\tborder-radius: 50%;\n\t\t\tflex-shrink: 0;\n\t\t\tdisplay: inline-block;\n\t\t}\n\t\t.dot-ok { background: var(--ok); }\n\t\t.dot-syncing { background: var(--syncing); animation: pulse 1.2s ease-in-out infinite alternate; }\n\t\t.dot-pending { background: var(--pending); }\n\t\t.dot-paused { background: var(--paused); }\n\t\t.dot-failing { background: var(--failing); }\n\t\t.dot-atrisk { background: var(--atrisk); }\n\t\t.dot-unknown { background: var(--unknown); }\n\t\t.dot.pulsing { animation: pulse 1.2s ease-in-out infinite alternate; }\n\t\t@keyframes pulse { from { opacity: 0.4; } to { opacity: 1; } }\n\t\t@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }\n\t\t.spinner {\n\t\t\tdisplay: inline-block;\n\t\t\twidth: 12px; height: 12px;\n\t\t\tborder: 2px solid var(--syncing);\n\t\t\tborder-top-color: transparent;\n\t\t\tborder-radius: 50%;\n\t\t\tanimation: spin 1s linear infinite;\n\t\t\tvertical-align: middle;\n\t\t}\n\n\t\t/* Shell */\n\t\t.shell { display: flex; flex: 1; min-height: 0; }\n\t\t.sidebar {\n\t\t\twidth: 270px;\n\t\t\tborder-right: 1px solid var(--border);\n\t\t\tbackground: #fafafa;\n\t\t\tpadding: 0.75rem;\n\t\t\toverflow-y: auto;\n\t\t\tflex-shrink: 0;\n\t\t}\n\t\t.main-content { flex: 1; padding: 1rem 1.5rem; overflow-y: auto; }\n\t\t.nav-link, .dataset-link {\n\t\t\tdisplay: flex;\n\t\t\talign-items: center;\n\t\t\tgap: 0.5rem;\n\t\t\tpadding: 0.35rem 0.5rem;\n\t\t\tborder-radius: 4px;\n\t\t\ttext-decoration: none;\n\t\t\tcolor: #212121;\n\t\t\tmargin-bottom: 0.1rem;\n\t\t}\n\t\t.nav-link:hover, .dataset-link:hover, .nav-link.active, .dataset-link.active { background: #e8e8e8; }\n\t\t.side-heading {\n\t\t\tmargin: 1rem 0 0.35rem;\n\t\t\tfont-size: 0.75rem;\n\t\t\tfont-weight: 600;\n\t\t\tletter-spacing: 0.06em;\n\t\t\ttext-transform: uppercase;\n\t\t\tcolor: var(--muted);\n\t\t}\n\t\t.dataset-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n\t\t.dataset-age { margin-left: auto; font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; }\n\t\t.controls { display: flex; flex-direction: column; gap: 0.4rem; margin: 0.75rem 0; }\n\t\t.controls .snapshot-row { display: flex; gap: 0.4rem; }\n\t\t.controls .snapshot-row select { flex: 1; min-width: 0; }\n\t\t.btn {\n\t\t\tpadding: 0.35rem 0.7rem;\n\t\t\tborder: 1px solid #bbb;\n\t\t\tborder-radius: 4px;\n\t\t\tbackground: white;\n\t\t\tcursor: pointer;\n\t\t\tfont-size: 0.85rem;\n\t\t}\n\t\t.btn:hover { background: #eee; }\n\t\t.btn.warn { border-color: var(--paused); color: var(--paused); font-weight: 500; }\n\t\t.btn.small { padding: 0.15rem 0.5rem; font-size: 0.8rem; }\n\n\t\t/* Content */\n\t\th1 { font-size: 1.4rem; margin: 0.25rem 0 1rem; }\n\t\th1 .chip { vertical-align: middle; margin-left: 0.5rem; }\n\t\th2 { font-size: 1.05rem; margin: 1.5rem 0 0.5rem; }\n\t\ttable { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }\n\t\tth, td { padding: 0.3em 0.9em 0.3em 0; text-align: left; border-bottom: 1px solid var(--border); vertical-align: baseline; }\n\t\tth { font-weight: 600; font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }\n\t\ttd.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }\n\t\tth.sortable { cursor: pointer; user-select: none; position: relative; padding-right: 1.3rem; }\n\t\tth.sortable::after { content: '↕'; position: absolute; right: 0.4rem; opacity: 0.3; }\n\t\tth.sortable.sort-asc::after { content: '↑'; opacity: 0.8; }\n\t\tth.sortable.sort-desc::after { content: '↓'; opacity: 0.8; }\n\t\t.muted { color: var(--muted); }\n\t\t.error-text { color: var(--failing); }\n\t\t.stale-text { color: var(--atrisk); font-weight: 500; }\n\t\t.cycle-ok { color: var(--ok); font-weight: 600; }\n\t\t.cycle-failed { color: var(--failing); font-weight: 600; }\n\t\t.cycle-paused { color: var(--paused); font-weight: 600; }\n\n\t\t/* Attention (issues) */\n\t\t.all-clear {\n\t\t\tcolor: var(--ok);\n\t\t\tbackground: var(--ok-bg);\n\t\t\tpadding: 0.6rem 0.9rem;\n\t\t\tborder-radius: 4px;\n\t\t\tmargin: 0 0 1rem;\n\t\t}\n\t\t.issues { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1rem; }\n\t\t.issue {\n\t\t\tdisplay: flex;\n\t\t\talign-items: baseline;\n\t\t\tgap: 0.6rem;\n\t\t\tpadding: 0.5rem 0.75rem;\n\t\t\tborder-radius: 4px;\n\t\t\tborder-left: 4px solid var(--unknown);\n\t\t\tbackground: #fafafa;\n\t\t\tflex-wrap: wrap;\n\t\t}\n\t\t.issue-critical { border-left-color: var(--failing); background: var(--failing-bg); }\n\t\t.issue-warning { border-left-color: var(--pending); background: var(--pending-bg); }\n\t\t.issue-info { border-left-color: var(--paused); background: var(--paused-bg); }\n\t\t.issue-summary { font-weight: 600; }\n\t\t.issue-since { color: var(--muted); font-size: 0.85rem; }\n\t\t.issue-detail { flex-basis: 100%; font-size: 0.85rem; color: #444; font-family: monospace; white-space: pre-wrap; }\n\t\t.issue .btn { margin-left: auto; }\n\n\t\t/* Now (cycle progress) */\n\t\t.now {\n\t\t\tdisplay: flex;\n\t\t\talign-items: center;\n\t\t\tgap: 0.75rem;\n\t\t\tmargin-bottom: 1rem;\n\t\t\tcolor: var(--muted);\n\t\t\tflex-wrap: wrap;\n\t\t}\n\t\t.qdots { display: inline-flex; gap: 3px; align-items: center; }\n\t\t.qdot { width: 8px; height: 8px; border-radius: 2px; display: inline-block; background: #ddd; }\n\t\t.qdot-done { background: var(--ok); }\n\t\t.qdot-failed { background: var(--failing); }\n\t\t.qdot-skipped { background: var(--paused); }\n\t\t.qdot-active { background: var(--syncing); animation: pulse 1.2s ease-in-out infinite alternate; }\n\n\t\t/* Fulfillment */\n\t\t.shortfall { color: var(--pending); font-weight: 600; }\n\n\t\t/* Plan steps */\n\t\t.step-status { display: inline-block; width: 14px; height: 14px; vertical-align: middle; }\n\t\t.step-status.pending { border: 2px solid #ccc; border-radius: 50%; }\n\t\t.step-status.in-progress { border: 2px solid var(--syncing); border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; }\n\t\t.step-status.completed::before { content: '✓'; color: var(--ok); font-weight: bold; }\n\t\t.step-status.failed::before { content: '✗'; color: var(--failing); font-weight: bold; }\n\t\t.step-log td { border-bottom: none; }\n\t\t.log-message { font-size: 0.8rem; color: var(--muted); font-family: monospace; display: block; padding: 0.1rem 0 0.1rem 2rem; }\n\t\t.step-progress td { border-bottom: none; padding-left: 2rem; }\n\t\t.step-progress progress { width: 16rem; }\n\n\t\t/* Recovery sentence */\n\t\t.recovery { margin: 0 0 1rem; max-width: 60rem; }\n\t\t.recovery b { font-weight: 600; }\n\t\t.recovery.atrisk { color: var(--atrisk); }\n\n\t\t/* Snapshot grid */\n\t\t.snapshot-table th, .snapshot-table td { text-align: center; }\n\t\t.snapshot-table th:first-child, .snapshot-table td:first-child { text-align: left; }\n\t\t.snapshot-present { color: var(--ok); }\n\t\t.snapshot-absent { color: var(--failing); }\n\t\t.snapshot-doomed { color: var(--pending); }\n\t\t.retention-override { color: var(--pending); font-weight: 500; }\n\n\t\t/* Logs */\n\t\tdetails.logs { margin: 1rem 0; }\n\t\tdetails.logs summary { cursor: pointer; color: var(--muted); }\n\t\tdetails.logs ul { list-style: none; padding: 0.5rem; margin: 0.5rem 0 0; background: #f7f7f7; border-radius: 4px; max-height: 24rem; overflow-y: auto; }\n\t\tdetails.logs li { padding: 0.1rem 0; font-family: monospace; font-size: 0.8rem; white-space: pre-wrap; }\n\n\t\t/* Config editor */\n\t\t#config-editor {\n\t\t\twidth: 100%;\n\t\t\tmin-height: 24rem;\n\t\t\tfont-family: monospace;\n\t\t\tfont-size: 0.9rem;\n\t\t\tpadding: 0.75rem;\n\t\t\tborder: 1px solid #ccc;\n\t\t\tborder-radius: 4px;\n\t\t\tresize: vertical;\n\t\t}\n\t\t.config-actions { display: flex; gap: 0.5rem; margin: 0.75rem 0; }\n\t\t.config-error {\n\t\t\tbackground: var(--failing-bg);\n\t\t\tcolor: var(--failing);\n\t\t\tpadding: 0.75rem;\n\t\t\tborder-radius: 4px;\n\t\t\twhite-space: pre-wrap;\n\t\t\tfont-family: monospace;\n\t\t\tfont-size: 0.85rem;\n\t\t}\n\t\t.impact-note { color: var(--muted); font-size: 0.9rem; }\n\t</style>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 69, "<style>\n\t\t:root {\n\t\t\t--ok: #2e7d32;\n\t\t\t--ok-bg: #e8f5e9;\n\t\t\t--syncing: #1565c0;\n\t\t\t--syncing-bg: #e3f2fd;\n\t\t\t--pending: #ef6c00;\n\t\t\t--pending-bg: #fff3e0;\n\t\t\t--paused: #607d8b;\n\t\t\t--paused-bg: #eceff1;\n\t\t\t--failing: #c62828;\n\t\t\t--failing-bg: #ffebee;\n\t\t\t--atrisk: #d84315;\n\t\t\t--atrisk-bg: #fbe9e7;\n\t\t\t--unknown: #757575;\n\t\t\t--unknown-bg: #f5f5f5;\n\t\t\t--border: #e0e0e0;\n\t\t\t--muted: #757575;\n\t\t}\n\t\t* { box-sizing: border-box; }\n\t\tbody {\n\t\t\tfont-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif;\n\t\t\tmargin: 0;\n\t\t\theight: 100vh;\n\t\t\tdisplay: flex;\n\t\t\tflex-direction: column;\n\t\t\tcolor: #212121;\n\t\t}\n\t\tcode { font-size: 0.9em; }\n\n\t\t/* Status strip */\n\t\t.strip {\n\t\t\tdisplay: flex;\n\t\t\talign-items: center;\n\t\t\tgap: 1.25rem;\n\t\t\tpadding: 0.5rem 1rem;\n\t\t\tborder-bottom: 1px solid var(--border);\n\t\t\tbackground: #fafafa;\n\t\t\tflex-wrap: wrap;\n\t\t}\n\t\t.strip-cell { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }\n\t\t.strip-activity { flex: 1; }\n\t\t.strip-facts { margin-left: auto; gap: 1rem; color: var(--muted); font-size: 0.85rem; }\n\t\t.strip-fact { white-space: nowrap; }\n\t\t.strip-reason { color: var(--muted); font-size: 0.9rem; }\n\t\t.chip {\n\t\t\tdisplay: inline-block;\n\t\t\tpadding: 0.15rem 0.6rem;\n\t\t\tborder-radius: 999px;\n\t\t\tfont-size: 0.75rem;\n\t\t\tfont-weight: 600;\n\t\t\tletter-spacing: 0.03em;\n\t\t\twhite-space: nowrap;\n\t\t}\n\t\t.chip-ok { background: var(--ok-bg); color: var(--ok); }\n\t\t.chip-syncing { background: var(--syncing-bg); color: var(--syncing); }\n\t\t.chip-pending { background: var(--pending-bg); color: var(--pending); }\n\t\t.chip-paused { background: var(--paused-bg); color: var(--paused); }\n\t\t.chip-failing { background: var(--failing-bg); color: var(--failing); }\n\t\t.chip-atrisk { background: var(--atrisk-bg); color: var(--atrisk); }\n\t\t.chip-unknown { background: var(--unknown-bg); color: var(--unknown); }\n\t\t.chip-dryrun { background: #fff8e1; color: #b26a00; border: 1px solid #ffe082; }\n\t\t.chip-info { background: var(--paused-bg); color: var(--paused); }\n\t\t.chip-warning { background: var(--pending-bg); color: var(--pending); }\n\t\t.chip-critical { background: var(--failing-bg); color: var(--failing); }\n\t\t.chip-reason {\n\t\t\tcolor: var(--muted);\n\t\t\tfont-size: 0.85rem;\n\t\t\toverflow: hidden;\n\t\t\ttext-overflow: ellipsis;\n\t\t\twhite-space: nowrap;\n\t\t\tmax-width: 28rem;\n\t\t\tdisplay: inline-block;\n\t\t\tvertical-align: bottom;\n\t\t}\n\t\t.countdown { color: var(--muted); font-variant-numeric: tabular-nums; }\n\t\tprogress { width: 10rem; height: 0.6rem; accent-color: var(--syncing); }\n\t\t.progress-label { color: var(--muted); font-size: 0.85rem; font-variant-numeric: tabular-nums; }\n\t\t.dot, .phase-dot {\n\t\t\twidth: 10px; height: 10px;\n\t\t\tborder-radius: 50%;\n\t\t\tflex-shrink: 0;\n\t\t\tdisplay: inline-block;\n\t\t}\n\t\t.dot-ok { background: var(--ok); }\n\t\t.dot-syncing { background: var(--syncing); animation: pulse 1.2s ease-in-out infinite alternate; }\n\t\t.dot-pending { background: var(--pending); }\n\t\t.dot-paused { background: var(--paused); }\n\t\t.dot-failing { background: var(--failing); }\n\t\t.dot-atrisk { background: var(--atrisk); }\n\t\t.dot-unknown { background: var(--unknown); }\n\t\t.dot.pulsing { animation: pulse 1.2s ease-in-out infinite alternate; }\n\t\t@keyframes pulse { from { opacity: 0.4; } to { opacity: 1; } }\n\t\t@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }\n\t\t.spinner {\n\t\t\tdisplay: inline-block;\n\t\t\twidth: 12px; height: 12px;\n\t\t\tborder: 2px solid var(--syncing);\n\t\t\tborder-top-color: transparent;\n\t\t\tborder-radius: 50%;\n\t\t\tanimation: spin 1s linear infinite;\n\t\t\tvertical-align: middle;\n\t\t}\n\n\t\t/* Shell */\n\t\t.shell { display: flex; flex: 1; min-height: 0; }\n\t\t.sidebar {\n\t\t\twidth: 270px;\n\t\t\tborder-right: 1px solid var(--border);\n\t\t\tbackground: #fafafa;\n\t\t\tpadding: 0.75rem;\n\t\t\toverflow-y: auto;\n\t\t\tflex-shrink: 0;\n\t\t}\n\t\t.main-content { flex: 1; padding: 1rem 1.5rem; overflow-y: auto; }\n\t\t.nav-link, .dataset-link {\n\t\t\tdisplay: flex;\n\t\t\talign-items: center;\n\t\t\tgap: 0.5rem;\n\t\t\tpadding: 0.35rem 0.5rem;\n\t\t\tborder-radius: 4px;\n\t\t\ttext-decoration: none;\n\t\t\tcolor: #212121;\n\t\t\tmargin-bottom: 0.1rem;\n\t\t}\n\t\t.nav-link:hover, .dataset-link:hover, .nav-link.active, .dataset-link.active { background: #e8e8e8; }\n\t\t.side-heading {\n\t\t\tmargin: 1rem 0 0.35rem;\n\t\t\tfont-size: 0.75rem;\n\t\t\tfont-weight: 600;\n\t\t\tletter-spacing: 0.06em;\n\t\t\ttext-transform: uppercase;\n\t\t\tcolor: var(--muted);\n\t\t}\n\t\t.dataset-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n\t\t.dataset-age { margin-left: auto; font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; }\n\t\t.controls { display: flex; flex-direction: column; gap: 0.4rem; margin: 0.75rem 0; }\n\t\t.controls .snapshot-row { display: flex; gap: 0.4rem; }\n\t\t.controls .snapshot-row select { flex: 1; min-width: 0; }\n\t\t.btn {\n\t\t\tpadding: 0.35rem 0.7rem;\n\t\t\tborder: 1px solid #bbb;\n\t\t\tborder-radius: 4px;\n\t\t\tbackground: white;\n\t\t\tcursor: pointer;\n\t\t\tfont-size: 0.85rem;\n\t\t}\n\t\t.btn:hover { background: #eee; }\n\t\t.btn.warn { border-color: var(--paused); color: var(--paused); font-weight: 500; }\n\t\t.btn.small { padding: 0.15rem 0.5rem; font-size: 0.8rem; }\n\n\t\t/* Content */\n\t\th1 { font-size: 1.4rem; margin: 0.25rem 0 1rem; }\n\t\th1 .chip { vertical-align: middle; margin-left: 0.5rem; }\n\t\th2 { font-size: 1.05rem; margin: 1.5rem 0 0.5rem; }\n\t\t/* Plain tables (facts, fulfillment, plan). The datagrid tables\n\t\t   bring their own operational-table treatment, so the host rules\n\t\t   stand aside for anything inside a monks-datagrid. */\n\t\ttable:not(monks-datagrid *) { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }\n\t\tth:not(monks-datagrid *), td:not(monks-datagrid *) { padding: 0.3em 0.9em 0.3em 0; text-align: left; border-bottom: 1px solid var(--border); vertical-align: baseline; }\n\t\tth:not(monks-datagrid *) { font-weight: 600; font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }\n\t\ttd.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }\n\t\t.muted { color: var(--muted); }\n\t\t.error-text { color: var(--failing); }\n\t\t.stale-text { color: var(--atrisk); font-weight: 500; }\n\t\t.cycle-ok { color: var(--ok); font-weight: 600; }\n\t\t.cycle-failed { color: var(--failing); font-weight: 600; }\n\t\t.cycle-paused { color: var(--paused); font-weight: 600; }\n\n\t\t/* Attention (issues) */\n\t\t.all-clear {\n\t\t\tcolor: var(--ok);\n\t\t\tbackground: var(--ok-bg);\n\t\t\tpadding: 0.6rem 0.9rem;\n\t\t\tborder-radius: 4px;\n\t\t\tmargin: 0 0 1rem;\n\t\t}\n\t\t.issues { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1rem; }\n\t\t.issue {\n\t\t\tdisplay: flex;\n\t\t\talign-items: baseline;\n\t\t\tgap: 0.6rem;\n\t\t\tpadding: 0.5rem 0.75rem;\n\t\t\tborder-radius: 4px;\n\t\t\tborder-left: 4px solid var(--unknown);\n\t\t\tbackground: #fafafa;\n\t\t\tflex-wrap: wrap;\n\t\t}\n\t\t.issue-critical { border-left-color: var(--failing); background: var(--failing-bg); }\n\t\t.issue-warning { border-left-color: var(--pending); background: var(--pending-bg); }\n\t\t.issue-info { border-left-color: var(--paused); background: var(--paused-bg); }\n\t\t.issue-summary { font-weight: 600; }\n\t\t.issue-since { color: var(--muted); font-size: 0.85rem; }\n\t\t.issue-detail { flex-basis: 100%; font-size: 0.85rem; color: #444; font-family: monospace; white-space: pre-wrap; }\n\t\t.issue .btn { margin-left: auto; }\n\n\t\t/* Now (cycle progress) */\n\t\t.now {\n\t\t\tdisplay: flex;\n\t\t\talign-items: center;\n\t\t\tgap: 0.75rem;\n\t\t\tmargin-bottom: 1rem;\n\t\t\tcolor: var(--muted);\n\t\t\tflex-wrap: wrap;\n\t\t}\n\t\t.qdots { display: inline-flex; gap: 3px; align-items: center; }\n\t\t.qdot { width: 8px; height: 8px; border-radius: 2px; display: inline-block; background: #ddd; }\n\t\t.qdot-done { background: var(--ok); }\n\t\t.qdot-failed { background: var(--failing); }\n\t\t.qdot-skipped { background: var(--paused); }\n\t\t.qdot-active { background: var(--syncing); animation: pulse 1.2s ease-in-out infinite alternate; }\n\n\t\t/* Cycle strip (recent checks at a glance) */\n\t\t.cycle-strip { display: flex; flex-wrap: wrap; gap: 3px; margin: 0.25rem 0 0.75rem; }\n\n\t\t/* Fulfillment */\n\t\t.shortfall { color: var(--pending); font-weight: 600; }\n\n\t\t/* Plan steps */\n\t\t.step-status { display: inline-block; width: 14px; height: 14px; vertical-align: middle; }\n\t\t.step-status.pending { border: 2px solid #ccc; border-radius: 50%; }\n\t\t.step-status.in-progress { border: 2px solid var(--syncing); border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; }\n\t\t.step-status.completed::before { content: '✓'; color: var(--ok); font-weight: bold; }\n\t\t.step-status.failed::before { content: '✗'; color: var(--failing); font-weight: bold; }\n\t\t.step-log td { border-bottom: none; }\n\t\t.log-message { font-size: 0.8rem; color: var(--muted); font-family: monospace; display: block; padding: 0.1rem 0 0.1rem 2rem; }\n\t\t.step-progress td { border-bottom: none; padding-left: 2rem; }\n\t\t.step-progress progress { width: 16rem; }\n\n\t\t/* Recovery sentence */\n\t\t.recovery { margin: 0 0 1rem; max-width: 60rem; }\n\t\t.recovery b { font-weight: 600; }\n\t\t.recovery.atrisk { color: var(--atrisk); }\n\n\t\t/* Snapshot grid */\n\t\t.snapshot-present { color: var(--ok); }\n\t\t.snapshot-absent { color: var(--failing); }\n\t\t.snapshot-doomed { color: var(--pending); }\n\t\t.retention-override { color: var(--pending); font-weight: 500; }\n\n\t\t/* Config editor */\n\t\t#config-editor {\n\t\t\twidth: 100%;\n\t\t\tmin-height: 24rem;\n\t\t\tfont-family: monospace;\n\t\t\tfont-size: 0.9rem;\n\t\t\tpadding: 0.75rem;\n\t\t\tborder: 1px solid #ccc;\n\t\t\tborder-radius: 4px;\n\t\t\tresize: vertical;\n\t\t}\n\t\t.config-actions { display: flex; gap: 0.5rem; margin: 0.75rem 0; }\n\t\t.config-error {\n\t\t\tbackground: var(--failing-bg);\n\t\t\tcolor: var(--failing);\n\t\t\tpadding: 0.75rem;\n\t\t\tborder-radius: 4px;\n\t\t\twhite-space: pre-wrap;\n\t\t\tfont-family: monospace;\n\t\t\tfont-size: 0.85rem;\n\t\t}\n\t\t.impact-note { color: var(--muted); font-size: 0.9rem; }\n\t</style>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

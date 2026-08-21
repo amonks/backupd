@@ -322,7 +322,10 @@ type System struct {
 	LocalUsed    int64
 	RemoteUsed   int64
 
-	LastCycle        *history.Cycle
+	LastCycle *history.Cycle
+	// Runs is the cycle history collapsed into consecutive
+	// same-outcome runs, newest first.
+	Runs             []CycleRun
 	LastSnitch       time.Time
 	SnitchConfigured bool
 	SnitchOverdue    bool
@@ -383,6 +386,7 @@ func Compute(in Input) System {
 	}
 	if cycles := in.History.Cycles(); len(cycles) > 0 {
 		sys.LastCycle = &cycles[0]
+		sys.Runs = CycleRuns(cycles)
 	}
 
 	var issues []Issue
@@ -681,7 +685,7 @@ func systemIssues(in Input, sys *System) []Issue {
 			Summary:  fmt.Sprintf("%s failed; retrying", plural(a.ConsecutiveFailures, "cycle")),
 		}
 		if sys.LastCycle != nil {
-			issue.Detail = cycleDetail(*sys.LastCycle)
+			issue.Detail = CycleDetail(*sys.LastCycle)
 			issue.Since = sys.LastCycle.StoppedAt
 		}
 		out = append(out, issue)
@@ -690,7 +694,7 @@ func systemIssues(in Input, sys *System) []Issue {
 			Kind:     IssueCycleFailing,
 			Severity: Critical,
 			Summary:  "last cycle failed",
-			Detail:   cycleDetail(*c),
+			Detail:   CycleDetail(*c),
 			Since:    c.StoppedAt,
 		})
 	}
@@ -722,7 +726,9 @@ func systemIssues(in Input, sys *System) []Issue {
 	return out
 }
 
-func cycleDetail(c history.Cycle) string {
+// CycleDetail is the one-line explanation of a failed cycle: the
+// refresh error, or the failed-dataset list.
+func CycleDetail(c history.Cycle) string {
 	if c.Error != "" {
 		return c.Error
 	}

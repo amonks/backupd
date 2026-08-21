@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"time"
 
+	"monks.co/backupd/history"
+	"monks.co/backupd/logger"
 	"monks.co/backupd/model"
 	"monks.co/backupd/status"
 	"monks.co/backupd/view"
@@ -41,29 +43,11 @@ templ datasetPage(d pageData) {
 		@fulfillmentTable(dv)
 		@planSection(d, name, ds)
 		<h2>Snapshots</h2>
-		<table class="snapshot-table">
-			<thead>
-				<tr>
-					<th>snapshot</th>
-					<th class="sortable">created</th>
-					<th>local</th>
-					<th>remote</th>
-					<th class="sortable num">size</th>
-				</tr>
-			</thead>
-			<tbody>
-				@snapshotRows(ds)
-			</tbody>
-		</table>
-		if ds.Logs != nil && len(ds.Logs.GetLogs()) > 0 {
-			<details class="logs">
-				<summary>Dataset logs ({ fmt.Sprint(len(ds.Logs.GetLogs())) })</summary>
-				<ul>
-					for _, log := range ds.Logs.GetLogs() {
-						<li>{ log.LogAt.Format(time.DateTime) } :: { log.Log }</li>
-					}
-				</ul>
-			</details>
+		@snapshotsGrid(ds)
+		{{ events := eventsForDataset(d.Events, name) }}
+		if len(events) > 0 {
+			<h2>Journal</h2>
+			@journalGrid(events)
 		}
 	}
 }
@@ -288,8 +272,19 @@ templ planSection(d pageData, name model.DatasetName, ds *model.Dataset) {
 							</td>
 						</tr>
 					}
-					if step.Logs != nil && len(step.Logs.GetLogs()) > 0 {
-						for _, logEntry := range step.Logs.GetLogs() {
+					{{ var stepLogs []logger.LogEntry }}
+					{{ if step.Logs != nil { stepLogs = step.Logs.GetLogs() } }}
+					if len(stepLogs) > 0 {
+						{{ logs, elided := tailLogs(stepLogs, stepLogTail) }}
+						if elided > 0 {
+							<tr class="step-log">
+								<td></td>
+								<td colspan="4">
+									<code class="log-message muted">… { fmt.Sprint(elided) } earlier lines (full record in the process log)</code>
+								</td>
+							</tr>
+						}
+						for _, logEntry := range logs {
 							<tr class="step-log">
 								<td></td>
 								<td colspan="4">
@@ -317,37 +312,27 @@ templ renderStepStatus(st model.StepStatus) {
 	}
 }
 
-templ snapshotRows(ds *model.Dataset) {
-	if ds.Current != nil {
-		for snap := range ds.Current.Local.Union(ds.Current.Remote).AllDesc() {
-			<tr>
-				<td>{ snap.Name }</td>
-				<td data-sort={ fmt.Sprint(snap.CreatedAt) }>{ snap.Time().Format(time.DateTime) }</td>
-				<td>
-					@snapshotPresence(ds.Current.Local.Has(snap), targetHas(ds.Target, model.Local, snap), ds.Target != nil)
-				</td>
-				<td>
-					@snapshotPresence(ds.Current.Remote.Has(snap), targetHas(ds.Target, model.Remote, snap), ds.Target != nil)
-				</td>
-				<td class="num" data-sort={ fmt.Sprint(snap.LogicalReferenced) }><code>{ snap.SizeString() }</code></td>
-			</tr>
-		}
+// stepLogTail bounds how many of a plan step's log lines render
+// inline: the tail is what matters for a live transfer (current
+// throughput), and a long transfer logs a line a minute — the full
+// record is in the process log.
+const stepLogTail = 12
+
+// tailLogs returns the last n entries and how many were elided.
+func tailLogs(logs []logger.LogEntry, n int) ([]logger.LogEntry, int) {
+	if len(logs) <= n {
+		return logs, 0
 	}
+	return logs[len(logs)-n:], len(logs) - n
 }
 
-// snapshotPresence renders one location cell: present (✓), present but
-// scheduled for deletion (orange ✓), missing but scheduled for transfer
-// (✗), or not wanted (-).
-templ snapshotPresence(current bool, inTarget bool, hasTarget bool) {
-	if current {
-		if hasTarget && !inTarget {
-			<span class="snapshot-doomed" title="Present; scheduled for deletion">✓</span>
-		} else {
-			<span class="snapshot-present" title="Present">✓</span>
+// eventsForDataset filters the journal to one dataset's entries.
+func eventsForDataset(events []history.Event, name model.DatasetName) []history.Event {
+	var out []history.Event
+	for _, e := range events {
+		if e.Dataset != nil && *e.Dataset == name {
+			out = append(out, e)
 		}
-	} else if inTarget {
-		<span class="snapshot-absent" title="Missing; scheduled for transfer">✗</span>
-	} else {
-		<span class="muted">-</span>
 	}
+	return out
 }

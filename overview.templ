@@ -2,10 +2,9 @@ package main
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
-	"monks.co/backupd/config"
+	"monks.co/backupd/history"
 	"monks.co/backupd/status"
 	"monks.co/backupd/view"
 )
@@ -13,23 +12,14 @@ import (
 // overview is the operator's landing page, ordered by session
 // frequency: what needs attention (or all clear), what is happening
 // right now, the fleet's assurance table, then the record of what the
-// daemon has done, with raw logs collapsed at the bottom.
+// daemon has done — the journal of notable transitions, executed
+// operations, and the cycle history collapsed into runs.
 templ overview(d pageData) {
 	<h1>Overview</h1>
 	@attentionSection(d)
 	@nowSection(d)
-	@fleetTable(d)
+	@fleetGrid(d.Sys.Datasets)
 	@recordSection(d)
-	if len(d.GlobalLogs) > 0 {
-		<details class="logs">
-			<summary>Global logs ({ fmt.Sprint(len(d.GlobalLogs)) })</summary>
-			<ul>
-				for _, log := range d.GlobalLogs {
-					<li>{ log.LogAt.Format(time.DateTime) } :: { log.Log }</li>
-				}
-			</ul>
-		</details>
-	}
 }
 
 // attentionSection leads with the typed issue list — everything wrong,
@@ -120,72 +110,6 @@ templ lastCycleNote(d pageData) {
 	}
 }
 
-// fleetTable is the assurance table: for every dataset, is it healthy,
-// when was it last snapshotted (are snapshots being taken?), when was
-// it last backed up (the recovery point), what work is queued, and
-// what it holds and costs on each side.
-templ fleetTable(d pageData) {
-	<table id="fleet">
-		<thead>
-			<tr>
-				<th class="sortable">dataset</th>
-				<th>status</th>
-				<th class="sortable num" title="Age of the newest local snapshot">snapshotted</th>
-				<th class="sortable num" title="Age of the newest remote snapshot — the recovery point">backed up</th>
-				<th>pending</th>
-				<th class="sortable num">local</th>
-				<th class="sortable num">remote</th>
-				<th>retention</th>
-			</tr>
-		</thead>
-		<tbody>
-			for _, dv := range d.Sys.Datasets {
-				@fleetRow(d, dv)
-			}
-		</tbody>
-	</table>
-}
-
-templ fleetRow(d pageData, dv view.Dataset) {
-	<tr>
-		<td><a href={ templ.SafeURL(datasetHref(dv.Name)) }>{ dv.Name.String() }</a></td>
-		<td>
-			@healthChip(dv)
-		</td>
-		<td class="num" data-sort={ ageSort(dv.HasLocal, dv.Snapshotted) }>
-			@ageCell(dv.HasLocal, dv.Snapshotted, dv.SnapshotsStale, "no snapshots")
-		</td>
-		<td class="num" data-sort={ ageSort(dv.HasRemote, dv.BackedUp) }>
-			@ageCell(dv.HasRemote, dv.BackedUp, dv.BackupStale, "never")
-		</td>
-		<td>
-			if s := dv.PendingSummary(); s != "" {
-				{ s }
-			} else {
-				<span class="muted">—</span>
-			}
-		</td>
-		<td class="num" data-sort={ fmt.Sprint(dv.LocalUsed) }>
-			{ fmt.Sprint(dv.LocalCount) } · { fmtBytes(dv.LocalUsed) }
-		</td>
-		<td class="num" data-sort={ fmt.Sprint(dv.RemoteUsed) }>
-			{ fmt.Sprint(dv.RemoteCount) } · { fmtBytes(dv.RemoteUsed) }
-		</td>
-		<td>
-			@renderRetention(d.Conf, dv.Name.Path())
-		</td>
-	</tr>
-}
-
-// ageSort keys age columns for sorting: missing sides sort past the
-// oldest present ones.
-func ageSort(has bool, age time.Duration) string {
-	if !has {
-		return fmt.Sprint(int64(1) << 62)
-	}
-	return fmt.Sprint(int64(age.Seconds()))
-}
-
 // ageCell renders an age with staleness highlighting, or the absent
 // label ("never", "no snapshots").
 templ ageCell(has bool, age time.Duration, stale bool, absent string) {
@@ -198,88 +122,77 @@ templ ageCell(has bool, age time.Duration, stale bool, absent string) {
 	}
 }
 
-// recordSection is the account of what the daemon has done: executed
-// operations, then cycle outcomes.
+// recordSection is the account of what the daemon has done. The
+// journal holds transitions and operator actions — when something
+// broke, changed, or recovered — so it stays short no matter how long
+// the daemon runs; the activity feed holds executed operations; the
+// cycle history is a strip of recent checks plus consecutive
+// same-outcome cycles collapsed into runs, so months of hourly checks
+// read as a handful of rows.
 templ recordSection(d pageData) {
+	if len(d.Events) > 0 {
+		<h2>Journal</h2>
+		@journalGrid(d.Events)
+	}
 	if len(d.Ops) > 0 {
 		<h2>Recent Activity</h2>
-		<table>
-			<thead>
-				<tr>
-					<th>when</th>
-					<th>dataset</th>
-					<th>operation</th>
-					<th class="num">duration</th>
-					<th>result</th>
-				</tr>
-			</thead>
-			<tbody>
-				for i, op := range d.Ops {
-					if i < 30 {
-						<tr>
-							<td title={ op.At.Format("2006-01-02 15:04:05") }>{ fmtAgo(op.At) }</td>
-							<td>
-								if op.Dataset != "" || op.Operation == "" {
-									<a href={ templ.SafeURL(datasetHref(op.Dataset)) }>{ op.Dataset.String() }</a>
-								}
-							</td>
-							<td><code>{ op.Operation }</code></td>
-							<td class="num">{ op.Duration.Round(time.Millisecond).String() }</td>
-							<td>
-								if op.Error == "" {
-									<span class="cycle-ok">ok</span>
-								} else {
-									<span class="error-text">{ op.Error }</span>
-								}
-							</td>
-						</tr>
-					}
-				}
-			</tbody>
-		</table>
-		if len(d.Ops) > 30 {
-			<p class="muted">Showing 30 of { fmt.Sprint(len(d.Ops)) } recorded operations.</p>
-		}
+		@opsGrid(d.Ops)
 	}
 	if len(d.Cycles) > 0 {
 		<h2>Cycle History</h2>
-		<table>
-			<thead>
-				<tr>
-					<th>started</th>
-					<th class="num">duration</th>
-					<th>result</th>
-					<th class="num">datasets</th>
-					<th>detail</th>
-				</tr>
-			</thead>
-			<tbody>
-				for _, c := range d.Cycles {
-					<tr>
-						<td>{ c.StartedAt.Format(time.DateTime) }</td>
-						<td class="num">{ c.Duration().Round(time.Second).String() }</td>
-						<td>
-							if c.Paused {
-								<span class="cycle-paused">paused</span>
-							} else if c.OK {
-								<span class="cycle-ok">ok</span>
-							} else {
-								<span class="cycle-failed">failed</span>
-							}
-						</td>
-						<td class="num">{ fmt.Sprint(c.Datasets) }</td>
-						<td>
-							if c.Error != "" {
-								<code>{ c.Error }</code>
-							} else if len(c.Failures) > 0 {
-								<code>failed: { strings.Join(c.Failures, ", ") }</code>
-							}
-						</td>
-					</tr>
-				}
-			</tbody>
-		</table>
+		@cycleStrip(d.Cycles)
+		@runsGrid(d.Sys.Runs)
 	}
+}
+
+// stripLen bounds the cycle strip: at an hourly interval, a few days
+// at a glance. Older cycles are still in the runs table.
+const stripLen = 96
+
+// stripCycles returns up to n of the newest cycles, oldest first, for
+// left-to-right rendering.
+func stripCycles(cycles []history.Cycle, n int) []history.Cycle {
+	if len(cycles) > n {
+		cycles = cycles[:n]
+	}
+	out := make([]history.Cycle, len(cycles))
+	for i, c := range cycles {
+		out[len(cycles)-1-i] = c
+	}
+	return out
+}
+
+// stripClass maps a cycle outcome onto the queue-dot palette.
+func stripClass(c history.Cycle) string {
+	switch view.OutcomeOf(c) {
+	case view.CyclePaused:
+		return "skipped"
+	case view.CycleOK:
+		return "done"
+	default:
+		return "failed"
+	}
+}
+
+func stripTitle(c history.Cycle) string {
+	title := fmt.Sprintf("%s · %s in %s",
+		c.StartedAt.Format(time.DateTime),
+		view.OutcomeOf(c).String(),
+		c.Duration().Round(time.Second))
+	if d := view.CycleDetail(c); d != "" {
+		title += " · " + d
+	}
+	return title
+}
+
+// cycleStrip shows recent cycles at a glance, one cell per cycle,
+// oldest to newest.
+templ cycleStrip(cycles []history.Cycle) {
+	<div class="cycle-strip">
+		for _, c := range stripCycles(cycles, stripLen) {
+			<span class={ "qdot", "qdot-" + stripClass(c) } title={ stripTitle(c) }></span>
+		}
+	</div>
 }
 
 func exactTime(t time.Time) string {
@@ -287,12 +200,4 @@ func exactTime(t time.Time) string {
 		return ""
 	}
 	return t.Format("2006-01-02 15:04:05")
-}
-
-templ renderRetention(conf *config.Config, dataset string) {
-	if _, override := conf.OverrideFor(dataset); override != nil {
-		<code class="retention-override">{ conf.RetentionDescription(dataset) }</code>
-	} else {
-		<code>default</code>
-	}
 }

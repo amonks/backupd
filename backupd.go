@@ -38,6 +38,10 @@ type Backupd struct {
 	// ping is before any ping has happened).
 	boot time.Time
 
+	// lastConfigReloadError edge-guards the reload-failure journal
+	// entry; only the sync loop touches it.
+	lastConfigReloadError string
+
 	// resume is env.Resume, injectable for tests.
 	resume func(context.Context, *logger.Logger, model.DatasetName, string) error
 
@@ -152,6 +156,23 @@ func (b *Backupd) idle(ctx context.Context, d time.Duration, failures int) error
 	}
 }
 
+// event journals a notable daemon-level condition or operator action
+// and echoes it to the process log. Steady-state chatter stays on the
+// per-call loggers; the journal holds only what an operator returning
+// after a week would want to read. The journal carries the dataset as
+// a structured field; the process log — the only record that survives
+// a restart — gets it as a prefix.
+func (b *Backupd) event(level history.Level, dataset *model.DatasetName, format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	if dataset != nil {
+		b.globalLogs.Printf("'%s': %s", *dataset, msg)
+	} else {
+		b.globalLogs.Printf("%s", msg)
+	}
+	b.history.RecordEvent(history.Event{At: time.Now(), Level: level, Dataset: dataset, Message: msg})
+	b.notifyStateChange()
+}
+
 // applyConfig swaps in a new config. Policy, pause, interval, and snitch
 // changes take effect immediately; the ZFS roots and SSH endpoint were
 // captured by env at startup, so changes there get a restart warning.
@@ -161,7 +182,7 @@ func (b *Backupd) applyConfig(fresh *config.Config) {
 		fresh.Remote.Root != cur.Remote.Root ||
 		fresh.Remote.SSHKey != cur.Remote.SSHKey ||
 		fresh.Remote.SSHHost != cur.Remote.SSHHost {
-		b.globalLogs.Printf("warning: local/remote endpoints changed; restart backupd to apply them")
+		b.event(history.Warning, nil, "local/remote endpoints changed; restart backupd to apply them")
 	}
 	b.conf.Reset(fresh)
 	b.notifyStateChange()
@@ -176,13 +197,22 @@ func (b *Backupd) reloadConfigFromDisk() {
 	}
 	fresh, err := config.LoadFrom(cur.Path)
 	if err != nil {
-		b.globalLogs.Printf("config reload failed; keeping current config: %s", err)
+		// Journal only the transition: this runs every cycle, and a
+		// typo'd config left on disk must not fill the journal with
+		// one warning per cycle.
+		if err.Error() != b.lastConfigReloadError {
+			b.lastConfigReloadError = err.Error()
+			b.event(history.Warning, nil, "config reload failed; keeping current config: %s", err)
+		} else {
+			b.globalLogs.Printf("config reload failed; keeping current config: %s", err)
+		}
 		return
 	}
+	b.lastConfigReloadError = ""
 	if bytes.Equal(fresh.Raw, cur.Raw) {
 		return
 	}
-	b.globalLogs.Printf("reloaded config from %s", cur.Path)
+	b.event(history.Info, nil, "reloaded config from %s", cur.Path)
 	b.applyConfig(fresh)
 }
 
@@ -331,6 +361,7 @@ func (b *Backupd) Sync(ctx context.Context) error {
 					b.globalLogs.Printf("alerting deadmanssnitch")
 					if err := b.snitch(conf.SnitchID); err != nil {
 						b.globalLogs.Printf("snitch error: %v", err)
+						b.history.RecordSnitchError(time.Now(), err.Error())
 					} else {
 						b.globalLogs.Printf("snitched success")
 						b.history.RecordSnitch(time.Now())
@@ -651,7 +682,11 @@ func (b *Backupd) syncDatasetInner(ctx context.Context, dataset model.DatasetNam
 		// Record the executed operation in the activity feed. In dryrun
 		// mode nothing actually ran, so nothing is recorded.
 		if !b.dryrun && ctx.Err() == nil {
-			op := history.Op{At: time.Now(), Dataset: dataset, Operation: step.Operation.String()}
+			kind := "deletion"
+			if model.IsTransfer(step.Operation) {
+				kind = "transfer"
+			}
+			op := history.Op{At: time.Now(), Dataset: dataset, Operation: step.Operation.String(), Kind: kind}
 			if step.StoppedAt != nil {
 				op.At = *step.StoppedAt
 			}
@@ -717,6 +752,7 @@ resume:
 		b.history.RecordOp(history.Op{
 			At: time.Now(), Dataset: dataset,
 			Operation: "abort unresumable transfer",
+			Kind:      "resume",
 			Duration:  time.Since(start),
 		})
 		return nil
@@ -725,6 +761,7 @@ resume:
 			b.history.RecordOp(history.Op{
 				At: time.Now(), Dataset: dataset,
 				Operation: "resume interrupted transfer",
+				Kind:      "resume",
 				Duration:  time.Since(start),
 				Error:     err.Error(),
 			})
@@ -736,6 +773,7 @@ resume:
 	b.history.RecordOp(history.Op{
 		At: time.Now(), Dataset: dataset,
 		Operation: "resume interrupted transfer",
+		Kind:      "resume",
 		Duration:  time.Since(start),
 	})
 

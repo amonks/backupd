@@ -1,0 +1,109 @@
+package main
+
+// Cell and header components for the datagrid tables in grids.go —
+// each replaces a grid cell's visible content while the behavioral
+// projections (search, sort, filter) stay on the column definitions —
+// plus small fragments shared with the plain tables (renderRetention
+// is also the dataset page's facts row).
+
+import (
+	"time"
+
+	"monks.co/backupd/config"
+	"monks.co/backupd/history"
+	"monks.co/backupd/model"
+	"monks.co/backupd/view"
+)
+
+templ renderRetention(conf *config.Config, dataset string) {
+	if _, override := conf.OverrideFor(dataset); override != nil {
+		<code class="retention-override">{ conf.RetentionDescription(dataset) }</code>
+	} else {
+		<code>default</code>
+	}
+}
+
+templ datasetLink(name model.DatasetName) {
+	<a href={ templ.SafeURL(datasetHref(name)) }>{ name.String() }</a>
+}
+
+templ whenCell(at time.Time) {
+	<span title={ exactTime(at) }>{ fmtAgo(at) }</span>
+}
+
+templ codeCell(s string) {
+	if s != "" {
+		<code>{ s }</code>
+	}
+}
+
+templ mutedDash() {
+	<span class="muted">—</span>
+}
+
+templ pendingCell(dv view.Dataset) {
+	{{ s := dv.PendingSummary() }}
+	if s != "" {
+		{ s }
+	} else {
+		@mutedDash()
+	}
+}
+
+templ retentionCell(dv view.Dataset) {
+	if dv.Overridden {
+		<code class="retention-override">{ dv.Retention }</code>
+	} else {
+		<code>default</code>
+	}
+}
+
+templ opResultCell(op history.Op) {
+	if op.Error == "" {
+		<span class="cycle-ok">ok</span>
+	} else {
+		<span class="error-text">{ op.Error }</span>
+	}
+}
+
+func levelClass(level history.Level) string {
+	switch level {
+	case history.Error:
+		return "critical"
+	case history.Warning:
+		return "warning"
+	default:
+		return "info"
+	}
+}
+
+templ levelChip(level history.Level) {
+	<span class={ "chip", "chip-" + levelClass(level) }>{ string(level) }</span>
+}
+
+templ outcomeCell(o view.CycleOutcome) {
+	<span class={ "cycle-" + o.String() }>{ o.String() }</span>
+}
+
+// headerTitle carries a column's explanatory tooltip; datagrid's
+// sortable header wraps it in the sort button, so it must stay
+// non-interactive.
+templ headerTitle(label, title string) {
+	<span title={ title }>{ label }</span>
+}
+
+// presenceCell renders one location cell of the snapshot grid: present
+// (✓), present but scheduled for deletion (orange ✓), missing but
+// scheduled for transfer (✗), or not wanted (-).
+templ presenceCell(p snapPresence) {
+	switch p {
+		case presencePresent:
+			<span class="snapshot-present" title="Present">✓</span>
+		case presenceDoomed:
+			<span class="snapshot-doomed" title="Present; scheduled for deletion">✓</span>
+		case presenceQueued:
+			<span class="snapshot-absent" title="Missing; scheduled for transfer">✗</span>
+		default:
+			<span class="muted">-</span>
+	}
+}

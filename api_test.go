@@ -1,7 +1,9 @@
 package main
 
 import (
+	"compress/gzip"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -291,6 +293,43 @@ func TestCLIRoundTrip(t *testing.T) {
 	}
 }
 
+// The dashboard pages and /api/state gzip when the client accepts it:
+// they carry complete datagrid data sets and are re-fetched on every
+// state change.
+func TestGzip(t *testing.T) {
+	local, remote := steadyStateExecutors()
+	b, _ := newAPITestBackupd(t, local, remote)
+	h := b.handler()
+
+	req := httptest.NewRequest("GET", "/global", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if got := w.Header().Get("Content-Encoding"); got != "gzip" {
+		t.Fatalf("expected gzip encoding, got %q", got)
+	}
+	zr, err := gzip.NewReader(w.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(zr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "backupd") {
+		t.Error("expected decompressed page content")
+	}
+
+	// Without Accept-Encoding, the response is identity.
+	w = do(t, h, "GET", "/global", "")
+	if got := w.Header().Get("Content-Encoding"); got != "" {
+		t.Errorf("expected identity encoding, got %q", got)
+	}
+	if !strings.Contains(w.Body.String(), "backupd") {
+		t.Error("expected plain page content")
+	}
+}
+
 func TestPageRendering(t *testing.T) {
 	local, remote := steadyStateExecutors()
 	b, _ := newAPITestBackupd(t, local, remote)
@@ -389,6 +428,10 @@ func TestPageShowsVerdictsAndActivity(t *testing.T) {
 		"Recent Activity",     // op feed
 		"transfer range x",    // the recorded op
 		"chip-failing",        // fleet health chip
+		"Journal",             // the failure transition was journaled
+		"sync failing: remote out of space",
+		`<monks-datagrid id="fleet"`, // the tables are datagrids
+		`<monks-datagrid id="ops"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected global page to contain %q", want)
@@ -396,7 +439,7 @@ func TestPageShowsVerdictsAndActivity(t *testing.T) {
 	}
 
 	// After a newer success, the dataset (and system) settle back to ok,
-	// and the overview says all clear.
+	// the overview says all clear, and the journal records the recovery.
 	b.history.RecordDatasetSuccess("/foo", time.Now().Add(time.Minute))
 	body = do(t, h, "GET", "/global", "").Body.String()
 	if strings.Contains(body, "FAILING") {
@@ -404,6 +447,9 @@ func TestPageShowsVerdictsAndActivity(t *testing.T) {
 	}
 	if !strings.Contains(body, "All clear") {
 		t.Error("expected the all-clear banner with no issues")
+	}
+	if !strings.Contains(body, "sync recovered") {
+		t.Error("expected the journal to record the recovery transition")
 	}
 
 	// The dataset page shows the recovery sentence, assurance facts,
@@ -469,6 +515,8 @@ func TestAPIState(t *testing.T) {
 	b, _ := newAPITestBackupd(t, local, remote)
 	b.state.Swap(model.AddLocalDataset("/foo", []*model.Snapshot{snapA}, nil))
 	b.state.Swap(model.AddRemoteDataset("/foo", []*model.Snapshot{snapA}, nil))
+	b.history.RecordCycle(history.Cycle{StartedAt: time.Now().Add(-2 * time.Minute), StoppedAt: time.Now().Add(-time.Minute), OK: true, Datasets: 1})
+	b.history.RecordDatasetFailure("/foo", time.Now(), "remote out of space")
 	h := b.handler()
 
 	w := do(t, h, "GET", "/api/state", "")
@@ -482,6 +530,15 @@ func TestAPIState(t *testing.T) {
 			Paused         bool   `json:"paused"`
 			LocalSnapshots int    `json:"localSnapshots"`
 		} `json:"datasets"`
+		Runs []struct {
+			Outcome string `json:"outcome"`
+			Count   int    `json:"count"`
+		} `json:"cycleRuns"`
+		Events []struct {
+			Level   string  `json:"level"`
+			Dataset *string `json:"dataset"`
+			Message string  `json:"message"`
+		} `json:"events"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decoding response: %v\n%s", err, w.Body)
@@ -491,5 +548,13 @@ func TestAPIState(t *testing.T) {
 	}
 	if resp.Datasets[0].LocalSnapshots != 1 {
 		t.Errorf("expected 1 local snapshot, got %d", resp.Datasets[0].LocalSnapshots)
+	}
+	if len(resp.Runs) != 1 || resp.Runs[0].Outcome != "ok" || resp.Runs[0].Count != 1 {
+		t.Errorf("expected one ok cycle run, got %+v", resp.Runs)
+	}
+	if len(resp.Events) != 1 || resp.Events[0].Level != "error" ||
+		resp.Events[0].Dataset == nil || *resp.Events[0].Dataset != "/foo" ||
+		!strings.Contains(resp.Events[0].Message, "remote out of space") {
+		t.Errorf("expected the journaled failure in events, got %+v", resp.Events)
 	}
 }

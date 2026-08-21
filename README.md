@@ -26,8 +26,17 @@ Key features:
 - Config editing from the dashboard, with validation and a per-dataset impact preview before anything is written
 - Hot config reload: retention, pause, and interval changes apply without a restart
 - Sync-on-demand (full cycle or single dataset) via UI, API, or CLI
-- History: cycle outcomes, per-dataset last success *and* last failure
-  (with the error), executed-operation feed, last snitch ping
+- History built for long runtimes: cycle outcomes collapsed into
+  same-outcome runs ("ok × 300 over 12d") with a strip of recent
+  checks, per-dataset last success *and* last failure (with the
+  error), a searchable executed-operation feed, last snitch ping, and
+  a journal that records incidents rather than states — one entry
+  when a dataset starts failing, updated in place with a count and
+  the latest error while the failure persists, one entry when it
+  recovers — so a healthy month stays quiet and a broken week reads
+  like an incident report. The dashboard tables (fleet, journal,
+  activity, cycle runs, snapshots) are data grids with search,
+  faceted filters, typed sorting, and pagination
 - Resumable transfers with live progress tracking
 - RESTful API for control and state inspection
 - Dead Man's Snitch integration for external monitoring

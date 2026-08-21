@@ -7,72 +7,6 @@ package main
 // which keeps the page readable while a sync is writing progress.
 templ script() {
 	<script>
-	// ---- Table sorting -------------------------------------------------
-	// Cells may carry a data-sort attribute with a numeric key (bytes,
-	// seconds, unix time); otherwise their text is compared, numerically
-	// when both sides parse as numbers. Sort choices persist across
-	// body swaps via sortState, keyed by table id or column signature.
-	const sortState = {};
-
-	function tableKey(table) {
-		return table.id || Array.from(table.querySelectorAll('th')).map(th => th.textContent.trim()).join('|');
-	}
-
-	function cellValue(row, col) {
-		const td = row.cells[col];
-		if (!td) return '';
-		if (td.dataset.sort !== undefined) return td.dataset.sort;
-		return td.textContent.trim();
-	}
-
-	function compareCells(a, b) {
-		const an = parseFloat(a), bn = parseFloat(b);
-		if (!isNaN(an) && !isNaN(bn)) return an - bn;
-		if (a === '—' || a === '-') return b === '—' || b === '-' ? 0 : 1;
-		if (b === '—' || b === '-') return -1;
-		return a.localeCompare(b);
-	}
-
-	function sortTable(table, col, asc) {
-		const tbody = table.querySelector('tbody');
-		if (!tbody) return;
-		// Group each sortable row with its detail rows (step logs,
-		// progress bars) so they move together.
-		const groups = [];
-		for (const row of Array.from(tbody.rows)) {
-			if (row.classList.contains('step-log') || row.classList.contains('step-progress')) {
-				if (groups.length) groups[groups.length - 1].push(row);
-			} else {
-				groups.push([row]);
-			}
-		}
-		groups.sort((ga, gb) => compareCells(cellValue(ga[0], col), cellValue(gb[0], col)) * (asc ? 1 : -1));
-		for (const group of groups) for (const row of group) tbody.appendChild(row);
-
-		table.querySelectorAll('th').forEach(th => th.classList.remove('sort-asc', 'sort-desc'));
-		const th = table.querySelectorAll('th')[col];
-		if (th) th.classList.add(asc ? 'sort-asc' : 'sort-desc');
-	}
-
-	document.addEventListener('click', function(e) {
-		const th = e.target.closest('th.sortable');
-		if (!th) return;
-		const table = th.closest('table');
-		const col = Array.from(table.querySelectorAll('th')).indexOf(th);
-		const key = tableKey(table);
-		const prev = sortState[key];
-		const asc = !(prev && prev.col === col && prev.asc);
-		sortState[key] = { col, asc };
-		sortTable(table, col, asc);
-	});
-
-	function reapplySorts() {
-		document.querySelectorAll('table').forEach(table => {
-			const st = sortState[tableKey(table)];
-			if (st) sortTable(table, st.col, st.asc);
-		});
-	}
-
 	// ---- Countdowns ----------------------------------------------------
 	// Elements with data-until (ms since epoch) tick down client-side.
 	function formatUntil(ms) {
@@ -209,7 +143,24 @@ templ script() {
 	// Long-poll for state changes; on change, re-fetch the page and swap
 	// the body in place, preserving sidebar/main scroll positions —
 	// a full reload would lose them every few seconds during a sync.
+	//
+	// Grid search/filter/sort state lives in the URL (pkg/datagrid), so
+	// it survives the swap; but a swap would still close an open facet
+	// menu or clobber half-typed search text, so the refresh waits for
+	// those. Only those: sort and pager clicks leave their button
+	// focused, and treating any in-grid focus as busy would freeze the
+	// dashboard until the next outside click. The wait is bounded —
+	// a stalled dashboard that looks live is worse than a closed menu.
+	function gridBusy() {
+		if (document.querySelector('monks-datagrid details[open]')) return true;
+		const a = document.activeElement;
+		return !!(a && a.matches && a.matches('monks-datagrid input, monks-datagrid textarea'));
+	}
+
 	async function refreshBody() {
+		for (let i = 0; i < 40 && gridBusy(); i++) {
+			await new Promise(resolve => setTimeout(resolve, 750));
+		}
 		const res = await fetch(location.href);
 		if (!res.ok) return;
 		const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
@@ -224,7 +175,6 @@ templ script() {
 		const newMain = document.querySelector('.main-content');
 		if (newSidebar) newSidebar.scrollTop = scrolls.sidebar;
 		if (newMain) newMain.scrollTop = scrolls.main;
-		reapplySorts();
 	}
 
 	async function poll() {

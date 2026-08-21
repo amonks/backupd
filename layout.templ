@@ -6,10 +6,10 @@ import (
 
 	"monks.co/backupd/config"
 	"monks.co/backupd/history"
-	"monks.co/backupd/logger"
 	"monks.co/backupd/model"
 	"monks.co/backupd/status"
 	"monks.co/backupd/view"
+	"monks.co/pkg/datagrid"
 )
 
 // pageData is everything a dashboard render needs, assembled once per
@@ -18,15 +18,15 @@ import (
 // templates only lay it out. State/Conf/logs are carried for the
 // detail surfaces (plans, snapshot grids, raw config, logs).
 type pageData struct {
-	Page       string // "global", "config", or a dataset path ("" is the root dataset)
-	State      *model.Model
-	Conf       *config.Config
-	Activity   status.Activity
-	Sys        view.System
-	Cycles     []history.Cycle
-	Ops        []history.Op
-	GlobalLogs []logger.LogEntry
-	Dryrun     bool
+	Page     string // "global", "config", or a dataset path ("" is the root dataset)
+	State    *model.Model
+	Conf     *config.Config
+	Activity status.Activity
+	Sys      view.System
+	Cycles   []history.Cycle
+	Ops      []history.Op
+	Events   []history.Event
+	Dryrun   bool
 }
 
 templ page(d pageData) {
@@ -35,6 +35,7 @@ templ page(d pageData) {
 		<head>
 			<title>backupd</title>
 			@styles()
+			@datagrid.Head()
 		</head>
 		<body>
 			@statusStrip(d)
@@ -356,14 +357,13 @@ templ styles() {
 		h1 { font-size: 1.4rem; margin: 0.25rem 0 1rem; }
 		h1 .chip { vertical-align: middle; margin-left: 0.5rem; }
 		h2 { font-size: 1.05rem; margin: 1.5rem 0 0.5rem; }
-		table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
-		th, td { padding: 0.3em 0.9em 0.3em 0; text-align: left; border-bottom: 1px solid var(--border); vertical-align: baseline; }
-		th { font-weight: 600; font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+		/* Plain tables (facts, fulfillment, plan). The datagrid tables
+		   bring their own operational-table treatment, so the host rules
+		   stand aside for anything inside a monks-datagrid. */
+		table:not(monks-datagrid *) { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
+		th:not(monks-datagrid *), td:not(monks-datagrid *) { padding: 0.3em 0.9em 0.3em 0; text-align: left; border-bottom: 1px solid var(--border); vertical-align: baseline; }
+		th:not(monks-datagrid *) { font-weight: 600; font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
 		td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-		th.sortable { cursor: pointer; user-select: none; position: relative; padding-right: 1.3rem; }
-		th.sortable::after { content: '↕'; position: absolute; right: 0.4rem; opacity: 0.3; }
-		th.sortable.sort-asc::after { content: '↑'; opacity: 0.8; }
-		th.sortable.sort-desc::after { content: '↓'; opacity: 0.8; }
 		.muted { color: var(--muted); }
 		.error-text { color: var(--failing); }
 		.stale-text { color: var(--atrisk); font-weight: 500; }
@@ -414,6 +414,9 @@ templ styles() {
 		.qdot-skipped { background: var(--paused); }
 		.qdot-active { background: var(--syncing); animation: pulse 1.2s ease-in-out infinite alternate; }
 
+		/* Cycle strip (recent checks at a glance) */
+		.cycle-strip { display: flex; flex-wrap: wrap; gap: 3px; margin: 0.25rem 0 0.75rem; }
+
 		/* Fulfillment */
 		.shortfall { color: var(--pending); font-weight: 600; }
 
@@ -434,18 +437,10 @@ templ styles() {
 		.recovery.atrisk { color: var(--atrisk); }
 
 		/* Snapshot grid */
-		.snapshot-table th, .snapshot-table td { text-align: center; }
-		.snapshot-table th:first-child, .snapshot-table td:first-child { text-align: left; }
 		.snapshot-present { color: var(--ok); }
 		.snapshot-absent { color: var(--failing); }
 		.snapshot-doomed { color: var(--pending); }
 		.retention-override { color: var(--pending); font-weight: 500; }
-
-		/* Logs */
-		details.logs { margin: 1rem 0; }
-		details.logs summary { cursor: pointer; color: var(--muted); }
-		details.logs ul { list-style: none; padding: 0.5rem; margin: 0.5rem 0 0; background: #f7f7f7; border-radius: 4px; max-height: 24rem; overflow-y: auto; }
-		details.logs li { padding: 0.1rem 0; font-family: monospace; font-size: 0.8rem; white-space: pre-wrap; }
 
 		/* Config editor */
 		#config-editor {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -27,12 +28,39 @@ func (b *Backupd) handler() http.Handler {
 	mux.HandleFunc("GET /api/config", b.handleConfigGet)
 	mux.HandleFunc("POST /api/config/preview", b.handleConfigPreview)
 	mux.HandleFunc("PUT /api/config", b.handleConfigPut)
-	mux.HandleFunc("GET /api/state", b.handleState)
+	mux.Handle("GET /api/state", maybeGzip(http.HandlerFunc(b.handleState)))
 	mux.HandleFunc("GET /poll", b.handlePoll)
-	mux.HandleFunc("/", b.handlePage)
+	mux.Handle("/", maybeGzip(http.HandlerFunc(b.handlePage)))
 
 	return mux
 }
+
+// maybeGzip compresses a response when the client accepts it. The
+// dashboard pages ship complete datagrid data sets and are re-fetched
+// on every state change, and nothing sits in front of backupd to
+// compress for it, so this is the difference between ~1 MB and tens
+// of KB per refresh on a loaded system. /poll stays uncompressed: its
+// 204s must not grow a body.
+func maybeGzip(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if !strings.Contains(req.Header.Get("Accept-Encoding"), "gzip") {
+			h.ServeHTTP(w, req)
+			return
+		}
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Add("Vary", "Accept-Encoding")
+		gz := gzip.NewWriter(w)
+		defer gz.Close()
+		h.ServeHTTP(gzipResponseWriter{ResponseWriter: w, gz: gz}, req)
+	})
+}
+
+type gzipResponseWriter struct {
+	http.ResponseWriter
+	gz *gzip.Writer
+}
+
+func (g gzipResponseWriter) Write(bs []byte) (int, error) { return g.gz.Write(bs) }
 
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -94,9 +122,10 @@ func (b *Backupd) handleSetPaused(paused bool) http.HandlerFunc {
 			verb = "resumed"
 		}
 		if dataset == "" {
-			b.globalLogs.Printf("%s globally via api", verb)
+			b.event(history.Info, nil, "%s globally via api", verb)
 		} else {
-			b.globalLogs.Printf("%s '%s' via api", verb, dataset)
+			name := model.DatasetName(dataset)
+			b.event(history.Info, &name, "%s via api", verb)
 		}
 		writeJSON(w, map[string]any{"ok": true})
 	}
@@ -146,6 +175,7 @@ func (b *Backupd) handleSnapshot(w http.ResponseWriter, req *http.Request) {
 	b.history.RecordOp(history.Op{
 		At:        time.Now(),
 		Operation: fmt.Sprintf("recursive %s snapshot", periodicity),
+		Kind:      "snapshot",
 	})
 	b.notifyStateChange()
 	w.WriteHeader(http.StatusOK)
@@ -252,7 +282,7 @@ func (b *Backupd) handleConfigPut(w http.ResponseWriter, req *http.Request) {
 	// (or a sync-now).
 	b.generatePlansForAllDatasets(req.Context())
 	b.notifyStateChange()
-	b.globalLogs.Printf("config updated via api")
+	b.event(history.Info, nil, "config updated via api")
 	writeJSON(w, map[string]any{"ok": true})
 }
 
@@ -330,6 +360,27 @@ type apiActivity struct {
 	Cycle               apiCycleProgress `json:"cycle"`
 }
 
+// apiCycleRun serializes one collapsed run of consecutive
+// same-outcome cycles.
+type apiCycleRun struct {
+	Outcome    string    `json:"outcome"`
+	Count      int       `json:"count"`
+	First      time.Time `json:"first"`
+	Last       time.Time `json:"last"`
+	AvgSeconds int64     `json:"avgSeconds"`
+	Detail     string    `json:"detail,omitempty"`
+}
+
+// apiEvent serializes one journal entry.
+type apiEvent struct {
+	At    time.Time `json:"at"`
+	Level string    `json:"level"`
+	// Dataset is the affected dataset's path (empty string is the root
+	// dataset); absent for daemon-level events.
+	Dataset *string `json:"dataset,omitempty"`
+	Message string  `json:"message"`
+}
+
 func secondsPtr(has bool, d time.Duration) *int64 {
 	if !has {
 		return nil
@@ -388,6 +439,39 @@ func (b *Backupd) handleState(w http.ResponseWriter, req *http.Request) {
 		issues = append(issues, out)
 	}
 
+	// Raw cycles are capped: a long-running daemon holds weeks of them,
+	// and the collapsed runs are the long-horizon serialization.
+	cycles := d.Cycles
+	if len(cycles) > 50 {
+		cycles = cycles[:50]
+	}
+
+	runs := []apiCycleRun{}
+	for _, r := range sys.Runs {
+		runs = append(runs, apiCycleRun{
+			Outcome:    r.Outcome.String(),
+			Count:      r.Count,
+			First:      r.First,
+			Last:       r.Last,
+			AvgSeconds: int64(r.AvgDuration.Seconds()),
+			Detail:     r.Detail,
+		})
+	}
+
+	events := []apiEvent{}
+	for _, e := range d.Events {
+		out := apiEvent{
+			At:      e.At,
+			Level:   string(e.Level),
+			Message: e.Message,
+		}
+		if e.Dataset != nil {
+			path := e.Dataset.Path()
+			out.Dataset = &path
+		}
+		events = append(events, out)
+	}
+
 	resp := struct {
 		Verdict  string            `json:"verdict"`
 		Reason   string            `json:"reason,omitempty"`
@@ -397,6 +481,8 @@ func (b *Backupd) handleState(w http.ResponseWriter, req *http.Request) {
 		Activity apiActivity       `json:"activity"`
 		Datasets []apiDatasetState `json:"datasets"`
 		Cycles   []history.Cycle   `json:"cycles"`
+		Runs     []apiCycleRun     `json:"cycleRuns"`
+		Events   []apiEvent        `json:"events"`
 	}{
 		Verdict:  sys.Verdict.String(),
 		Reason:   sys.Reason,
@@ -405,7 +491,9 @@ func (b *Backupd) handleState(w http.ResponseWriter, req *http.Request) {
 		Issues:   issues,
 		Activity: act,
 		Datasets: []apiDatasetState{},
-		Cycles:   d.Cycles,
+		Cycles:   cycles,
+		Runs:     runs,
+		Events:   events,
 	}
 	if resp.Cycles == nil {
 		resp.Cycles = []history.Cycle{}
@@ -492,10 +580,10 @@ func (b *Backupd) pageData(page string) pageData {
 			Now:      time.Now(),
 			Boot:     b.boot,
 		}),
-		Cycles:     b.history.Cycles(),
-		Ops:        b.history.Ops(),
-		GlobalLogs: b.globalLogs.GetLogs(),
-		Dryrun:     b.dryrun,
+		Cycles: b.history.Cycles(),
+		Ops:    b.history.Ops(),
+		Events: b.history.Events(),
+		Dryrun: b.dryrun,
 	}
 }
 
