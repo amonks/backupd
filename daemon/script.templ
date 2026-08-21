@@ -195,12 +195,29 @@ templ script() {
 		window.scrollTo(0, scrolls.window);
 	}
 
+	// The poll is a long one — the server holds it for five minutes —
+	// which is the only thing pacing this loop while it succeeds. An
+	// error response is not an exception, so anything that answers
+	// immediately (a host's 401 once a session lapses, a 502 while the
+	// daemon restarts) would spin here at network speed, forever, with
+	// nothing to notice it but the load. So: back off on every
+	// non-success, and stop entirely on a refusal, where retrying
+	// cannot be what the operator wants — a reload puts them in front
+	// of whatever their host does about signing in.
 	async function poll() {
 		while (true) {
 			try {
 				const response = await fetch(BASE + '/poll');
+				if (response.status === 401 || response.status === 403) {
+					location.reload();
+					return;
+				}
 				if (response.ok && response.status === 200) {
 					await refreshBody();
+					continue;
+				}
+				if (response.status !== 204) {
+					await new Promise(resolve => setTimeout(resolve, 5000));
 				}
 			} catch (error) {
 				await new Promise(resolve => setTimeout(resolve, 5000));

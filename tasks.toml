@@ -1,9 +1,10 @@
-# The committed _templ.go files carry repo-root-relative FileNames, so
-# regenerating them means `go tool templ generate -path cmd/backupd` from
-# the repo root — note the flag: a positional path is ignored, and a bare
-# `templ generate` at the root rewrites every app's FileNames as well.
-# This task, run from the module dir, produces module-relative names
-# instead, which is why nothing depends on it (see `tidy` below).
+# This task is how the committed _templ.go files are produced: run from
+# the module dir, so their embedded FileNames are module-relative
+# (`daemon/layout.templ`). Generating from anywhere else — a bare
+# `templ generate` at the repo root, or `-path` pointed at a
+# subdirectory — writes different FileNames and dirties the tree, which
+# is worth knowing before reaching for either. Note also that a
+# positional path is ignored; the flag is `-path`.
 [[task]]
   id = "templ"
   type = "short"
@@ -12,21 +13,20 @@
 
 # This module publishes to a public mirror, so `publish-validate` checks it
 # with `GOWORK=off go mod tidy -diff`, and `generate` re-tidies only modules
-# that own a tidy task — see specs/publish.md. Unlike the other published
-# modules' tidy tasks this one does not depend on `templ`: the generated
-# `_templ.go` files are committed, so the import graph tidy sees is already
-# complete, and running `templ` here would rewrite them (this module's
-# committed copies were generated from the repo root rather than the module
-# dir, so their embedded FileNames differ from what the task emits).
+# that own a tidy task — see specs/publish.md.
 [[task]]
   id = "tidy"
   type = "short"
   cmd = "go mod tidy -e"
 
+# `generate` runs templ so CI's dirty-tree check verifies the committed
+# _templ.go files against their sources, the way it does for every other
+# templ app. That only works because this task and the committed files
+# agree on where generation runs from; see the templ task above.
 [[task]]
   id = "generate"
   type = "short"
-  dependencies = ["tidy"]
+  dependencies = ["tidy", "templ"]
 
 [[task]]
   id = 'test'

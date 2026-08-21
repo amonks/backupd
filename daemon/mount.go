@@ -24,6 +24,10 @@ import (
 // A host behind a reverse proxy that already sets X-Forwarded-Prefix
 // and strips the path — the usual deployment — needs none of this and
 // should register Handler directly.
+//
+// This is a deliberate twin of pkg/hermit/admin's Mount in the monks.co
+// monorepo, down to locationPrefixer: this module is published and must
+// not import from there. A fix to one is worth applying to the other.
 func (b *Daemon) Mount(prefix string) http.Handler {
 	inner := b.Handler()
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {

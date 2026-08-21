@@ -1,6 +1,8 @@
 package config
 
 import (
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/BurntSushi/toml"
@@ -165,5 +167,30 @@ func TestPolicyFor_KeyNormalization(t *testing.T) {
 	// The override defines no policies, so globals apply.
 	if local["daily"] != 90 {
 		t.Errorf("expected global local policy, got %v", local)
+	}
+}
+
+// TestPathHierarchyPrefersADirectoryOfItsOwn: saving a config is a
+// write to a temp file and a rename over the target, which needs write
+// permission on the directory. A daemon that is not root — the point of
+// local.escalate — therefore cannot pause itself with its config in a
+// root-owned /usr/local/etc, so the directory forms are searched first
+// and can be owned by whoever runs the daemon.
+func TestPathHierarchyPrefersADirectoryOfItsOwn(t *testing.T) {
+	var flatFirst, dirLast int
+	for i, path := range pathHierarchy {
+		if strings.HasSuffix(path, "/backupd/backupd.toml") {
+			dirLast = i
+		} else if flatFirst == 0 {
+			flatFirst = i
+		}
+	}
+	if dirLast > flatFirst {
+		t.Errorf("a flat path is searched before a directory one:\n%v", pathHierarchy)
+	}
+	for _, want := range []string{"/etc/backupd/backupd.toml", "/usr/local/etc/backupd/backupd.toml"} {
+		if !slices.Contains(pathHierarchy, want) {
+			t.Errorf("%s is not searched", want)
+		}
 	}
 }

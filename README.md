@@ -125,10 +125,20 @@ sudo mkdir -p /var/log
 ## Configuration
 
 Configuration is loaded from one of the following locations (in order of precedence):
+- `/etc/backupd/backupd.toml`
+- `/usr/local/etc/backupd/backupd.toml`
+- `/opt/local/etc/backupd/backupd.toml`
 - `/etc/backupd.toml`
 - `/usr/local/etc/backupd.toml`
 - `/opt/local/etc/backupd.toml`
 - `/Library/Application Support/co.monks.backupd/backupd.toml`
+
+The directory forms come first and exist for a daemon that is not root.
+Pausing and saving a config *edit the config file*, atomically — a write
+to a temp file and a rename — which needs write permission on the
+directory, not just on the file. A daemon running under `local.escalate`
+should be given a directory of its own, owned by whoever runs it, or its
+pause button returns a permission error.
 
 ### Configuration Structure
 
@@ -646,9 +656,12 @@ prefix — it already arrives over ssh as whichever user the key
 authenticates as.
 
 Cancelling a transfer kills the whole process group, not just the
-process the daemon started, because `sudo` does not exec its command: it
-forks and waits, so killing it would leave `zfs send` running with the
-pipe still open.
+process the daemon started: `sudo` forks and waits whenever it allocates
+a pty or logs I/O, so killing the wrapper alone can leave `zfs send`
+running with the pipe still open. Where the daemon lacks the privilege
+to signal what it escalated to — an unprivileged daemon cannot signal a
+root process group — the kill is best-effort, and what stops the send is
+the pipe closing behind it.
 
 ## Architecture
 

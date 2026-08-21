@@ -32,6 +32,10 @@ type LocalExecutor struct {
 	Escalate []string
 }
 
+// Local runs local commands with no escalation prefix, which is right
+// only for a daemon that already has the privilege — see
+// config.Config.Local.Escalate. env.New builds its own executor from
+// the config rather than using this one.
 var Local = &LocalExecutor{}
 
 // Exec runs the given command, returning its stdout and stderr as a combined
@@ -171,7 +175,10 @@ func Pipe(ctx context.Context, logger *logger.Logger, size int64, onProgress fun
 	// errgroup. If the context is canceled, kill the command before
 	// returning to the errgroup.
 	g.Go(func() error {
-		c := make(chan error)
+		// Buffered: on the cancellation path nobody reads this
+		// channel again, and an unbuffered send would park the
+		// goroutine for the life of the process.
+		c := make(chan error, 1)
 		go func() { c <- from.Wait() }()
 
 		select {
@@ -198,7 +205,7 @@ func Pipe(ctx context.Context, logger *logger.Logger, size int64, onProgress fun
 	// errgroup. If the context is canceled, kill the command before
 	// returning to the errgroup.
 	g.Go(func() error {
-		c := make(chan error)
+		c := make(chan error, 1)
 		go func() { c <- to.Wait() }()
 
 		select {

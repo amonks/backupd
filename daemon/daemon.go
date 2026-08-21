@@ -87,7 +87,15 @@ func New(opts Options) *Daemon {
 	if log == nil {
 		log = slog.Default()
 	}
-	logger.SetLogger(log)
+	// Only a host's own logger is installed as the ring sink. Passing
+	// slog.Default() here instead would work — its handler writes
+	// through the log package either way — but it would change the
+	// bytes the standalone daemon prints, and the documented default
+	// (logger.SetLogger, the README) is the "[label]\tline" form the
+	// published command has always written.
+	if opts.Logger != nil {
+		logger.SetLogger(opts.Logger)
+	}
 
 	b := &Daemon{
 		conf:       atom.New(opts.Config),

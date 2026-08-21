@@ -60,6 +60,12 @@ type Layout func(w http.ResponseWriter, r *http.Request, page Page) error
 // scoped to that element, so a layout can embed it anywhere in its
 // document without either stylesheet reaching the other. No user input
 // is emitted unescaped.
+//
+// One thing a host does need to know about the body: it loads the
+// monks-datagrid custom element, which the tables are built from. The
+// definition is guarded, so a host that already loads the same asset is
+// fine, but a host loading a different build of it would win or lose by
+// load order.
 type Page struct {
 	Title string
 	Body  template.HTML

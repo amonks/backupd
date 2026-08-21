@@ -16,6 +16,8 @@ import (
 // built from the mount point rather than assuming a root.
 
 var (
+	customPropRE = regexp.MustCompile(`(--[a-z0-9-]+)\s*:`)
+	varUseRE     = regexp.MustCompile(`var\((--[a-z0-9-]+)`)
 	styleBlockRE = regexp.MustCompile(`(?s)<style([^>]*)>(.*?)</style>`)
 	urlAttrRE    = regexp.MustCompile(`(?:href|action|data-api)="([^"]*)"`)
 	keyframesRE  = regexp.MustCompile(`@keyframes\s+([A-Za-z0-9_-]+)`)
@@ -387,5 +389,34 @@ func TestPageTitlesNameThePageNotTheProgram(t *testing.T) {
 	standalone, _ := newAPITestDaemon(t, local, remote)
 	if body := renderPage(t, standalone, "/global", ""); !strings.Contains(body, "<title>backupd — Overview</title>") {
 		t.Error("the standalone document's title does not name the program")
+	}
+}
+
+// Every custom property the stylesheet reads must be one it defines: a
+// typo'd var() is not an error, it is a rule that silently does
+// nothing, and embedded there is a host stylesheet nearby whose
+// property of that name might even resolve.
+func TestEveryCustomPropertyIsDefined(t *testing.T) {
+	var page Page
+	b := embeddedDaemon(t, &page)
+	primeState(t, b)
+	renderPage(t, b, "/global", "")
+
+	css := strings.Join(ownStyles(t, string(page.Body)), "\n")
+	defined := map[string]bool{}
+	for _, m := range customPropRE.FindAllStringSubmatch(css, -1) {
+		defined[m[1]] = true
+	}
+	used := map[string]bool{}
+	for _, m := range varUseRE.FindAllStringSubmatch(css, -1) {
+		used[m[1]] = true
+	}
+	if len(used) == 0 {
+		t.Fatal("no var() uses found; the extraction regex is stale")
+	}
+	for name := range used {
+		if !defined[name] {
+			t.Errorf("stylesheet reads %s but never defines it", name)
+		}
 	}
 }

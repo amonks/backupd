@@ -15,6 +15,7 @@ import (
 	"monks.co/backupd/config"
 	"monks.co/backupd/history"
 	"monks.co/backupd/model"
+	"monks.co/backupd/status"
 	"monks.co/backupd/view"
 )
 
@@ -575,13 +576,20 @@ func (b *Daemon) handlePoll(w http.ResponseWriter, req *http.Request) {
 // It is a snapshot, computed on call, and safe to call concurrently
 // with the sync loop.
 func (b *Daemon) View() view.System {
-	state := b.state.Deref()
-	conf := b.conf.Deref()
+	return b.viewOf(b.state.Deref(), b.conf.Deref(), b.activity.Get())
+}
+
+// viewOf is the one place the derivation is assembled. Both View and
+// the page render go through it, so "an exported metric cannot disagree
+// with the dashboard" is structural rather than two literals somebody
+// keeps in step. It takes its inputs rather than reading them because
+// the page needs the same activity snapshot it lays out elsewhere.
+func (b *Daemon) viewOf(state *model.Model, conf *config.Config, activity status.Activity) view.System {
 	return view.Compute(view.Input{
 		State:    state,
 		Conf:     conf,
 		History:  b.history,
-		Activity: b.activity.Get(),
+		Activity: activity,
 		Now:      time.Now(),
 		Boot:     b.boot,
 	})
@@ -602,18 +610,11 @@ func (b *Daemon) pageData(req *http.Request, page string) pageData {
 		State:      state,
 		Conf:       conf,
 		Activity:   activity,
-		Sys: view.Compute(view.Input{
-			State:    state,
-			Conf:     conf,
-			History:  b.history,
-			Activity: activity,
-			Now:      time.Now(),
-			Boot:     b.boot,
-		}),
-		Cycles: b.history.Cycles(),
-		Ops:    b.history.Ops(),
-		Events: b.history.Events(),
-		Dryrun: b.dryrun,
+		Sys:        b.viewOf(state, conf, activity),
+		Cycles:     b.history.Cycles(),
+		Ops:        b.history.Ops(),
+		Events:     b.history.Events(),
+		Dryrun:     b.dryrun,
 	}
 }
 

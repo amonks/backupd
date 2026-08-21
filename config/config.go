@@ -197,7 +197,20 @@ func normalizeOverrideKey(key string) string {
 	return key
 }
 
+// pathHierarchy is where Load looks, in order.
+//
+// The directory forms come first, and exist for a daemon that is not
+// root. Saving edits the config file, which Save does as a write to a
+// temp file and a rename over the target — and that needs write
+// permission on the *directory*, not the file, so a daemon running as
+// an ordinary user cannot pause itself with its config sitting in
+// /usr/local/etc. Giving it a directory of its own, owned by whoever
+// runs it, is the arrangement that makes pause, resume, and the config
+// editor work at all under `local.escalate`.
 var pathHierarchy = []string{
+	"/etc/backupd/backupd.toml",
+	"/usr/local/etc/backupd/backupd.toml",
+	"/opt/local/etc/backupd/backupd.toml",
 	"/etc/backupd.toml",
 	"/usr/local/etc/backupd.toml",
 	"/opt/local/etc/backupd.toml",
