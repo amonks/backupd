@@ -8,6 +8,6 @@ require (
 	github.com/dustin/go-humanize v1.0.1
 	golang.org/x/sync v0.22.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
-	monks.co/pkg/datagrid v0.0.1
+	monks.co/pkg/datagrid v0.0.2
 	pgregory.net/rapid v1.2.0
 )
