@@ -184,28 +184,30 @@ templ factsTable(d pageData, name model.DatasetName, dv view.Dataset) {
 templ fulfillmentTable(dv view.Dataset) {
 	if len(dv.Fulfillment) > 0 {
 		<h2>Retention Fulfillment</h2>
-		<table style="max-width: 32rem;">
-			<thead>
-				<tr>
-					<th>periodicity</th>
-					<th class="num">local (have / want)</th>
-					<th class="num">remote (have / want)</th>
-				</tr>
-			</thead>
-			<tbody>
-				for _, row := range dv.Fulfillment {
+		<div class="table-scroll">
+			<table style="max-width: 32rem;">
+				<thead>
 					<tr>
-						<td>{ row.Periodicity }</td>
-						<td class="num">
-							@fulfillmentCell(row.LocalHave, row.LocalWant)
-						</td>
-						<td class="num">
-							@fulfillmentCell(row.RemoteHave, row.RemoteWant)
-						</td>
+						<th>periodicity</th>
+						<th class="num">local (have / want)</th>
+						<th class="num">remote (have / want)</th>
 					</tr>
-				}
-			</tbody>
-		</table>
+				</thead>
+				<tbody>
+					for _, row := range dv.Fulfillment {
+						<tr>
+							<td>{ row.Periodicity }</td>
+							<td class="num">
+								@fulfillmentCell(row.LocalHave, row.LocalWant)
+							</td>
+							<td class="num">
+								@fulfillmentCell(row.RemoteHave, row.RemoteWant)
+							</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		</div>
 	}
 }
 
@@ -230,72 +232,74 @@ templ planSection(d pageData, name model.DatasetName, ds *model.Dataset) {
 				— { fmt.Sprint(len(ds.Plan.Steps)) } steps, { fmt.Sprint(dv.StepsDone) } done
 			</span>
 		</h2>
-		<table>
-			<thead>
-				<tr>
-					<th class="num">#</th>
-					<th>status</th>
-					<th>operation</th>
-					<th>started</th>
-					<th class="num">duration</th>
-				</tr>
-			</thead>
-			<tbody>
-				for i, step := range ds.Plan.Steps {
+		<div class="table-scroll">
+			<table>
+				<thead>
 					<tr>
-						<td class="num">{ fmt.Sprint(i + 1) }</td>
-						<td>
-							@renderStepStatus(step.Status)
-						</td>
-						<td><code>{ step.String() }</code></td>
-						<td>
-							if step.StartedAt != nil {
-								{ step.StartedAt.Format("15:04:05") }
-							} else {
-								<span class="muted">—</span>
-							}
-						</td>
-						<td class="num">
-							if dur := step.Duration(); dur > 0 {
-								{ dur.Round(time.Millisecond).String() }
-							} else {
-								<span class="muted">—</span>
-							}
-						</td>
+						<th class="num">#</th>
+						<th>status</th>
+						<th>operation</th>
+						<th>started</th>
+						<th class="num">duration</th>
 					</tr>
-					if step.Status == model.StepInProgress && d.Activity.Phase == status.Syncing && d.Activity.Dataset == name && d.Activity.Transfer != nil {
-						<tr class="step-progress">
-							<td></td>
-							<td colspan="4">
-								<progress max="100" value={ fmt.Sprintf("%.1f", d.Activity.Transfer.Percent()) }></progress>
-								<span class="progress-label">{ transferLabel(*d.Activity.Transfer) }</span>
+				</thead>
+				<tbody>
+					for i, step := range ds.Plan.Steps {
+						<tr>
+							<td class="num">{ fmt.Sprint(i + 1) }</td>
+							<td>
+								@renderStepStatus(step.Status)
+							</td>
+							<td><code>{ step.String() }</code></td>
+							<td>
+								if step.StartedAt != nil {
+									{ step.StartedAt.Format("15:04:05") }
+								} else {
+									<span class="muted">—</span>
+								}
+							</td>
+							<td class="num">
+								if dur := step.Duration(); dur > 0 {
+									{ dur.Round(time.Millisecond).String() }
+								} else {
+									<span class="muted">—</span>
+								}
 							</td>
 						</tr>
-					}
-					{{ var stepLogs []logger.LogEntry }}
-					{{ if step.Logs != nil { stepLogs = step.Logs.GetLogs() } }}
-					if len(stepLogs) > 0 {
-						{{ logs, elided := tailLogs(stepLogs, stepLogTail) }}
-						if elided > 0 {
-							<tr class="step-log">
+						if step.Status == model.StepInProgress && d.Activity.Phase == status.Syncing && d.Activity.Dataset == name && d.Activity.Transfer != nil {
+							<tr class="step-progress">
 								<td></td>
 								<td colspan="4">
-									<code class="log-message muted">… { fmt.Sprint(elided) } earlier lines (full record in the process log)</code>
+									<progress max="100" value={ fmt.Sprintf("%.1f", d.Activity.Transfer.Percent()) }></progress>
+									<span class="progress-label">{ transferLabel(*d.Activity.Transfer) }</span>
 								</td>
 							</tr>
 						}
-						for _, logEntry := range logs {
-							<tr class="step-log">
-								<td></td>
-								<td colspan="4">
-									<code class="log-message">{ logEntry.LogAt.Format("15:04:05") } { logEntry.Log }</code>
-								</td>
-							</tr>
+						{{ var stepLogs []logger.LogEntry }}
+						{{ if step.Logs != nil { stepLogs = step.Logs.GetLogs() } }}
+						if len(stepLogs) > 0 {
+							{{ logs, elided := tailLogs(stepLogs, stepLogTail) }}
+							if elided > 0 {
+								<tr class="step-log">
+									<td></td>
+									<td colspan="4">
+										<code class="log-message muted">… { fmt.Sprint(elided) } earlier lines (full record in the process log)</code>
+									</td>
+								</tr>
+							}
+							for _, logEntry := range logs {
+								<tr class="step-log">
+									<td></td>
+									<td colspan="4">
+										<code class="log-message">{ logEntry.LogAt.Format("15:04:05") } { logEntry.Log }</code>
+									</td>
+								</tr>
+							}
 						}
 					}
-				}
-			</tbody>
-		</table>
+				</tbody>
+			</table>
+		</div>
 	}
 }
 

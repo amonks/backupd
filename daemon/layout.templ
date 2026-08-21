@@ -173,12 +173,26 @@ func phaseClass(p status.Phase) string {
 	}
 }
 
+// sidebar holds the three groups in wrappers of their own rather than
+// as a flat run of children. Wide, that costs nothing; narrow, the
+// sidebar's box dissolves and these three become siblings of the
+// content, which is what lets the page links lead and the controls and
+// the dataset list follow (see the narrow block in styles).
+//
+// The <nav>s are the two groups that are navigation, not the column
+// that holds them: a row of Pause / Sync / Snapshot buttons is not a
+// set of links, and the column is only a column at one width anyway.
+// That also keeps the landmarks off the element the narrow block gives
+// `display: contents` — a property with a history of dropping the
+// element it is on out of the accessibility tree.
 templ sidebar(d pageData) {
-	<nav class="sidebar">
+	<div class="sidebar">
 		if !d.OmitNav {
-			for _, link := range Nav() {
-				<a href={ templ.SafeURL(Link(d.Base, link.Path)) } class={ "nav-link", templ.KV("active", isActive(d, link)) }>{ link.Label }</a>
-			}
+			<nav class="nav-links" aria-label="Pages">
+				for _, link := range Nav() {
+					<a href={ templ.SafeURL(Link(d.Base, link.Path)) } class={ "nav-link", templ.KV("active", isActive(d, link)) }>{ link.Label }</a>
+				}
+			</nav>
 		}
 		<div class="controls">
 			if d.Conf.Paused {
@@ -197,11 +211,13 @@ templ sidebar(d pageData) {
 				<button class="btn" id="snapshot-btn">Snapshot</button>
 			</div>
 		</div>
-		<div class="side-heading">Datasets</div>
-		for _, dv := range d.Sys.Datasets {
-			@sidebarLink(d, dv)
-		}
-	</nav>
+		<nav class="datasets" aria-label="Datasets">
+			<div class="side-heading">Datasets</div>
+			for _, dv := range d.Sys.Datasets {
+				@sidebarLink(d, dv)
+			}
+		</nav>
+	</div>
 }
 
 // sidebarLink shows one dataset: health dot (pulsing while its plan
@@ -309,7 +325,14 @@ templ styles() {
 			font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 		}
 		.backupd *, .backupd *::before, .backupd *::after { box-sizing: border-box; }
-		.backupd code { font-size: 0.9em; }
+		/* Every <code> on these pages holds a path, a snapshot name, or a
+		   ZFS error — one long token with no spaces to break at, which at
+		   a phone's width runs straight off the side of whatever holds
+		   it. break-word rather than anywhere: it breaks only a line that
+		   would otherwise overflow, and leaves intrinsic min-content
+		   widths alone, so a table's column algorithm sees what it saw
+		   before. */
+		.backupd code { font-size: 0.9em; overflow-wrap: break-word; }
 		.backupd a { color: inherit; }
 
 		/* The standalone shell: the daemon owns the document, so the
@@ -345,7 +368,13 @@ templ styles() {
 			flex-wrap: wrap;
 		}
 		.backupd .strip-cell { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
-		.backupd .strip-activity { flex: 1; }
+		/* The basis is what makes the strip wrap instead of crush. The
+		   activity cell holds a sentence, a progress bar and a transfer
+		   label; asked to share a row with a long verdict reason it will
+		   otherwise shrink to a column of one-word lines with the bar as
+		   a stub, because min-width: 0 lets it. A basis wide enough to be
+		   worth reading sends it to a row of its own first. */
+		.backupd .strip-activity { flex: 1 1 24rem; }
 		.backupd .strip-facts { margin-left: auto; gap: 1rem; color: var(--muted); font-size: 0.85rem; }
 		.backupd .strip-fact { white-space: nowrap; }
 		.backupd .strip-reason { color: var(--muted); font-size: 0.9rem; }
@@ -375,12 +404,17 @@ templ styles() {
 			overflow: hidden;
 			text-overflow: ellipsis;
 			white-space: nowrap;
-			max-width: 28rem;
+			/* A cap, not a width: 28rem is wider than a phone, where an
+			   uncapped chip pushes the strip off the screen instead of
+			   ellipsing. */
+			max-width: min(28rem, 100%);
 			display: inline-block;
 			vertical-align: bottom;
 		}
 		.backupd .countdown { color: var(--muted); font-variant-numeric: tabular-nums; }
-		.backupd progress { width: 10rem; height: 0.6rem; accent-color: var(--syncing); }
+		/* flex: none for the same reason: in the strip the bar is a fixed
+		   gauge, and a shrunk one reads as a different number. */
+		.backupd progress { width: 10rem; height: 0.6rem; accent-color: var(--syncing); flex: none; }
 		.backupd .progress-label { color: var(--muted); font-size: 0.85rem; font-variant-numeric: tabular-nums; }
 		.backupd .dot, .backupd .phase-dot {
 			width: 10px; height: 10px;
@@ -462,7 +496,10 @@ templ styles() {
 		.backupd .btn.small { padding: 0.15rem 0.5rem; font-size: 0.8rem; }
 
 		/* Content */
-		.backupd h1 { font-size: 1.4rem; margin: 0.25rem 0 1rem; }
+		/* break-word for the same reason <code> carries it: the h1 on a
+		   dataset page is a ZFS path, and a slash is not a break
+		   opportunity. */
+		.backupd h1 { font-size: 1.4rem; margin: 0.25rem 0 1rem; overflow-wrap: break-word; }
 		.backupd h1 .chip { vertical-align: middle; margin-left: 0.5rem; }
 		.backupd h2 { font-size: 1.05rem; margin: 1.5rem 0 0.5rem; }
 		/* Plain tables (facts, fulfillment, plan). The datagrid tables
@@ -472,6 +509,12 @@ templ styles() {
 		.backupd th:not(monks-datagrid *), .backupd td:not(monks-datagrid *) { padding: 0.3em 0.9em 0.3em 0; text-align: left; border-bottom: 1px solid var(--border); vertical-align: baseline; }
 		.backupd th:not(monks-datagrid *) { font-weight: 600; font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
 		.backupd td.num, .backupd th.num { text-align: right; font-variant-numeric: tabular-nums; }
+		/* A column-shaped table — one whose cells mean nothing stacked —
+		   scrolls inside its own box rather than widening the page. The
+		   table keeps width:100% and no min-width, so it squeezes first
+		   and only scrolls once something in it genuinely cannot fit. */
+		.backupd .table-scroll { overflow-x: auto; margin-bottom: 1rem; }
+		.backupd .table-scroll table:not(monks-datagrid *) { margin-bottom: 0; }
 		.backupd .muted { color: var(--muted); }
 		.backupd .error-text { color: var(--failing); }
 		.backupd .stale-text { color: var(--atrisk); font-weight: 500; }
@@ -503,7 +546,10 @@ templ styles() {
 		.backupd .issue-info { border-left-color: var(--paused); background: var(--paused-bg); }
 		.backupd .issue-summary { font-weight: 600; }
 		.backupd .issue-since { color: var(--muted); font-size: 0.85rem; }
-		.backupd .issue-detail { flex-basis: 100%; font-size: 0.85rem; color: var(--detail); font-family: monospace; white-space: pre-wrap; }
+		/* pre-wrap keeps the detail's own line breaks, but it does not
+		   break a long unbroken run — and these details are snapshot
+		   names and ZFS paths, which is exactly that. */
+		.backupd .issue-detail { flex-basis: 100%; font-size: 0.85rem; color: var(--detail); font-family: monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 		.backupd .issue .btn { margin-left: auto; }
 
 		/* Now (cycle progress) */
@@ -570,5 +616,149 @@ templ styles() {
 			font-size: 0.85rem;
 		}
 		.backupd .impact-note { color: var(--muted); font-size: 0.9rem; }
+
+		/* ---- Touch ----------------------------------------------------
+		   Two things change when there is no pointer to hover with, and
+		   neither is a question of width: a tablet in landscape has the
+		   width and still has fingers.
+
+		   16px is the size below which a phone browser zooms the page in
+		   to meet a field taking focus, and it never zooms back out — so
+		   every control you type into is floored there. Everything on
+		   these pages is deliberately smaller than that: this is a dense
+		   dashboard read at a desk, and the floor is a separate rule so
+		   the desk keeps its density. An ops host may well floor its own
+		   controls the same way (monks.co/pkg/opsui does), but a daemon
+		   that can be embedded anywhere cannot count on it.
+
+		   16px, not 1rem: the zoom threshold is an absolute computed
+		   size, and a host that sets a root font-size below 100% would
+		   leave a 1rem floor under it with the trap still open.
+
+		   !important for the reason opsui's own floor carries it: the
+		   floor has to win against rules that legitimately size a control
+		   smaller, and one of them is right here — #config-editor sets a
+		   font-size from an id, which outranks any selector this block
+		   could write. Without it the config editor is the one control on
+		   these pages you actually type into and the one the floor misses.
+
+		   The search fields inside a datagrid are floored from here too,
+		   reaching across a boundary the rest of this sheet respects. The
+		   better home is monks.co/pkg/datagrid's own stylesheet, where
+		   every consumer would get it; until it has one, a grid whose
+		   search box zooms the page is this page's problem, and an
+		   embedded grid is inside .backupd either way. Nothing is typed
+		   into a checkbox or a radio, so neither zooms and neither wants
+		   the size.
+
+		   The buttons follow the fields up rather than staying at
+		   0.85rem: they sit in the same rows, a 12px button against 16px
+		   text reads as a mistake, and they are the tap targets. 29px of
+		   button clears the WCAG 2.5.8 minimum and neither platform's
+		   own. .small does not stay small here — it is used for exactly
+		   one thing, the remedy button on an issue card, which on a phone
+		   is the likeliest thing in the whole app to be tapped: you
+		   opened the dashboard because something was red. */
+		@media (hover: none) {
+			.backupd select,
+			.backupd textarea,
+			.backupd input:not([type="checkbox"]):not([type="radio"]) { font-size: 16px !important; }
+			.backupd .btn, .backupd .btn.small { font-size: 16px; padding: 0.7rem 1rem; }
+			.backupd .nav-link, .backupd .dataset-link { padding-block: 0.55rem; }
+		}
+
+		/* ---- Narrow ---------------------------------------------------
+		   A 270px pane beside the content is most of a phone's width, so
+		   at 820px the shell stops being two panes. That number is where
+		   the pane stops leaving the content a readable measure — 270 of
+		   sidebar and 48 of gutter off 820 leaves about 500px of text,
+		   and below that the pane is taking more than it gives. It is
+		   also, not by accident, where monks.co/pkg/opsui's masthead
+		   wraps: on an ops page the chrome and the shell below it break
+		   at the same width rather than one at a time.
+
+		   `display: contents` dissolves the sidebar's box so its three
+		   groups become siblings of the content and can be ordered around
+		   it. The page links lead, the way a subnav does; the controls and
+		   the dataset list follow, because on a phone the page you asked
+		   for should be the thing under the fold, and both the dataset
+		   page and the overview carry the buttons that matter inline
+		   anyway. Nothing is hidden behind a toggle: the whole list stays
+		   on the page, one scroll away, and there is no open/closed state
+		   to lose — the live refresh replaces this subtree wholesale every
+		   time the daemon's state changes, which is often during a sync. */
+		@media (max-width: 820px) {
+			.backupd .shell { flex-direction: column; }
+			.backupd .sidebar { display: contents; }
+			.backupd .nav-links { order: 1; }
+			.backupd .main-content { order: 2; }
+			.backupd .controls { order: 3; }
+			.backupd .datasets { order: 4; }
+
+			/* Whichever shell we are in, the page scrolls as one. Two
+			   panes that scroll independently is a good desk and a bad
+			   phone: stacked, the second one is a scroll trap. */
+			.backupd.standalone { height: auto; }
+			.backupd.standalone .shell { flex: none; min-height: 0; }
+			.backupd.standalone .main-content { overflow-y: visible; }
+
+			/* The sidebar's padding went with its box; the groups carry
+			   their own, sized so link text lines up with the content's
+			   own 1rem gutter. */
+			.backupd .nav-links, .backupd .controls, .backupd .datasets { padding-inline: 0.5rem; }
+			.backupd .main-content { padding: 0.75rem 1rem; }
+
+			.backupd .nav-links {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 0.15rem;
+				padding-block: 0.4rem;
+				background: var(--surface);
+				border-bottom: 1px solid var(--border);
+			}
+			.backupd .nav-links .nav-link { margin-bottom: 0; }
+			.backupd .controls {
+				flex-direction: row;
+				flex-wrap: wrap;
+				margin: 0;
+				padding-block: 0.75rem;
+				border-top: 1px solid var(--border);
+			}
+			/* A child combinator, because the snapshot button is a .btn
+			   inside .snapshot-row and a descendant selector hands it a
+			   basis it then wins the row with — leaving the periodicity
+			   you read a sixth of the width and the button you tap two
+			   thirds of it. */
+			.backupd .controls > .btn { flex: 1 1 8rem; }
+			.backupd .controls .snapshot-row { flex: 1 1 14rem; }
+			.backupd .datasets { padding-bottom: 1rem; }
+
+			/* The strip's three cells each take a row. Left to flex, the
+			   verdict's reason squeezes the activity cell to a column of
+			   single words and the countdown lands off the screen. */
+			.backupd .strip { gap: 0.3rem 1rem; padding: 0.5rem 0.75rem; }
+			.backupd .strip-cell { flex-wrap: wrap; }
+			.backupd .strip-verdict, .backupd .strip-activity, .backupd .strip-facts { flex: 1 1 100%; }
+			.backupd .strip-facts { margin-left: 0; gap: 0.2rem 0.9rem; }
+			.backupd .strip-activity progress { width: auto; flex: 1 1 6rem; }
+
+			/* The facts table is label-and-value, not columns, so it
+			   stacks instead of scrolling: two columns at this width
+			   leave the value about ten characters. */
+			.backupd .facts, .backupd .facts tbody, .backupd .facts tr, .backupd .facts th, .backupd .facts td { display: block; }
+			.backupd .facts tr { padding: 0.45rem 0; border-bottom: 1px solid var(--border); }
+			.backupd .facts th, .backupd .facts td { padding: 0; border-bottom: none; }
+			.backupd .facts th { margin-bottom: 0.1rem; }
+
+			/* A plan step's log lines are already indented under their
+			   step by the table; another 2rem of it at this width leaves
+			   nothing to read them in. */
+			.backupd .log-message { padding-left: 0.5rem; }
+			.backupd .step-progress td { padding-left: 0.5rem; }
+			.backupd .step-progress progress { width: 100%; }
+
+			.backupd h1 { font-size: 1.25rem; }
+			.backupd .controls-row { flex-wrap: wrap; }
+		}
 	</style>
 }

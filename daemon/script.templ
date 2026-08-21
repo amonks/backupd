@@ -107,10 +107,10 @@ templ script() {
 			];
 			return '<tr>' + cells.map(c => `<td>${escapeHtml(String(c))}</td>`).join('') + '</tr>';
 		}).join('');
-		el.innerHTML = '<h2>Impact</h2><table><thead><tr>'
+		el.innerHTML = '<h2>Impact</h2><div class="table-scroll"><table><thead><tr>'
 			+ '<th>dataset</th><th>retention</th><th>pause</th>'
 			+ '<th>local deletions</th><th>remote deletions</th><th>transfers</th>'
-			+ '</tr></thead><tbody>' + rows + '</tbody></table>';
+			+ '</tr></thead><tbody>' + rows + '</tbody></table></div>';
 	}
 
 	function escapeHtml(s) {

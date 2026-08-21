@@ -21,8 +21,11 @@ var (
 	styleBlockRE = regexp.MustCompile(`(?s)<style([^>]*)>(.*?)</style>`)
 	urlAttrRE    = regexp.MustCompile(`(?:href|action|data-api)="([^"]*)"`)
 	keyframesRE  = regexp.MustCompile(`@keyframes\s+([A-Za-z0-9_-]+)`)
-	commentRE    = regexp.MustCompile(`(?s)/\*.*?\*/`)
-	scriptRE     = regexp.MustCompile(`(?s)<script[^>]*>.*?</script>`)
+	// The at-rules whose bodies hold ordinary rules, as opposed to
+	// @keyframes, whose body holds keyframe selectors.
+	conditionalAtRuleRE = regexp.MustCompile(`^@(media|supports|container|layer|scope)\b`)
+	commentRE           = regexp.MustCompile(`(?s)/\*.*?\*/`)
+	scriptRE            = regexp.MustCompile(`(?s)<script[^>]*>.*?</script>`)
 )
 
 // ownStyles returns the daemon's own style blocks from a rendered page,
@@ -272,19 +275,24 @@ func TestEmbeddedPageDeclaresNoColorScheme(t *testing.T) {
 	}
 }
 
-// selectors returns the selector of every rule in a flat stylesheet,
-// splitting selector lists on commas. The daemon's sheet is deliberately
-// flat — no @media, no nesting — so a rule head is either a selector
-// list or an at-rule.
+// selectors returns the selector of every rule in a stylesheet,
+// splitting selector lists on commas and descending into conditional
+// at-rules. The descent is the point: the sheet's responsive rules live
+// inside @media blocks, and a rule that reaches outside .backupd reaches
+// just as far for being wrapped in one. @keyframes is the at-rule that
+// is not descended into — its `from` / `to` / `50%` heads are not
+// selectors and match no element at all.
 func selectors(css string) []string {
 	css = commentRE.ReplaceAllString(css, "")
 	var out []string
-	start, depth := 0, 0
+	var head string
+	start, blockStart, depth := 0, 0, 0
 	for i, c := range css {
 		switch c {
 		case '{':
 			if depth == 0 {
-				head := strings.TrimSpace(css[start:i])
+				head = strings.TrimSpace(css[start:i])
+				blockStart = i + 1
 				if head != "" && !strings.HasPrefix(head, "@") {
 					for sel := range strings.SplitSeq(head, ",") {
 						if sel = strings.TrimSpace(sel); sel != "" {
@@ -297,11 +305,36 @@ func selectors(css string) []string {
 		case '}':
 			depth--
 			if depth == 0 {
+				if conditionalAtRuleRE.MatchString(head) {
+					out = append(out, selectors(css[blockStart:i])...)
+				}
 				start = i + 1
 			}
 		}
 	}
 	return out
+}
+
+// TestSelectorsDescendsIntoConditionalAtRules guards the guard: the
+// scoping test is only worth what its selector walk covers, and a walk
+// that stopped at a @media block would wave every responsive rule
+// through.
+func TestSelectorsDescendsIntoConditionalAtRules(t *testing.T) {
+	got := selectors(`
+		.a { color: red }
+		@media (max-width: 45rem) { .b, table { color: red } }
+		@keyframes spin { from { opacity: 0 } to { opacity: 1 } }
+		.c { color: red }
+	`)
+	want := []string{".a", ".b", "table", ".c"}
+	if len(got) != len(want) {
+		t.Fatalf("selectors() = %q, want %q", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("selectors()[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
 }
 
 // primeState refreshes the daemon from its fake environment, so pages
