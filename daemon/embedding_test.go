@@ -362,3 +362,30 @@ func TestViewMatchesTheDashboard(t *testing.T) {
 		t.Errorf("View's verdict %q does not appear on the page", sys.Verdict)
 	}
 }
+
+// TestPageTitlesNameThePageNotTheProgram: a host layout composes the
+// title with its own site's name, so a title of "backupd" reads as
+// "backupd — backups · ss.cx" on the page it labels.
+func TestPageTitlesNameThePageNotTheProgram(t *testing.T) {
+	var page Page
+	b := embeddedDaemon(t, &page)
+	primeState(t, b)
+
+	for path, want := range map[string]string{
+		"/global": "Overview",
+		"/config": "Config",
+		"/foo":    "foo",
+	} {
+		renderPage(t, b, path, "")
+		if page.Title != want {
+			t.Errorf("GET %s: title %q, want %q", path, page.Title, want)
+		}
+	}
+
+	// Standalone, nothing else names the program, so the document does.
+	local, remote := steadyStateExecutors()
+	standalone, _ := newAPITestDaemon(t, local, remote)
+	if body := renderPage(t, standalone, "/global", ""); !strings.Contains(body, "<title>backupd — Overview</title>") {
+		t.Error("the standalone document's title does not name the program")
+	}
+}

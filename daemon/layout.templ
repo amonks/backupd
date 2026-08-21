@@ -56,7 +56,7 @@ templ document(d pageData) {
 		<head>
 			<meta charset="utf-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
-			<title>{ pageTitle(d) }</title>
+			<title>{ "backupd — " + pageTitle(d) }</title>
 		</head>
 		<body class="backupd-standalone-body">
 			@pageBody(d)
@@ -93,13 +93,15 @@ templ pageBody(d pageData) {
 	</div>
 }
 
-// pageTitle names the page for a browser tab or a host layout.
+// pageTitle names the page — not the program. A host layout composes it
+// with its own site's name, and the standalone document adds "backupd"
+// itself, so returning "backupd" here would say it twice.
 func pageTitle(d pageData) string {
 	switch d.Page {
 	case "global":
-		return "backupd"
+		return "Overview"
 	case "config":
-		return "config"
+		return "Config"
 	case "":
 		return "root"
 	}
