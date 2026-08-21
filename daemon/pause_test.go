@@ -1,4 +1,4 @@
-package main
+package daemon
 
 import (
 	"context"
@@ -34,7 +34,7 @@ func TestSyncDatasetPausedGeneratesPlanButSkipsExecution(t *testing.T) {
 
 	conf := testConf()
 	conf.Overrides["/foo"].Paused = true
-	b := newTestBackupd(conf, local, remote)
+	b := newTestDaemon(conf, local, remote)
 	b.state.Swap(model.AddLocalDataset("/foo", []*model.Snapshot{snapA, snapB, snapC}, nil))
 	b.state.Swap(model.AddRemoteDataset("/foo", []*model.Snapshot{snapA}, nil))
 
@@ -65,7 +65,7 @@ func TestSyncDatasetPausedGeneratesPlanButSkipsExecution(t *testing.T) {
 // TestPauseTakesEffectAtStepBoundary: pausing mid-plan lets the in-flight
 // step finish and stops before the next one.
 func TestPauseTakesEffectAtStepBoundary(t *testing.T) {
-	var b *Backupd
+	var b *Daemon
 	local := &fakeExecutor{name: "local", handlers: []fakeHandler{
 		{match: "-t snapshot", rows: []string{
 			row("data/tank", snapA),
@@ -87,7 +87,7 @@ func TestPauseTakesEffectAtStepBoundary(t *testing.T) {
 		}},
 	}}
 
-	b = newTestBackupd(testConf(), local, remote)
+	b = newTestDaemon(testConf(), local, remote)
 	b.state.Swap(model.AddLocalDataset("/foo", []*model.Snapshot{snapA, snapB, snapC}, nil))
 	b.state.Swap(model.AddRemoteDataset("/foo", []*model.Snapshot{snapA}, nil))
 
@@ -125,7 +125,7 @@ func TestGlobalPauseSuppressesSnitch(t *testing.T) {
 	conf := testConf()
 	conf.SnitchID = "test-snitch"
 	conf.Paused = true
-	b := newTestBackupd(conf, local, remote)
+	b := newTestDaemon(conf, local, remote)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -136,7 +136,7 @@ func TestGlobalPauseSuppressesSnitch(t *testing.T) {
 		return nil, ctx.Err()
 	}
 
-	if err := b.Sync(ctx); !errors.Is(err, context.Canceled) {
+	if err := b.Run(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected Sync to return on cancellation, got: %v", err)
 	}
 	if snitched {
@@ -148,7 +148,7 @@ func TestSnitchPingsWhenNotPaused(t *testing.T) {
 	local, remote := steadyStateExecutors()
 	conf := testConf()
 	conf.SnitchID = "test-snitch"
-	b := newTestBackupd(conf, local, remote)
+	b := newTestDaemon(conf, local, remote)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -159,7 +159,7 @@ func TestSnitchPingsWhenNotPaused(t *testing.T) {
 		return nil, ctx.Err()
 	}
 
-	if err := b.Sync(ctx); !errors.Is(err, context.Canceled) {
+	if err := b.Run(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected Sync to return on cancellation, got: %v", err)
 	}
 	if !snitched {
@@ -172,7 +172,7 @@ func TestSnitchPingsWhenNotPaused(t *testing.T) {
 func TestSyncNowGlobalWakesIdle(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		local, remote := steadyStateExecutors()
-		b := newTestBackupd(testConf(), local, remote)
+		b := newTestDaemon(testConf(), local, remote)
 
 		if !b.TriggerSync(true, "") {
 			t.Fatal("TriggerSync returned false")
@@ -193,7 +193,7 @@ func TestSyncNowGlobalWakesIdle(t *testing.T) {
 func TestSyncNowDatasetSyncsDuringIdle(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		local, remote := steadyStateExecutors()
-		b := newTestBackupd(testConf(), local, remote)
+		b := newTestDaemon(testConf(), local, remote)
 		b.state.Swap(model.AddLocalDataset("/foo", []*model.Snapshot{snapA}, nil))
 		b.state.Swap(model.AddRemoteDataset("/foo", []*model.Snapshot{snapA}, nil))
 
@@ -238,7 +238,7 @@ func TestReloadConfigFromDisk(t *testing.T) {
 	}
 
 	local, remote := steadyStateExecutors()
-	b := newTestBackupd(conf, local, remote)
+	b := newTestDaemon(conf, local, remote)
 
 	// A hand-edit is picked up.
 	if err := os.WriteFile(path, []byte("paused = true\n"+reloadTestConfig), 0o644); err != nil {

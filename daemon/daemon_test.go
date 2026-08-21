@@ -1,20 +1,18 @@
-package main
+package daemon
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
 
-	"monks.co/backupd/atom"
 	"monks.co/backupd/config"
 	"monks.co/backupd/env"
-	"monks.co/backupd/history"
 	"monks.co/backupd/logger"
 	"monks.co/backupd/model"
-	"monks.co/backupd/status"
 )
 
 // fakeExecutor implements env.Executor. Each command is matched against the
@@ -50,6 +48,15 @@ func (f *fakeExecutor) Execf(logger *logger.Logger, s string, args ...any) ([]st
 	return f.Exec(logger, strings.Fields(fmt.Sprintf(s, args...))...)
 }
 
+// Command records the invocation the way Exec does and returns a
+// command that cannot run: these tests never execute a transfer pipe,
+// and a fake that silently shelled out would be worse than one that
+// fails loudly.
+func (f *fakeExecutor) Command(args ...string) *exec.Cmd {
+	f.calls = append(f.calls, strings.Join(args, " "))
+	return exec.Command("false")
+}
+
 func (f *fakeExecutor) calledMatching(substr string) bool {
 	for _, call := range f.calls {
 		if strings.Contains(call, substr) {
@@ -72,27 +79,18 @@ func testConf() *config.Config {
 	return conf
 }
 
-func newTestBackupd(conf *config.Config, local, remote *fakeExecutor) *Backupd {
-	b := &Backupd{
-		conf:       atom.New(conf),
-		state:      atom.New[*model.Model](nil),
-		globalLogs: logger.New("global"),
-		env: &env.Env{
+func newTestDaemon(conf *config.Config, local, remote *fakeExecutor) *Daemon {
+	b := New(Options{
+		Config: conf,
+		Env: &env.Env{
 			Local:  env.NewZFS(conf.Local.Root, local),
 			Remote: env.NewZFS(conf.Remote.Root, remote),
 		},
-		addr:      "127.0.0.1:0",
-		version:   atom.New[int64](0),
-		versionCh: make(chan struct{}, 1),
-		syncNow:   make(chan syncRequest, 16),
-		history:   history.New(),
-	}
-	b.activity = status.New(b.notifyStateChange)
+	})
 	b.resume = func(context.Context, *logger.Logger, model.DatasetName, string) error {
 		return fmt.Errorf("unexpected resume call")
 	}
 	b.snitch = func(string) error { return nil }
-	b.wait = b.waitWake
 	b.state.Reset(model.New())
 	return b
 }
@@ -127,7 +125,7 @@ func TestSyncRetriesWithBackoffWhenRemoteIsDown(t *testing.T) {
 		{match: "-t filesystem", err: fmt.Errorf("running 'ssh': exit status 255: kex_exchange_identification: read: Connection reset by peer")},
 	}}
 
-	b := newTestBackupd(testConf(), local, remote)
+	b := newTestDaemon(testConf(), local, remote)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var waits []time.Duration
@@ -139,7 +137,7 @@ func TestSyncRetriesWithBackoffWhenRemoteIsDown(t *testing.T) {
 		return nil, ctx.Err()
 	}
 
-	if err := b.Sync(ctx); !errors.Is(err, context.Canceled) {
+	if err := b.Run(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected Sync to return only on cancellation, got: %v", err)
 	}
 
@@ -181,7 +179,7 @@ func TestSyncBackoffResetsAfterSuccessfulCycle(t *testing.T) {
 	}}
 	remote := &fakeExecutor{name: "remote", handlers: failing}
 
-	b := newTestBackupd(testConf(), local, remote)
+	b := newTestDaemon(testConf(), local, remote)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var waits []time.Duration
@@ -198,7 +196,7 @@ func TestSyncBackoffResetsAfterSuccessfulCycle(t *testing.T) {
 		return nil, ctx.Err()
 	}
 
-	if err := b.Sync(ctx); !errors.Is(err, context.Canceled) {
+	if err := b.Run(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected Sync to return only on cancellation, got: %v", err)
 	}
 
@@ -240,7 +238,7 @@ func TestSyncDatasetPlansFromRefreshedInventory(t *testing.T) {
 		{match: "zfs destroy", rows: nil},
 	}}
 
-	b := newTestBackupd(testConf(), local, remote)
+	b := newTestDaemon(testConf(), local, remote)
 	// Cycle-start state is stale: it predates snapshot C existing locally
 	// and having been transferred to the remote.
 	b.state.Swap(model.AddLocalDataset("/foo", []*model.Snapshot{snapA, snapB}, nil))
@@ -282,7 +280,7 @@ func TestSyncDatasetResumeFailureStillDeletes(t *testing.T) {
 		{match: "zfs destroy", rows: nil},
 	}}
 
-	b := newTestBackupd(testConf(), local, remote)
+	b := newTestDaemon(testConf(), local, remote)
 	b.resume = func(context.Context, *logger.Logger, model.DatasetName, string) error {
 		return fmt.Errorf("process error: 'to' command error: exit status 1 (cannot receive resume stream: out of space)")
 	}
@@ -331,7 +329,7 @@ func TestSyncDatasetUnresumableTransferIsAborted(t *testing.T) {
 		{match: "zfs destroy", rows: nil},
 	}}
 
-	b := newTestBackupd(testConf(), local, remote)
+	b := newTestDaemon(testConf(), local, remote)
 	b.resume = func(context.Context, *logger.Logger, model.DatasetName, string) error {
 		return fmt.Errorf("getting size of resume: running 'zfs': exit status 1: cannot resume send: 'data/tank/foo@daily-2026-07-02-01:00:00' used in the initial send no longer exists")
 	}

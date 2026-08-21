@@ -16,6 +16,12 @@ const readOnly = false
 type Executor interface {
 	Exec(logger *logger.Logger, cmd ...string) ([]string, error)
 	Execf(logger *logger.Logger, cmd string, args ...any) ([]string, error)
+
+	// Command builds a command without running it, for the two halves
+	// of a transfer pipe. It is the same invocation Exec would run, so
+	// a local executor's escalation prefix and a remote's ssh wrapper
+	// apply to piped transfers exactly as they do to everything else.
+	Command(args ...string) *exec.Cmd
 }
 
 type ZFS struct {
@@ -26,6 +32,11 @@ type ZFS struct {
 
 func NewZFS(prefix string, x Executor) *ZFS {
 	return &ZFS{prefix, x, readOnly}
+}
+
+// Command builds one of this location's commands without running it.
+func (zfs *ZFS) Command(args ...string) *exec.Cmd {
+	return zfs.x.Command(args...)
 }
 
 func (zfs *ZFS) WithPrefix(dataset model.DatasetName) string {
@@ -50,12 +61,16 @@ func (zfs *ZFS) GetResumeToken(logger *logger.Logger, dataset model.DatasetName)
 	return value, nil
 }
 
-func (zfs *ZFS) Size(logger *logger.Logger, cmd *exec.Cmd) (int64, error) {
-	if cmd.Args[0] != "zfs" || cmd.Args[1] != "send" {
+// Size reports how many bytes a zfs send will move, by running the same
+// send with --dryrun. It takes the send's arguments rather than a built
+// command because the built command may carry an escalation prefix,
+// which belongs to the executor and not to the argument list.
+func (zfs *ZFS) Size(logger *logger.Logger, send []string) (int64, error) {
+	if len(send) < 2 || send[0] != "zfs" || send[1] != "send" {
 		return 0, fmt.Errorf("must be a zfs send command")
 	}
 
-	args := append(cmd.Args[:], "--dryrun", "--verbose", "--parsable")
+	args := append(append([]string{}, send...), "--dryrun", "--verbose", "--parsable")
 	out, err := zfs.x.Exec(logger, args...)
 	if err != nil {
 		return 0, fmt.Errorf("getting size of '%s': %w", strings.Join(args, " "), err)

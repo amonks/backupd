@@ -1,4 +1,4 @@
-package main
+package daemon
 
 // The dashboard's tables render through pkg/datagrid: the complete data
 // set travels with the page (every ring history holds is bounded), and
@@ -43,7 +43,7 @@ func rowIDForDataset(name model.DatasetName) string {
 	return name.Path()
 }
 
-func fleetGrid(datasets []view.Dataset) templ.Component {
+func fleetGrid(base string, datasets []view.Dataset) templ.Component {
 	return datagrid.Table(datagrid.Options[view.Dataset]{
 		ID:                "fleet",
 		PageSize:          50,
@@ -53,7 +53,7 @@ func fleetGrid(datasets []view.Dataset) templ.Component {
 			{
 				Key: "dataset", Label: "dataset", RowHeader: true,
 				Text:     func(dv view.Dataset) string { return dv.Name.String() },
-				Cell:     func(dv view.Dataset) templ.Component { return datasetLink(dv.Name) },
+				Cell:     func(dv view.Dataset) templ.Component { return datasetLink(base, dv.Name) },
 				FilterUI: datagrid.FilterNone,
 			},
 			{
@@ -151,7 +151,7 @@ func fleetGrid(datasets []view.Dataset) templ.Component {
 	}, datasets)
 }
 
-func opsGrid(ops []history.Op) templ.Component {
+func opsGrid(base string, ops []history.Op) templ.Component {
 	return datagrid.Table(datagrid.Options[history.Op]{
 		ID:                "ops",
 		SearchPlaceholder: "Search operations…",
@@ -169,7 +169,7 @@ func opsGrid(ops []history.Op) templ.Component {
 			{
 				Key: "dataset", Label: "dataset",
 				Text: func(op history.Op) string { return op.Dataset.String() },
-				Cell: func(op history.Op) templ.Component { return datasetLink(op.Dataset) },
+				Cell: func(op history.Op) templ.Component { return datasetLink(base, op.Dataset) },
 			},
 			{
 				Key: "operation", Label: "operation",
@@ -208,7 +208,7 @@ func opsGrid(ops []history.Op) templ.Component {
 	}, ops)
 }
 
-func journalGrid(events []history.Event) templ.Component {
+func journalGrid(base string, events []history.Event) templ.Component {
 	return datagrid.Table(datagrid.Options[history.Event]{
 		ID:                "journal",
 		SearchPlaceholder: "Search the journal…",
@@ -241,7 +241,7 @@ func journalGrid(events []history.Event) templ.Component {
 					if e.Dataset == nil {
 						return mutedDash()
 					}
-					return datasetLink(*e.Dataset)
+					return datasetLink(base, *e.Dataset)
 				},
 			},
 			{

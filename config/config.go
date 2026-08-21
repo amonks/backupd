@@ -29,6 +29,17 @@ type Config struct {
 	Local struct {
 		Policy map[string]int `toml:"policy"`
 		Root   string         `toml:"root"`
+		// Escalate is a command prefix applied to every local ZFS
+		// command — ["sudo", "-n"], ["doas"] — so the daemon can run
+		// as an ordinary user on a host where only root may drive
+		// zfs. Empty (the default) runs zfs directly, which requires
+		// the daemon itself to be root. Setting it is also what
+		// relaxes the CLI's own root check: a daemon that escalates
+		// per command is not supposed to be root.
+		//
+		// The remote side takes no prefix: it already arrives over
+		// ssh as whichever user the key authenticates as.
+		Escalate []string `toml:"escalate"`
 	} `toml:"local"`
 	Overrides map[string]*Override `toml:"overrides"`
 

@@ -40,6 +40,14 @@ type Interface interface {
 	// Snapshot creates a recursive snapshot of the local root, named
 	// <periodicity>-<timestamp>.
 	Snapshot(ctx context.Context, l *logger.Logger, root, periodicity string) error
+
+	// SetOnProgress installs the callback that receives cumulative
+	// progress for the in-flight transfer: bytes moved so far and the
+	// expected total. Transfers run one at a time, so one callback
+	// serves the whole environment. The daemon installs its own on
+	// construction, which is why this is part of the seam rather than a
+	// field on each implementation.
+	SetOnProgress(func(sent, total int64))
 }
 
 var _ Interface = &Env{}
@@ -71,3 +79,5 @@ func (env *Env) AbortRemoteResumable(l *logger.Logger, dataset model.DatasetName
 func (env *Env) Snapshot(ctx context.Context, l *logger.Logger, root, periodicity string) error {
 	return env.CreateSnapshotRecursively(ctx, l, root, periodicity)
 }
+
+func (env *Env) SetOnProgress(fn func(sent, total int64)) { env.OnProgress = fn }

@@ -1,4 +1,4 @@
-package main
+package daemon
 
 // script is the dashboard's client-side behavior. All event handlers
 // are delegated from `document` so they survive DOM replacement: state
@@ -7,6 +7,14 @@ package main
 // which keeps the page readable while a sync is writing progress.
 templ script() {
 	<script>
+	// ---- Mount point ---------------------------------------------------
+	// Every request the page makes is relative to where the dashboard is
+	// mounted, which the server wrote onto the root element. Reading it
+	// from the DOM rather than baking it into this script keeps the
+	// script a constant: the same bytes serve a root mount and a
+	// proxied sub-path.
+	const ROOT = document.currentScript.closest('.backupd');
+	const BASE = ROOT.dataset.base || '';
 	// ---- Countdowns ----------------------------------------------------
 	// Elements with data-until (ms since epoch) tick down client-side.
 	function formatUntil(ms) {
@@ -35,7 +43,7 @@ templ script() {
 		if (btn.dataset.confirm && !confirm(btn.dataset.confirm)) return;
 		btn.disabled = true;
 		try {
-			const res = await fetch(btn.dataset.api, { method: 'POST' });
+			const res = await fetch(BASE + btn.dataset.api, { method: 'POST' });
 			if (!res.ok) alert(await res.text());
 		} catch (err) {
 			alert(err);
@@ -51,7 +59,7 @@ templ script() {
 		if (!confirm(`Create a recursive ${periodicity} snapshot?`)) return;
 		btn.disabled = true;
 		try {
-			const res = await fetch(`/api/snapshot?periodicity=${periodicity}`, { method: 'POST' });
+			const res = await fetch(`${BASE}/api/snapshot?periodicity=${periodicity}`, { method: 'POST' });
 			if (!res.ok) alert(await res.text());
 		} catch (err) {
 			alert(err);
@@ -66,7 +74,7 @@ templ script() {
 		const el = document.getElementById('config-impacts');
 		let res;
 		try {
-			res = await fetch('/api/config/preview', { method: 'POST', body });
+			res = await fetch(BASE + '/api/config/preview', { method: 'POST', body });
 		} catch (err) {
 			el.innerHTML = '<pre class="config-error"></pre>';
 			el.querySelector('pre').textContent = String(err);
@@ -128,7 +136,7 @@ templ script() {
 		if (!confirm(msg)) return;
 		saveBtn.disabled = true;
 		try {
-			const res = await fetch('/api/config', { method: 'PUT', body: document.getElementById('config-editor').value });
+			const res = await fetch(BASE + '/api/config', { method: 'PUT', body: document.getElementById('config-editor').value });
 			if (!res.ok) {
 				alert(await res.text());
 				return;
@@ -157,6 +165,11 @@ templ script() {
 		return !!(a && a.matches && a.matches('monks-datagrid input, monks-datagrid textarea'));
 	}
 
+	// The swap replaces the dashboard element, not the document body:
+	// embedded in a host page, the body also holds chrome the daemon
+	// does not own and must not throw away. Scroll positions are
+	// restored for both shells — the standalone one scrolls its two
+	// panes, the embedded one scrolls the window.
 	async function refreshBody() {
 		for (let i = 0; i < 40 && gridBusy(); i++) {
 			await new Promise(resolve => setTimeout(resolve, 750));
@@ -164,23 +177,28 @@ templ script() {
 		const res = await fetch(location.href);
 		if (!res.ok) return;
 		const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
-		const sidebar = document.querySelector('.sidebar');
-		const main = document.querySelector('.main-content');
+		const fresh = doc.querySelector('.backupd');
+		const current = document.querySelector('.backupd');
+		if (!fresh || !current) return;
+		const sidebar = current.querySelector('.sidebar');
+		const main = current.querySelector('.main-content');
 		const scrolls = {
 			sidebar: sidebar ? sidebar.scrollTop : 0,
 			main: main ? main.scrollTop : 0,
+			window: window.scrollY,
 		};
-		document.body.replaceChildren(...doc.body.childNodes);
-		const newSidebar = document.querySelector('.sidebar');
-		const newMain = document.querySelector('.main-content');
+		current.replaceChildren(...fresh.childNodes);
+		const newSidebar = current.querySelector('.sidebar');
+		const newMain = current.querySelector('.main-content');
 		if (newSidebar) newSidebar.scrollTop = scrolls.sidebar;
 		if (newMain) newMain.scrollTop = scrolls.main;
+		window.scrollTo(0, scrolls.window);
 	}
 
 	async function poll() {
 		while (true) {
 			try {
-				const response = await fetch('/poll');
+				const response = await fetch(BASE + '/poll');
 				if (response.ok && response.status === 200) {
 					await refreshBody();
 				}
@@ -192,7 +210,7 @@ templ script() {
 
 	// The config page doesn't auto-refresh: a swap would clobber an
 	// in-progress edit.
-	if (window.location.pathname !== '/config') {
+	if (window.location.pathname !== BASE + '/config') {
 		poll();
 	}
 	</script>

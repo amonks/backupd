@@ -6,11 +6,13 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
 	"os/user"
 
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 
 	"monks.co/backupd/config"
+	"monks.co/backupd/daemon"
 	"monks.co/backupd/model"
 )
 
@@ -84,16 +86,21 @@ func run() error {
 		return runSim(NewSigctx(), addr)
 	}
 
-	// Root check (after help handling)
-	if whoami, err := user.Current(); err != nil {
-		return fmt.Errorf("getting user: %w", err)
-	} else if whoami.Username != "root" {
-		return fmt.Errorf("must be root, not '%s'", whoami)
-	}
-
 	conf, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
+	}
+
+	// Driving zfs takes privilege. Either the daemon has it — running
+	// as root, as it does by default — or the config names a way to
+	// escalate per command, in which case running as root would be the
+	// mistake.
+	if len(conf.Local.Escalate) == 0 {
+		if whoami, err := user.Current(); err != nil {
+			return fmt.Errorf("getting user: %w", err)
+		} else if whoami.Username != "root" {
+			return fmt.Errorf("must be root, not '%s' (or set local.escalate in the config)", whoami)
+		}
 	}
 
 	// The -addr flag wins over the config's listen setting.
@@ -105,34 +112,20 @@ func run() error {
 	}
 
 	ctx := NewSigctx()
-	b := New(conf, addr, dryrun)
 
-	// Execute subcommands
+	// Subcommands talk to the running daemon over its control API;
+	// they need its address and nothing else.
 	if len(args) > 0 {
 		switch args[0] {
 		case "snapshot":
-			return b.CreateSnapshot(ctx, args[1])
+			return daemon.CreateSnapshot(ctx, addr, args[1])
 		case "pause", "resume", "sync":
 			path := "/api/" + args[0]
 			if len(args) == 2 {
 				path += "?dataset=" + args[1]
 			}
-			return b.CallAPI(ctx, "POST", path)
+			return daemon.CallAPI(ctx, addr, "POST", path)
 		}
-	}
-
-	if debugDS != "" {
-		if debugDS == "<root>" {
-			debugDS = ""
-		}
-		logger := b.globalLogs
-		ds := model.DatasetName(debugDS)
-		if err := b.refreshDataset(ctx, logger, ds); err != nil {
-			return err
-		} else if err := b.Plan(ctx, ds); err != nil {
-			return err
-		}
-		return nil
 	}
 
 	if logfile != "" {
@@ -146,9 +139,14 @@ func run() error {
 		log.SetOutput(logger)
 	}
 
-	if err := b.Go(ctx); err != nil {
-		return err
+	d := daemon.New(daemon.Options{Config: conf, Dryrun: dryrun})
+
+	if debugDS != "" {
+		if debugDS == "<root>" {
+			debugDS = ""
+		}
+		return d.Debug(ctx, model.DatasetName(debugDS), os.Stdout)
 	}
 
-	return nil
+	return d.Go(ctx, addr)
 }

@@ -3,7 +3,6 @@ package env
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"path"
 
 	"monks.co/backupd/config"
@@ -22,7 +21,7 @@ type Env struct {
 
 func New(config *config.Config) *Env {
 	return &Env{
-		Local: NewZFS(config.Local.Root, Local),
+		Local: NewZFS(config.Local.Root, &LocalExecutor{Escalate: config.Local.Escalate}),
 		Remote: NewZFS(
 			config.Remote.Root,
 			NewRemote(
@@ -37,13 +36,11 @@ func (env *Env) Resume(ctx context.Context, logger *logger.Logger, dataset model
 	if env.Local.readOnly || env.Remote.readOnly {
 		panic("read only")
 	}
-	remote := env.Remote.x.(*Remote)
+	sendArgs := []string{"zfs", "send", "--raw", "-t", token}
+	send := env.Local.Command(sendArgs...)
+	recv := env.Remote.Command("zfs", "receive", "-s", env.Remote.WithPrefix(dataset))
 
-	send := exec.Command("zfs", "send", "--raw", "-t", token)
-	recv := exec.Command("ssh", "-i", remote.sshKey, remote.sshHost,
-		fmt.Sprintf("zfs receive -s %s", env.Remote.WithPrefix(dataset)))
-
-	size, err := env.Local.Size(logger, send)
+	size, err := env.Local.Size(logger, sendArgs)
 	if err != nil {
 		return fmt.Errorf("getting size of resume: %w", err)
 	}
@@ -59,8 +56,6 @@ func (env *Env) TransferInitialSnapshot(ctx context.Context, logger *logger.Logg
 	if env.Local.readOnly || env.Remote.readOnly {
 		panic("read only")
 	}
-	remote := env.Remote.x.(*Remote)
-
 	// Ensure parent dataset exists on the remote so zfs receive can create
 	// the leaf dataset. Without this, receives into nested paths like
 	// /home/thor fail because the intermediate /home dataset doesn't exist.
@@ -70,12 +65,12 @@ func (env *Env) TransferInitialSnapshot(ctx context.Context, logger *logger.Logg
 		}
 	}
 
-	send := exec.Command("zfs", "send", "--raw",
-		fmt.Sprintf("%s@%s", env.Local.WithPrefix(dataset), snapshot))
-	recv := exec.Command("ssh", "-i", remote.sshKey, remote.sshHost,
-		fmt.Sprintf("zfs receive -s %s", env.Remote.WithPrefix(dataset)))
+	sendArgs := []string{"zfs", "send", "--raw",
+		fmt.Sprintf("%s@%s", env.Local.WithPrefix(dataset), snapshot)}
+	send := env.Local.Command(sendArgs...)
+	recv := env.Remote.Command("zfs", "receive", "-s", env.Remote.WithPrefix(dataset))
 
-	size, err := env.Local.Size(logger, send)
+	size, err := env.Local.Size(logger, sendArgs)
 	if err != nil {
 		return fmt.Errorf("getting size of transfer '%s': %w", snapshot, err)
 	}
@@ -91,14 +86,12 @@ func (env *Env) TransferSnapshot(ctx context.Context, logger *logger.Logger, dat
 	if env.Local.readOnly || env.Remote.readOnly {
 		panic("read only")
 	}
-	remote := env.Remote.x.(*Remote)
+	sendArgs := []string{"zfs", "send", "--raw",
+		fmt.Sprintf("%s %s", env.Local.WithPrefix(dataset), snapshot)}
+	send := env.Local.Command(sendArgs...)
+	recv := env.Remote.Command("zfs", "receive", "-s", "-F", env.Remote.WithPrefix(dataset))
 
-	send := exec.Command("zfs", "send", "--raw",
-		fmt.Sprintf("%s %s", env.Local.WithPrefix(dataset), snapshot))
-	recv := exec.Command("ssh", "-i", remote.sshKey, remote.sshHost,
-		fmt.Sprintf("zfs receive -s -F %s", env.Remote.WithPrefix(dataset)))
-
-	size, err := env.Local.Size(logger, send)
+	size, err := env.Local.Size(logger, sendArgs)
 	if err != nil {
 		return fmt.Errorf("getting size of transfer '%s': %w", snapshot, err)
 	}
@@ -114,15 +107,13 @@ func (env *Env) TransferSnapshotIncrementally(ctx context.Context, logger *logge
 	if env.Local.readOnly || env.Remote.readOnly {
 		panic("read only")
 	}
-	remote := env.Remote.x.(*Remote)
-
-	send := exec.Command("zfs", "send", "--raw", "-i",
+	sendArgs := []string{"zfs", "send", "--raw", "-i",
 		fmt.Sprintf("%s@%s", env.Local.WithPrefix(dataset), from),
-		fmt.Sprintf("%s@%s", env.Local.WithPrefix(dataset), to))
-	recv := exec.Command("ssh", "-i", remote.sshKey, remote.sshHost,
-		fmt.Sprintf("zfs receive -s -F %s", env.Remote.WithPrefix(dataset)))
+		fmt.Sprintf("%s@%s", env.Local.WithPrefix(dataset), to)}
+	send := env.Local.Command(sendArgs...)
+	recv := env.Remote.Command("zfs", "receive", "-s", "-F", env.Remote.WithPrefix(dataset))
 
-	size, err := env.Local.Size(logger, send)
+	size, err := env.Local.Size(logger, sendArgs)
 	if err != nil {
 		return fmt.Errorf("getting size of range transfer from '%s' to '%s': %w", from, to, err)
 	}

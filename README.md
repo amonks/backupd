@@ -94,7 +94,9 @@ Key features:
 
 ## Requirements
 
-- Must be run as root (for ZFS operations)
+- Root, or a way to escalate: driving zfs takes privilege, so `backupd`
+  runs as root by default. Set `local.escalate` (below) to run it as an
+  ordinary user that escalates per command instead
 - ZFS filesystem
 - FreeBSD or Linux operating system
 - SSH access to remote backup server (if using remote backups)
@@ -153,6 +155,11 @@ snitch_id = "your-snitch-id"
 [local]
 # Root dataset to backup (all child datasets included)
 root = "tank/data"
+
+# Optional: a command prefix for every local zfs command, so the daemon
+# can run as an ordinary user instead of root. Omitted, zfs runs
+# directly and the daemon must be root.
+#escalate = ["sudo", "-n"]
 
 # Retention policy: how many snapshots of each type to keep locally
 # Format: type = count
@@ -536,6 +543,113 @@ Then add to crontab:
 0 0 1 1 * /path/to/snapshot.sh yearly
 ```
 
+## Using backupd as a library
+
+`backupd` is also a Go package. The daemon — sync loop, planner,
+dashboard, control API — is `monks.co/backupd/daemon`, and the command
+you install is a thin wrapper over it. A host program embeds it to
+supply the things a deployment owns and a backup daemon should not
+invent: a listener, an authorization layer, a log pipeline, and the
+chrome of the site it is part of.
+
+```go
+d := daemon.New(daemon.Options{
+	Config: conf,           // the only required field
+	Logger: slog.Default(), // structured records go here
+	Layout: myLayout,       // wrap each page in your own HTML
+	OmitNav: true,          // ...and render its nav yourself
+})
+
+go d.Run(ctx)                     // the sync loop
+http.Handle("/", d.Handler())     // the dashboard and control API
+```
+
+`Options{Config: conf}` alone gives you exactly what the command does;
+every other field has a working default.
+
+| API | Purpose |
+|-----|---------|
+| `daemon.New(Options) *Daemon` | Build a daemon. Starts nothing. |
+| `(*Daemon).Run(ctx)` | The sync loop, until ctx is cancelled. |
+| `(*Daemon).Handler()` | The dashboard and control API as an `http.Handler`. |
+| `(*Daemon).Mount(prefix)` | The same, under a sub-path of your own mux. |
+| `(*Daemon).Serve(ctx, addr)` | A listener of the daemon's own, for hosts that don't have one. |
+| `(*Daemon).Go(ctx, addr)` | Run and Serve together — the standalone daemon. |
+| `(*Daemon).View()` | The current derived state: verdict, issues, per-dataset health, cycle history. What the dashboard renders, for exporting to metrics or health checks. |
+| `(*Daemon).Debug(ctx, dataset, w)` | Refresh one dataset and write what would happen to it. |
+| `daemon.CallAPI(ctx, addr, method, path)` | Drive a running daemon's control API, as the subcommands do. |
+
+### Logging
+
+Every line the daemon writes goes to one place. By default that is the
+standard `log` package; pass `Options.Logger` and it is your
+`*slog.Logger` instead — including the in-memory ring buffers, whose
+lines arrive labelled with the logger that wrote them
+(`backupd.log=global`).
+
+The records worth alerting on carry named attributes rather than
+message text, so "are backups running" is a query:
+
+| Attribute | Meaning |
+|-----------|---------|
+| `backupd.cycle.ok` | false on a cycle that failed, wholly or for some datasets. The record is at ERROR level too, so level-based routing catches it without knowing this vocabulary. |
+| `backupd.cycle.paused`, `backupd.cycle.datasets`, `backupd.cycle.duration_ms`, `backupd.cycle.failures` | The rest of the cycle outcome. |
+| `backupd.event` | A journal entry's level: info, warning, error. |
+| `backupd.dataset` | The dataset a record concerns. |
+| `backupd.snitch.ok` | false when a Dead Man's Snitch ping failed. |
+| `backupd.log` | Which ring buffer a buffered line came from. |
+
+### Page chrome
+
+Without a layout, the daemon renders a complete HTML document. With
+`Options.Layout`, it renders the page body and hands it to you:
+
+```go
+func myLayout(w http.ResponseWriter, r *http.Request, page daemon.Page) error {
+	// page.Title names the page; page.Body is one <div class="backupd">
+	// carrying its styles, scripts, and content.
+	return mySite.Render(w, r, page.Title, page.Body)
+}
+```
+
+`Layout` takes no framework-specific types, so anything that can write
+HTML can be one. The body is safe to drop into a page whose stylesheet
+the daemon knows nothing about: every rule it emits is scoped to
+`.backupd`, its animation names are prefixed, and its colors are
+`light-dark()` pairs that follow whatever `color-scheme` your page
+declares. `daemon.Nav()` returns the daemon's own top-level links so you
+can render them in your nav; `OmitNav` then stops it rendering them
+again.
+
+### Mount points
+
+The dashboard can be served anywhere. Behind a reverse proxy that sets
+`X-Forwarded-Prefix` and strips the path — the usual arrangement —
+register `Handler()` and every link and fetch follows the prefix. Behind
+your own mux, use `Mount("/backups")` instead.
+
+### Privilege
+
+`local.escalate` is a command prefix applied to every local zfs
+command:
+
+```toml
+[local]
+root = "tank/data"
+escalate = ["sudo", "-n"]   # or ["doas"], or omitted to run as root
+```
+
+With it set, the daemon runs as an ordinary user and escalates per
+command; the root check at startup relaxes accordingly, since a daemon
+that escalates is not supposed to be root. The remote side takes no
+prefix — it already arrives over ssh as whichever user the key
+authenticates as.
+
+Cancelling a transfer kills the whole process group, not just the
+process the daemon started, because `sudo` does not exec its command: it
+forks and waits, so killing it would leave `zfs send` running with the
+pipe still open.
+
 ## Architecture
 
 ### Domain Model
@@ -607,7 +721,12 @@ The application uses a clear domain-driven design with the following core entiti
 - `status/`: Live activity tracking (sync phase, cycle queue, current
   step, transfer progress)
 - `history/`: Cycle outcomes, per-dataset success/failure, executed ops
-- `logger/`: Buffered in-memory operation logs
+- `daemon/`: The daemon itself — sync loop, dashboard, control API —
+  as an importable package, so a host program can supply its own
+  listener, logging, authorization, and page chrome (see Using backupd
+  as a library)
+- `logger/`: Buffered in-memory operation logs, routed to the host's
+  `*slog.Logger` when one is installed
 - `atom/`: Thread-safe state management
 
 **Concurrent Architecture:**

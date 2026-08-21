@@ -1,4 +1,4 @@
-package main
+package daemon
 
 import (
 	"context"
@@ -10,10 +10,7 @@ import (
 
 	"pgregory.net/rapid"
 
-	"monks.co/backupd/atom"
 	"monks.co/backupd/config"
-	"monks.co/backupd/history"
-	"monks.co/backupd/logger"
 	"monks.co/backupd/model"
 	"monks.co/backupd/sim"
 	"monks.co/backupd/status"
@@ -26,30 +23,16 @@ import (
 // only substitutions are the environment itself, the snitch, and the
 // between-cycle wait.
 
-func newSimBackupd(conf *config.Config, s *sim.Sim) *Backupd {
-	b := &Backupd{
-		conf:       atom.New(conf),
-		state:      atom.New[*model.Model](nil),
-		globalLogs: logger.New("global"),
-		env:        s,
-		addr:       "127.0.0.1:0",
-		version:    atom.New[int64](0),
-		versionCh:  make(chan struct{}, 1),
-		syncNow:    make(chan syncRequest, 16),
-		history:    history.New(),
-	}
-	b.activity = status.New(b.notifyStateChange)
-	s.OnProgress = b.activity.Progress
-	b.resume = s.Resume
+func newSimDaemon(conf *config.Config, s *sim.Sim) *Daemon {
+	b := New(Options{Config: conf, Env: s})
 	b.snitch = func(string) error { return nil }
-	b.wait = b.waitWake
 	b.state.Reset(model.New())
 	return b
 }
 
 // runCycles runs the sync loop for exactly n cycles by cancelling the
 // context at the nth between-cycle wait.
-func runCycles(t rapid.TB, b *Backupd, n int) {
+func runCycles(t rapid.TB, b *Daemon, n int) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -61,7 +44,7 @@ func runCycles(t rapid.TB, b *Backupd, n int) {
 		}
 		return nil, ctx.Err()
 	}
-	if err := b.Sync(ctx); !errors.Is(err, context.Canceled) {
+	if err := b.Run(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected Sync to end by cancellation, got: %v", err)
 	}
 }
@@ -118,7 +101,7 @@ func TestSimCycleConverges(t *testing.T) {
 	s.SeedRemote("/foo", a)
 
 	conf := simConf(map[string]int{"daily": 2}, map[string]int{"daily": 2}, true)
-	b := newSimBackupd(conf, s)
+	b := newSimDaemon(conf, s)
 	runCycles(t, b, 2)
 
 	assertConverged(t, s, conf, "/foo")
@@ -142,7 +125,7 @@ func TestSimCycleConverges(t *testing.T) {
 
 	// A further cycle must be a no-op.
 	s.ResetMutations()
-	b2 := newSimBackupd(conf, s)
+	b2 := newSimDaemon(conf, s)
 	runCycles(t, b2, 1)
 	if muts := s.Mutations(); len(muts) != 0 {
 		t.Errorf("expected no mutations in a converged cycle, got %v", muts)
@@ -160,7 +143,7 @@ func TestSimInterruptedTransferResumes(t *testing.T) {
 	s.InterruptNextTransfer(0.5)
 
 	conf := simConf(map[string]int{"daily": 2}, map[string]int{"daily": 2}, true)
-	b := newSimBackupd(conf, s)
+	b := newSimDaemon(conf, s)
 	runCycles(t, b, 1)
 
 	cycles := b.history.Cycles()
@@ -207,7 +190,7 @@ func TestSimRemoteFullStillDeletes(t *testing.T) {
 	// daily=1 with no baseline: remote should end up with just the
 	// latest, so A must be deleted and C transferred.
 	conf := simConf(map[string]int{"daily": 3}, map[string]int{"daily": 1}, false, "/foo")
-	b := newSimBackupd(conf, s)
+	b := newSimDaemon(conf, s)
 	runCycles(t, b, 1)
 
 	cycles := b.history.Cycles()
@@ -239,7 +222,7 @@ func TestSimUnresumableTransferAborted(t *testing.T) {
 	s.SeedInterruptedTransfer("/foo", gone, 100)
 
 	conf := simConf(map[string]int{"daily": 2}, map[string]int{"daily": 2}, true)
-	b := newSimBackupd(conf, s)
+	b := newSimDaemon(conf, s)
 	runCycles(t, b, 1)
 
 	assertConverged(t, s, conf, "/foo")
@@ -269,7 +252,7 @@ func TestSimPausedCycleExecutesNothing(t *testing.T) {
 	conf := simConf(map[string]int{"daily": 2}, map[string]int{"daily": 2}, true)
 	conf.Paused = true
 	conf.SnitchID = "test-snitch"
-	b := newSimBackupd(conf, s)
+	b := newSimDaemon(conf, s)
 	snitched := 0
 	b.snitch = func(string) error { snitched++; return nil }
 	runCycles(t, b, 1)
@@ -292,7 +275,7 @@ func TestSimPausedCycleExecutesNothing(t *testing.T) {
 
 // computeView derives the dashboard state from a live daemon exactly
 // the way the HTTP layer does, with the clock pinned by the caller.
-func computeView(b *Backupd, at time.Time) view.System {
+func computeView(b *Daemon, at time.Time) view.System {
 	return view.Compute(view.Input{
 		State:    b.state.Deref(),
 		Conf:     b.conf.Deref(),
@@ -318,7 +301,7 @@ func TestSimDashboardInvariants(t *testing.T) {
 	s.SeedRemote("/foo", a)
 
 	conf := simConf(map[string]int{"daily": 3}, map[string]int{"daily": 3}, true)
-	b := newSimBackupd(conf, s)
+	b := newSimDaemon(conf, s)
 	runCycles(t, b, 2)
 
 	sys := computeView(b, now)
@@ -384,7 +367,7 @@ func TestSimFailingDatasetSurfaces(t *testing.T) {
 	s.SetDatasetError("/bad", "invalid backup stream (checksum mismatch)")
 
 	conf := simConf(map[string]int{"daily": 2}, map[string]int{"daily": 2}, true)
-	b := newSimBackupd(conf, s)
+	b := newSimDaemon(conf, s)
 	runCycles(t, b, 1)
 
 	sys := computeView(b, now)
@@ -496,7 +479,7 @@ func TestRapidSimConvergence(t *testing.T) {
 			rapid.Bool().Draw(t, "keepBaseline"),
 			datasets...,
 		)
-		b := newSimBackupd(conf, s)
+		b := newSimDaemon(conf, s)
 		runCycles(t, b, 3)
 
 		for _, name := range datasets {

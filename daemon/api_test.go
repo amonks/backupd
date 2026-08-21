@@ -1,4 +1,4 @@
-package main
+package daemon
 
 import (
 	"compress/gzip"
@@ -31,7 +31,7 @@ daily = 1
 keep_baseline = false
 `
 
-func newAPITestBackupd(t *testing.T, local, remote *fakeExecutor) (*Backupd, string) {
+func newAPITestDaemon(t *testing.T, local, remote *fakeExecutor) (*Daemon, string) {
 	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "backupd.toml")
@@ -42,7 +42,7 @@ func newAPITestBackupd(t *testing.T, local, remote *fakeExecutor) (*Backupd, str
 	if err != nil {
 		t.Fatal(err)
 	}
-	return newTestBackupd(conf, local, remote), path
+	return newTestDaemon(conf, local, remote), path
 }
 
 func do(t *testing.T, h http.Handler, method, target string, body string) *httptest.ResponseRecorder {
@@ -60,8 +60,8 @@ func do(t *testing.T, h http.Handler, method, target string, body string) *httpt
 
 func TestAPIPauseResumeGlobal(t *testing.T) {
 	local, remote := steadyStateExecutors()
-	b, path := newAPITestBackupd(t, local, remote)
-	h := b.handler()
+	b, path := newAPITestDaemon(t, local, remote)
+	h := b.Handler()
 
 	if w := do(t, h, "POST", "/api/pause", ""); w.Code != http.StatusOK {
 		t.Fatalf("pause: expected 200, got %d: %s", w.Code, w.Body)
@@ -94,8 +94,8 @@ func TestAPIPauseResumeGlobal(t *testing.T) {
 
 func TestAPIPauseDataset(t *testing.T) {
 	local, remote := steadyStateExecutors()
-	b, _ := newAPITestBackupd(t, local, remote)
-	h := b.handler()
+	b, _ := newAPITestDaemon(t, local, remote)
+	h := b.Handler()
 
 	if w := do(t, h, "POST", "/api/pause?dataset=/foo", ""); w.Code != http.StatusOK {
 		t.Fatalf("pause: expected 200, got %d: %s", w.Code, w.Body)
@@ -123,9 +123,9 @@ func TestAPIPauseDataset(t *testing.T) {
 
 func TestAPISync(t *testing.T) {
 	local, remote := steadyStateExecutors()
-	b, _ := newAPITestBackupd(t, local, remote)
+	b, _ := newAPITestDaemon(t, local, remote)
 	b.state.Swap(model.AddLocalDataset("/foo", []*model.Snapshot{snapA}, nil))
-	h := b.handler()
+	h := b.Handler()
 
 	if w := do(t, h, "POST", "/api/sync", ""); w.Code != http.StatusOK {
 		t.Fatalf("sync: expected 200, got %d: %s", w.Code, w.Body)
@@ -154,8 +154,8 @@ func TestAPISync(t *testing.T) {
 
 func TestAPIConfigGet(t *testing.T) {
 	local, remote := steadyStateExecutors()
-	b, _ := newAPITestBackupd(t, local, remote)
-	h := b.handler()
+	b, _ := newAPITestDaemon(t, local, remote)
+	h := b.Handler()
 
 	w := do(t, h, "GET", "/api/config", "")
 	if w.Code != http.StatusOK {
@@ -168,10 +168,10 @@ func TestAPIConfigGet(t *testing.T) {
 
 func TestAPIConfigPreview(t *testing.T) {
 	local, remote := steadyStateExecutors()
-	b, _ := newAPITestBackupd(t, local, remote)
+	b, _ := newAPITestDaemon(t, local, remote)
 	b.state.Swap(model.AddLocalDataset("/foo", []*model.Snapshot{snapA, snapB, snapC}, nil))
 	b.state.Swap(model.AddRemoteDataset("/foo", []*model.Snapshot{snapA}, nil))
-	h := b.handler()
+	h := b.Handler()
 
 	// Raise /foo's local retention from the global daily=1 to daily=3.
 	edited := apiTestConfig + "[overrides.\"/foo\".local.policy]\ndaily = 3\n"
@@ -213,8 +213,8 @@ func TestAPIConfigPreview(t *testing.T) {
 
 func TestAPIConfigPut(t *testing.T) {
 	local, remote := steadyStateExecutors()
-	b, path := newAPITestBackupd(t, local, remote)
-	h := b.handler()
+	b, path := newAPITestDaemon(t, local, remote)
+	h := b.Handler()
 
 	edited := strings.Replace(apiTestConfig, "daily = 1", "daily = 7", 1)
 	w := do(t, h, "PUT", "/api/config", edited)
@@ -252,8 +252,8 @@ func TestAPIConfigPut(t *testing.T) {
 func TestAPISnapshot(t *testing.T) {
 	local, remote := steadyStateExecutors()
 	local.handlers = append(local.handlers, fakeHandler{match: "zfs snapshot"})
-	b, _ := newAPITestBackupd(t, local, remote)
-	h := b.handler()
+	b, _ := newAPITestDaemon(t, local, remote)
+	h := b.Handler()
 
 	if w := do(t, h, "POST", "/api/snapshot?periodicity=daily", ""); w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body)
@@ -271,24 +271,24 @@ func TestAPISnapshot(t *testing.T) {
 // against a live handler end to end.
 func TestCLIRoundTrip(t *testing.T) {
 	local, remote := steadyStateExecutors()
-	b, _ := newAPITestBackupd(t, local, remote)
-	srv := httptest.NewServer(b.handler())
+	b, _ := newAPITestDaemon(t, local, remote)
+	srv := httptest.NewServer(b.Handler())
 	defer srv.Close()
-	b.addr = strings.TrimPrefix(srv.URL, "http://")
+	addr := strings.TrimPrefix(srv.URL, "http://")
 
-	if err := b.CallAPI(t.Context(), "POST", "/api/pause"); err != nil {
+	if err := CallAPI(t.Context(), addr, "POST", "/api/pause"); err != nil {
 		t.Fatalf("CallAPI pause: %v", err)
 	}
 	if !b.conf.Deref().Paused {
 		t.Error("expected pause via CLI round trip")
 	}
-	if err := b.CallAPI(t.Context(), "POST", "/api/resume"); err != nil {
+	if err := CallAPI(t.Context(), addr, "POST", "/api/resume"); err != nil {
 		t.Fatalf("CallAPI resume: %v", err)
 	}
 	if b.conf.Deref().Paused {
 		t.Error("expected resume via CLI round trip")
 	}
-	if err := b.CallAPI(t.Context(), "POST", "/api/nonexistent"); err == nil {
+	if err := CallAPI(t.Context(), addr, "POST", "/api/nonexistent"); err == nil {
 		t.Error("expected error for unknown endpoint")
 	}
 }
@@ -298,8 +298,8 @@ func TestCLIRoundTrip(t *testing.T) {
 // state change.
 func TestGzip(t *testing.T) {
 	local, remote := steadyStateExecutors()
-	b, _ := newAPITestBackupd(t, local, remote)
-	h := b.handler()
+	b, _ := newAPITestDaemon(t, local, remote)
+	h := b.Handler()
 
 	req := httptest.NewRequest("GET", "/global", nil)
 	req.Header.Set("Accept-Encoding", "gzip")
@@ -332,11 +332,11 @@ func TestGzip(t *testing.T) {
 
 func TestPageRendering(t *testing.T) {
 	local, remote := steadyStateExecutors()
-	b, _ := newAPITestBackupd(t, local, remote)
+	b, _ := newAPITestDaemon(t, local, remote)
 	b.state.Swap(model.AddLocalDataset("/foo", []*model.Snapshot{snapA}, nil))
 	b.state.Swap(model.AddRemoteDataset("/foo", []*model.Snapshot{snapA}, nil))
 	b.history.RecordCycle(history.Cycle{OK: true, Datasets: 1})
-	h := b.handler()
+	h := b.Handler()
 
 	w := do(t, h, "GET", "/global", "")
 	if w.Code != http.StatusOK {
@@ -406,7 +406,7 @@ func TestPageRendering(t *testing.T) {
 // derived from inventory ages against the wall clock.
 func TestPageShowsVerdictsAndActivity(t *testing.T) {
 	local, remote := steadyStateExecutors()
-	b, _ := newAPITestBackupd(t, local, remote)
+	b, _ := newAPITestDaemon(t, local, remote)
 	freshA := testSnap("daily-a", time.Now().Add(-26*time.Hour).Unix())
 	freshB := testSnap("daily-b", time.Now().Add(-time.Hour).Unix())
 	b.state.Swap(model.AddLocalDataset("/foo", []*model.Snapshot{freshA, freshB}, nil))
@@ -414,7 +414,7 @@ func TestPageShowsVerdictsAndActivity(t *testing.T) {
 	b.history.RecordCycle(history.Cycle{OK: true, Datasets: 1})
 	b.history.RecordDatasetFailure("/foo", time.Now(), "remote out of space")
 	b.history.RecordOp(history.Op{At: time.Now(), Dataset: "/foo", Operation: "transfer range x", Duration: time.Second})
-	h := b.handler()
+	h := b.Handler()
 
 	w := do(t, h, "GET", "/global", "")
 	if w.Code != http.StatusOK {
@@ -480,7 +480,7 @@ func TestPageShowsVerdictsAndActivity(t *testing.T) {
 // them from the inventory alone.
 func TestPageShowsStaleAndUnreplicated(t *testing.T) {
 	local, remote := steadyStateExecutors()
-	b, _ := newAPITestBackupd(t, local, remote)
+	b, _ := newAPITestDaemon(t, local, remote)
 	// /stale: fresh local snapshots, remote 5 days behind (policy is
 	// daily, so the 2×24h grace is blown).
 	staleOld := testSnap("daily-old", time.Now().Add(-5*24*time.Hour).Unix())
@@ -489,7 +489,7 @@ func TestPageShowsStaleAndUnreplicated(t *testing.T) {
 	b.state.Swap(model.AddRemoteDataset("/stale", []*model.Snapshot{staleOld}, nil))
 	// /new: never replicated.
 	b.state.Swap(model.AddLocalDataset("/new", []*model.Snapshot{staleNew}, nil))
-	h := b.handler()
+	h := b.Handler()
 
 	body := do(t, h, "GET", "/global", "").Body.String()
 	for _, want := range []string{
@@ -512,12 +512,12 @@ func TestPageShowsStaleAndUnreplicated(t *testing.T) {
 
 func TestAPIState(t *testing.T) {
 	local, remote := steadyStateExecutors()
-	b, _ := newAPITestBackupd(t, local, remote)
+	b, _ := newAPITestDaemon(t, local, remote)
 	b.state.Swap(model.AddLocalDataset("/foo", []*model.Snapshot{snapA}, nil))
 	b.state.Swap(model.AddRemoteDataset("/foo", []*model.Snapshot{snapA}, nil))
 	b.history.RecordCycle(history.Cycle{StartedAt: time.Now().Add(-2 * time.Minute), StoppedAt: time.Now().Add(-time.Minute), OK: true, Datasets: 1})
 	b.history.RecordDatasetFailure("/foo", time.Now(), "remote out of space")
-	h := b.handler()
+	h := b.Handler()
 
 	w := do(t, h, "GET", "/api/state", "")
 	if w.Code != http.StatusOK {

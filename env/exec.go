@@ -25,20 +25,44 @@ var _ Executor = &LocalExecutor{}
 // A LocalExecutor implements the Executor interface by executing commands on
 // the local machine.
 type LocalExecutor struct {
+	// Escalate is prepended to every command this executor runs —
+	// ["sudo", "-n"], ["doas"] — so a daemon running as an ordinary
+	// user can still drive zfs. Empty runs the command directly. See
+	// config.Config.Local.Escalate.
+	Escalate []string
 }
 
 var Local = &LocalExecutor{}
 
 // Exec runs the given command, returning its stdout and stderr as a combined
 // slice of lines.
-func (*LocalExecutor) Exec(logger *logger.Logger, args ...string) ([]string, error) {
-	return Exec(logger, args...)
+func (l *LocalExecutor) Exec(logger *logger.Logger, args ...string) ([]string, error) {
+	return Exec(logger, l.argv(args)...)
 }
 
 // Execf runs the given command, returning its stdout and stderr as a combined
 // slice of lines.
-func (*LocalExecutor) Execf(logger *logger.Logger, s string, args ...any) ([]string, error) {
-	return Execf(logger, s, args...)
+func (l *LocalExecutor) Execf(logger *logger.Logger, s string, args ...any) ([]string, error) {
+	return l.Exec(logger, strings.Fields(fmt.Sprintf(s, args...))...)
+}
+
+// Command builds — but does not run — a local command, for the send half
+// of a transfer pipe.
+func (l *LocalExecutor) Command(args ...string) *exec.Cmd {
+	argv := l.argv(args)
+	return exec.Command(argv[0], argv[1:]...)
+}
+
+// argv applies the escalation prefix. It copies rather than appending in
+// place: callers hold the args slice (Size appends its own --dryrun
+// flags to the same one).
+func (l *LocalExecutor) argv(args []string) []string {
+	if len(l.Escalate) == 0 {
+		return args
+	}
+	argv := make([]string, 0, len(l.Escalate)+len(args))
+	argv = append(argv, l.Escalate...)
+	return append(argv, args...)
 }
 
 // Exec runs the given command, returning its stdout and stderr as a combined
@@ -104,6 +128,11 @@ func Pipe(ctx context.Context, logger *logger.Logger, size int64, onProgress fun
 	to.Stdout = out
 	to.Stderr = out
 
+	// Each half runs in its own process group, so cancelling reaches
+	// whatever the command is wrapping — see terminate.
+	isolate(from)
+	isolate(to)
+
 	// Start the `to` command.
 	if err := to.Start(); err != nil {
 		return fmt.Errorf("failed to start 'to' command: %w", err)
@@ -114,7 +143,7 @@ func Pipe(ctx context.Context, logger *logger.Logger, size int64, onProgress fun
 	if err := from.Start(); err != nil {
 		pr.Close()
 		pw.Close()
-		to.Process.Kill()
+		terminate(to)
 		to.Wait()
 		return fmt.Errorf("failed to start 'from' command: %w", err)
 	}
@@ -160,7 +189,7 @@ func Pipe(ctx context.Context, logger *logger.Logger, size int64, onProgress fun
 			return nil
 
 		case <-ctx.Done():
-			from.Process.Kill()
+			terminate(from)
 			return ctx.Err()
 		}
 	})
@@ -183,7 +212,7 @@ func Pipe(ctx context.Context, logger *logger.Logger, size int64, onProgress fun
 			return nil
 
 		case <-ctx.Done():
-			to.Process.Kill()
+			terminate(to)
 			return ctx.Err()
 		}
 	})
@@ -193,8 +222,8 @@ func Pipe(ctx context.Context, logger *logger.Logger, size int64, onProgress fun
 
 		// XXX: is this necessary? If the errgroup ended, shouldn't
 		// the processes have already died?
-		from.Process.Kill()
-		to.Process.Kill()
+		terminate(from)
+		terminate(to)
 
 		return fmt.Errorf("process error: %w", err)
 	}

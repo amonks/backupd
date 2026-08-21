@@ -1,4 +1,4 @@
-package main
+package daemon
 
 // Cell and header components for the datagrid tables in grids.go —
 // each replaces a grid cell's visible content while the behavioral
@@ -23,8 +23,8 @@ templ renderRetention(conf *config.Config, dataset string) {
 	}
 }
 
-templ datasetLink(name model.DatasetName) {
-	<a href={ templ.SafeURL(datasetHref(name)) }>{ name.String() }</a>
+templ datasetLink(base string, name model.DatasetName) {
+	<a href={ templ.SafeURL(datasetHref(base, name)) }>{ name.String() }</a>
 }
 
 templ whenCell(at time.Time) {

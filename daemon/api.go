@@ -1,9 +1,11 @@
-package main
+package daemon
 
 import (
+	"bytes"
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"io"
 	"net/http"
 	"strings"
@@ -16,9 +18,13 @@ import (
 	"monks.co/backupd/view"
 )
 
-// handler builds the full HTTP mux: the HTML dashboard, the long-poll
-// endpoint, and the JSON control API.
-func (b *Backupd) handler() http.Handler {
+// Handler is the dashboard and control API: the HTML pages, the
+// long-poll endpoint, and the JSON API, on the paths documented in the
+// README. It is safe to mount under a prefix — every link and fetch is
+// built from the request's X-Forwarded-Prefix — and it authorizes
+// nothing, so a host serving it anywhere but a trusted network is
+// expected to wrap it.
+func (b *Daemon) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("POST /api/pause", b.handleSetPaused(true))
@@ -85,7 +91,7 @@ func datasetParam(req *http.Request) (string, bool) {
 
 // saveAndApply validates a new raw config, persists it to the loaded
 // config path, and swaps it in.
-func (b *Backupd) saveAndApply(raw []byte) error {
+func (b *Daemon) saveAndApply(raw []byte) error {
 	cur := b.conf.Deref()
 	fresh, err := config.Parse(raw)
 	if err != nil {
@@ -104,7 +110,7 @@ func (b *Backupd) saveAndApply(raw []byte) error {
 // handleSetPaused toggles the pause flag — global without ?dataset=, per
 // subtree with it — by editing and persisting the config file, which is
 // where pause state lives.
-func (b *Backupd) handleSetPaused(paused bool) http.HandlerFunc {
+func (b *Daemon) handleSetPaused(paused bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
 		dataset, _ := datasetParam(req)
 		cur := b.conf.Deref()
@@ -131,7 +137,7 @@ func (b *Backupd) handleSetPaused(paused bool) http.HandlerFunc {
 	}
 }
 
-func (b *Backupd) handleSync(w http.ResponseWriter, req *http.Request) {
+func (b *Daemon) handleSync(w http.ResponseWriter, req *http.Request) {
 	dataset, hasDataset := datasetParam(req)
 	if hasDataset {
 		name := model.DatasetName(dataset)
@@ -152,7 +158,7 @@ func (b *Backupd) handleSync(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, map[string]any{"ok": true})
 }
 
-func (b *Backupd) handleSnapshot(w http.ResponseWriter, req *http.Request) {
+func (b *Daemon) handleSnapshot(w http.ResponseWriter, req *http.Request) {
 	periodicity := req.URL.Query().Get("periodicity")
 	if periodicity == "" {
 		http.Error(w, "Missing periodicity parameter", http.StatusBadRequest)
@@ -182,7 +188,7 @@ func (b *Backupd) handleSnapshot(w http.ResponseWriter, req *http.Request) {
 	fmt.Fprintf(w, "Created %s snapshot for root %s\n", periodicity, root)
 }
 
-func (b *Backupd) handleConfigGet(w http.ResponseWriter, req *http.Request) {
+func (b *Daemon) handleConfigGet(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Write(b.conf.Deref().Raw)
 }
@@ -204,7 +210,7 @@ type configImpact struct {
 // previewConfig computes the per-dataset impact of switching to a new
 // config: which retention descriptions change, what gets paused, and how
 // many snapshots the new target would delete or transfer.
-func (b *Backupd) previewConfig(fresh *config.Config) []configImpact {
+func (b *Daemon) previewConfig(fresh *config.Config) []configImpact {
 	state := b.state.Deref()
 	cur := b.conf.Deref()
 	var impacts []configImpact
@@ -247,7 +253,7 @@ func readBody(w http.ResponseWriter, req *http.Request) ([]byte, bool) {
 	return raw, true
 }
 
-func (b *Backupd) handleConfigPreview(w http.ResponseWriter, req *http.Request) {
+func (b *Daemon) handleConfigPreview(w http.ResponseWriter, req *http.Request) {
 	raw, ok := readBody(w, req)
 	if !ok {
 		return
@@ -264,7 +270,7 @@ func (b *Backupd) handleConfigPreview(w http.ResponseWriter, req *http.Request) 
 	writeJSON(w, map[string]any{"impacts": impacts})
 }
 
-func (b *Backupd) handleConfigPut(w http.ResponseWriter, req *http.Request) {
+func (b *Daemon) handleConfigPut(w http.ResponseWriter, req *http.Request) {
 	raw, ok := readBody(w, req)
 	if !ok {
 		return
@@ -389,8 +395,8 @@ func secondsPtr(has bool, d time.Duration) *int64 {
 	return &s
 }
 
-func (b *Backupd) handleState(w http.ResponseWriter, req *http.Request) {
-	d := b.pageData("")
+func (b *Daemon) handleState(w http.ResponseWriter, req *http.Request) {
+	d := b.pageData(req, "")
 	sys := d.Sys
 
 	act := apiActivity{
@@ -548,7 +554,7 @@ func (b *Backupd) handleState(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, resp)
 }
 
-func (b *Backupd) handlePoll(w http.ResponseWriter, req *http.Request) {
+func (b *Daemon) handlePoll(w http.ResponseWriter, req *http.Request) {
 	select {
 	case <-b.versionCh:
 		w.WriteHeader(http.StatusOK)
@@ -560,18 +566,42 @@ func (b *Backupd) handlePoll(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
+// View is the daemon's current judgment of itself: the system verdict
+// and its reason, the typed issue list, per-dataset health and ages,
+// what it is doing right now, and the cycle history — the same
+// derivation the dashboard renders and /api/state serializes, so a host
+// exporting metrics or health checks cannot disagree with the page.
+//
+// It is a snapshot, computed on call, and safe to call concurrently
+// with the sync loop.
+func (b *Daemon) View() view.System {
+	state := b.state.Deref()
+	conf := b.conf.Deref()
+	return view.Compute(view.Input{
+		State:    state,
+		Conf:     conf,
+		History:  b.history,
+		Activity: b.activity.Get(),
+		Now:      time.Now(),
+		Boot:     b.boot,
+	})
+}
+
 // pageData assembles one consistent snapshot of everything the
 // dashboard shows: the raw state plus the derived view.System.
-func (b *Backupd) pageData(page string) pageData {
+func (b *Daemon) pageData(req *http.Request, page string) pageData {
 	state := b.state.Deref()
 	conf := b.conf.Deref()
 	activity := b.activity.Get()
 
 	return pageData{
-		Page:     page,
-		State:    state,
-		Conf:     conf,
-		Activity: activity,
+		Page:       page,
+		Base:       basePath(req),
+		Standalone: b.layout == nil,
+		OmitNav:    b.omitNav,
+		State:      state,
+		Conf:       conf,
+		Activity:   activity,
 		Sys: view.Compute(view.Input{
 			State:    state,
 			Conf:     conf,
@@ -587,7 +617,7 @@ func (b *Backupd) pageData(page string) pageData {
 	}
 }
 
-func (b *Backupd) handlePage(w http.ResponseWriter, req *http.Request) {
+func (b *Daemon) handlePage(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -612,5 +642,18 @@ func (b *Backupd) handlePage(w http.ResponseWriter, req *http.Request) {
 		pageName = "/" + trimmedPath
 	}
 
-	templ.Handler(page(b.pageData(pageName))).ServeHTTP(w, req)
+	d := b.pageData(req, pageName)
+	if b.layout == nil {
+		templ.Handler(document(d)).ServeHTTP(w, req)
+		return
+	}
+
+	var buf bytes.Buffer
+	if err := pageBody(d).Render(req.Context(), &buf); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := b.layout(w, req, Page{Title: pageTitle(d), Body: template.HTML(buf.String())}); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }

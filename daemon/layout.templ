@@ -1,0 +1,572 @@
+package daemon
+
+import (
+	"fmt"
+	"strings"
+
+	"monks.co/backupd/config"
+	"monks.co/backupd/history"
+	"monks.co/backupd/model"
+	"monks.co/backupd/status"
+	"monks.co/backupd/view"
+	"monks.co/pkg/datagrid"
+)
+
+// pageData is everything a dashboard render needs, assembled once per
+// request in handlePage. All judgment — verdicts, issues, staleness,
+// cycle progress — arrives pre-derived in Sys (the view package);
+// templates only lay it out. State/Conf/logs are carried for the
+// detail surfaces (plans, snapshot grids, raw config, logs).
+type pageData struct {
+	Page     string // "global", "config", or a dataset path ("" is the root dataset)
+	State    *model.Model
+	Conf     *config.Config
+	Activity status.Activity
+	Sys      view.System
+	Cycles   []history.Cycle
+	Ops      []history.Op
+	Events   []history.Event
+	Dryrun   bool
+
+	// Base is the path the dashboard is mounted at, without a trailing
+	// slash — "" at a root mount, "/backupd" behind a proxy. Every link
+	// and every fetch is built from it.
+	Base string
+
+	// Standalone is set when the daemon owns the whole document, which
+	// is what licenses the viewport-height app shell: two panes that
+	// scroll independently under a fixed strip. Embedded in a host
+	// page, the daemon owns a box in someone else's document, so the
+	// shell flows and the page scrolls as one.
+	Standalone bool
+
+	// OmitNav drops the daemon's own top-level links, for a host
+	// rendering them itself from Nav().
+	OmitNav bool
+}
+
+// document is the whole HTML page, used when no host layout is
+// installed. color-scheme is declared here and not inside .backupd: the
+// light-dark() pairs the stylesheet is written in resolve against the
+// scheme in force, so embedded in a host page they must follow the
+// host's choice rather than announce one of their own.
+templ document(d pageData) {
+	<!DOCTYPE html>
+	<html lang="en" style="color-scheme: light dark">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>{ pageTitle(d) }</title>
+		</head>
+		<body class="backupd-standalone-body">
+			@pageBody(d)
+		</body>
+	</html>
+}
+
+// pageBody is the embeddable rendering: one .backupd element carrying
+// the page's head assets and its content. Everything the daemon styles
+// is inside it and every rule is scoped to it, so a host can drop it
+// anywhere in its own document without the two stylesheets reaching
+// each other.
+templ pageBody(d pageData) {
+	<div class={ "backupd", templ.KV("standalone", d.Standalone) } data-base={ d.Base }>
+		@styles()
+		@datagrid.Head()
+		@statusStrip(d)
+		<div class="shell">
+			@sidebar(d)
+			// A div rather than <main>: embedded, this sits inside the
+			// host's own <main>, and a document may have only one.
+			<div class="main-content">
+				switch d.Page {
+					case "global":
+						@overview(d)
+					case "config":
+						@configPage(d)
+					default:
+						@datasetPage(d)
+				}
+			</div>
+		</div>
+		@script()
+	</div>
+}
+
+// pageTitle names the page for a browser tab or a host layout.
+func pageTitle(d pageData) string {
+	switch d.Page {
+	case "global":
+		return "backupd"
+	case "config":
+		return "config"
+	case "":
+		return "root"
+	}
+	return strings.TrimPrefix(d.Page, "/")
+}
+
+// statusStrip is the always-visible header answering "is everything
+// ok" and "what is happening right now".
+templ statusStrip(d pageData) {
+	<header class="strip">
+		<div class="strip-cell strip-verdict">
+			<span class={ "chip", "chip-" + d.Sys.Verdict.Class() }>{ strings.ToUpper(d.Sys.Verdict.String()) }</span>
+			if d.Dryrun {
+				<span class="chip chip-dryrun" title="No transfers or deletions will occur">DRY RUN</span>
+			}
+			if d.Sys.Reason != "" {
+				<span class="strip-reason">{ d.Sys.Reason }</span>
+			}
+		</div>
+		<div class="strip-cell strip-activity">
+			<span class={ "phase-dot", "dot-" + phaseClass(d.Activity.Phase) }></span>
+			<span>{ activityLabel(d.Activity, d.Sys.Cycle) }</span>
+			if !d.Activity.Until.IsZero() && (d.Activity.Phase == status.Idle || d.Activity.Phase == status.BackingOff) {
+				<span class="countdown" data-until={ fmt.Sprint(d.Activity.Until.UnixMilli()) }>{ fmtUntil(d.Activity.Until) }</span>
+			}
+			if d.Activity.Transfer != nil {
+				<progress max="100" value={ fmt.Sprintf("%.1f", d.Activity.Transfer.Percent()) }></progress>
+				<span class="progress-label">{ transferLabel(*d.Activity.Transfer) }</span>
+			}
+		</div>
+		<div class="strip-cell strip-facts">
+			if d.Sys.LastCycle != nil {
+				<span class="strip-fact" title={ "started " + d.Sys.LastCycle.StartedAt.Format("2006-01-02 15:04:05") }>
+					last cycle:&nbsp;
+					if d.Sys.LastCycle.Paused {
+						<span class="cycle-paused">paused</span>
+					} else if d.Sys.LastCycle.OK {
+						<span class="cycle-ok">ok</span>
+					} else {
+						<span class="cycle-failed">failed</span>
+					}
+				</span>
+			}
+			if d.Sys.SnitchConfigured {
+				if d.Sys.SnitchOverdue {
+					<span class="strip-fact error-text" title="No successful ping within twice the sync interval">snitch: overdue ({ fmtAgo(d.Sys.LastSnitch) })</span>
+				} else {
+					<span class="strip-fact">snitch: { fmtAgo(d.Sys.LastSnitch) }</span>
+				}
+			}
+			<span class="strip-fact">{ fmt.Sprint(d.Sys.DatasetCount) } datasets</span>
+			<span class="strip-fact">{ fmtBytes(d.Sys.LocalUsed) } local · { fmtBytes(d.Sys.RemoteUsed) } remote</span>
+		</div>
+	</header>
+}
+
+// phaseClass maps an activity phase to a verdict-ish color class for
+// the little phase dot.
+func phaseClass(p status.Phase) string {
+	switch p {
+	case status.Syncing, status.Refreshing:
+		return "syncing"
+	case status.Idle:
+		return "ok"
+	case status.BackingOff:
+		return "failing"
+	default:
+		return "unknown"
+	}
+}
+
+templ sidebar(d pageData) {
+	<nav class="sidebar">
+		if !d.OmitNav {
+			for _, link := range Nav() {
+				<a href={ templ.SafeURL(Link(d.Base, link.Path)) } class={ "nav-link", templ.KV("active", isActive(d, link)) }>{ link.Label }</a>
+			}
+		}
+		<div class="controls">
+			if d.Conf.Paused {
+				<button class="btn warn" data-api="/api/resume">Resume all</button>
+			} else {
+				<button class="btn" data-api="/api/pause" data-confirm="Pause all execution? State keeps refreshing, but no transfers or deletions run, and the dead-man's-snitch ping is withheld.">Pause all</button>
+			}
+			<button class="btn" data-api="/api/sync">Sync now</button>
+			<div class="snapshot-row">
+				<select id="snapshot-periodicity">
+					<option value="daily">daily</option>
+					<option value="weekly">weekly</option>
+					<option value="monthly">monthly</option>
+					<option value="yearly">yearly</option>
+				</select>
+				<button class="btn" id="snapshot-btn">Snapshot</button>
+			</div>
+		</div>
+		<div class="side-heading">Datasets</div>
+		for _, dv := range d.Sys.Datasets {
+			@sidebarLink(d, dv)
+		}
+	</nav>
+}
+
+// sidebarLink shows one dataset: health dot (pulsing while its plan
+// executes), name, and how old its backup is — the recovery point,
+// the one number worth scanning the fleet for.
+templ sidebarLink(d pageData, dv view.Dataset) {
+	<a href={ templ.SafeURL(datasetHref(d.Base, dv.Name)) } class={ "dataset-link", templ.KV("active", dv.Name.Path() == d.Page && d.Page != "global" && d.Page != "config") }>
+		<span class={ "dot", "dot-" + dv.Health.Class(), templ.KV("pulsing", dv.Syncing) } title={ dv.Health.String() + reasonSuffix(dv.Reason) }></span>
+		<span class="dataset-name">{ dv.Name.String() }</span>
+		if dv.HasRemote {
+			<span class={ "dataset-age", templ.KV("error-text", dv.BackupStale) } title={ "backed up " + fmtAgo(dv.NewestRemote) }>{ fmtCompactDuration(dv.BackedUp) }</span>
+		} else if dv.HasLocal {
+			<span class="dataset-age error-text" title="Never replicated">never</span>
+		}
+	</a>
+}
+
+// datasetHref maps a dataset name to its page URL under the mount
+// point. The root dataset's empty path gets the dedicated /root URL.
+func datasetHref(base string, name model.DatasetName) string {
+	if name == "" {
+		return base + "/root"
+	}
+	return base + "/" + strings.TrimPrefix(name.Path(), "/")
+}
+
+// isActive reports whether a nav link points at the page being
+// rendered.
+func isActive(d pageData, link NavLink) bool {
+	return link.Path == "/"+d.Page
+}
+
+func reasonSuffix(reason string) string {
+	if reason == "" {
+		return ""
+	}
+	return ": " + reason
+}
+
+// healthChip renders a dataset's health with its reason, plus a
+// spinner while the dataset's plan is executing — health and activity
+// are orthogonal, so both show.
+templ healthChip(dv view.Dataset) {
+	<span class={ "chip", "chip-" + dv.Health.Class() }>{ dv.Health.String() }</span>
+	if dv.Syncing {
+		<span class="spinner" title={ syncingTitle(dv) }></span>
+	}
+	if dv.Reason != "" {
+		<span class="chip-reason" title={ dv.Reason }>{ dv.Reason }</span>
+	}
+}
+
+func syncingTitle(dv view.Dataset) string {
+	if dv.Steps > 0 {
+		return fmt.Sprintf("syncing — step %d of %d", dv.Step, dv.Steps)
+	}
+	return "syncing"
+}
+
+// styles is the dashboard's entire stylesheet, and every rule in it is
+// scoped to .backupd. That is what lets a host embed the body in a page
+// whose stylesheet the daemon knows nothing about: a bare `body` rule
+// would restyle the host's chrome, and bare `table` / `h1` / `button`
+// rules would restyle everything else on the page. Nothing outside
+// .backupd is styled except the standalone document's own body, which
+// only exists when the daemon owns the page.
+//
+// Colors are light-dark() pairs rather than fixed values, resolved
+// against whatever color-scheme is in force where the element lands —
+// the standalone document declares one, an embedding host declares its
+// own, and the daemon never declares one inside its own subtree, so it
+// cannot disagree with the page around it.
+templ styles() {
+	<style>
+		.backupd {
+			--ok: light-dark(#2e7d32, #81c784);
+			--ok-bg: light-dark(#e8f5e9, rgba(129, 199, 132, 0.14));
+			--syncing: light-dark(#1565c0, #64b5f6);
+			--syncing-bg: light-dark(#e3f2fd, rgba(100, 181, 246, 0.14));
+			--pending: light-dark(#ef6c00, #ffb74d);
+			--pending-bg: light-dark(#fff3e0, rgba(255, 183, 77, 0.14));
+			--paused: light-dark(#607d8b, #90a4ae);
+			--paused-bg: light-dark(#eceff1, rgba(144, 164, 174, 0.14));
+			--failing: light-dark(#c62828, #ef9a9a);
+			--failing-bg: light-dark(#ffebee, rgba(239, 154, 154, 0.14));
+			--atrisk: light-dark(#d84315, #ff8a65);
+			--atrisk-bg: light-dark(#fbe9e7, rgba(255, 138, 101, 0.14));
+			--unknown: light-dark(#757575, #9e9e9e);
+			--unknown-bg: light-dark(#f5f5f5, rgba(158, 158, 158, 0.12));
+			--dryrun: light-dark(#b26a00, #ffd54f);
+			--dryrun-bg: light-dark(#fff8e1, rgba(255, 213, 79, 0.12));
+			--dryrun-border: light-dark(#ffe082, rgba(255, 213, 79, 0.4));
+
+			--fg: light-dark(#212121, #e6edf3);
+			--detail: light-dark(#444, #b6c2cf);
+			--muted: light-dark(#757575, #99a5b3);
+			--border: light-dark(#e0e0e0, #2c3442);
+			--surface: light-dark(#fafafa, #151b23);
+			--surface-hover: light-dark(#e8e8e8, rgba(255, 255, 255, 0.07));
+			--field: light-dark(#ffffff, #0d1117);
+			--field-border: light-dark(#bbb, #3d4654);
+			--track: light-dark(#ddd, #2c3442);
+
+			color: var(--fg);
+			font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+		}
+		.backupd *, .backupd *::before, .backupd *::after { box-sizing: border-box; }
+		.backupd code { font-size: 0.9em; }
+		.backupd a { color: inherit; }
+
+		/* The standalone shell: the daemon owns the document, so the
+		   strip sits at the top and the two panes scroll independently
+		   under it. Embedded, the daemon owns a box in someone else's
+		   document — the shell flows, the sidebar sticks, and the host
+		   page does the scrolling. */
+		body.backupd-standalone-body { margin: 0; }
+		.backupd.standalone {
+			height: 100vh;
+			display: flex;
+			flex-direction: column;
+		}
+		.backupd.standalone .shell { flex: 1; min-height: 0; }
+		.backupd.standalone .sidebar { overflow-y: auto; }
+		.backupd.standalone .main-content { overflow-y: auto; }
+		.backupd:not(.standalone) .sidebar {
+			position: sticky;
+			top: 0;
+			align-self: flex-start;
+			max-height: 100vh;
+			overflow-y: auto;
+		}
+
+		/* Status strip */
+		.backupd .strip {
+			display: flex;
+			align-items: center;
+			gap: 1.25rem;
+			padding: 0.5rem 1rem;
+			border-bottom: 1px solid var(--border);
+			background: var(--surface);
+			flex-wrap: wrap;
+		}
+		.backupd .strip-cell { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+		.backupd .strip-activity { flex: 1; }
+		.backupd .strip-facts { margin-left: auto; gap: 1rem; color: var(--muted); font-size: 0.85rem; }
+		.backupd .strip-fact { white-space: nowrap; }
+		.backupd .strip-reason { color: var(--muted); font-size: 0.9rem; }
+		.backupd .chip {
+			display: inline-block;
+			padding: 0.15rem 0.6rem;
+			border-radius: 999px;
+			font-size: 0.75rem;
+			font-weight: 600;
+			letter-spacing: 0.03em;
+			white-space: nowrap;
+		}
+		.backupd .chip-ok { background: var(--ok-bg); color: var(--ok); }
+		.backupd .chip-syncing { background: var(--syncing-bg); color: var(--syncing); }
+		.backupd .chip-pending { background: var(--pending-bg); color: var(--pending); }
+		.backupd .chip-paused { background: var(--paused-bg); color: var(--paused); }
+		.backupd .chip-failing { background: var(--failing-bg); color: var(--failing); }
+		.backupd .chip-atrisk { background: var(--atrisk-bg); color: var(--atrisk); }
+		.backupd .chip-unknown { background: var(--unknown-bg); color: var(--unknown); }
+		.backupd .chip-dryrun { background: var(--dryrun-bg); color: var(--dryrun); border: 1px solid var(--dryrun-border); }
+		.backupd .chip-info { background: var(--paused-bg); color: var(--paused); }
+		.backupd .chip-warning { background: var(--pending-bg); color: var(--pending); }
+		.backupd .chip-critical { background: var(--failing-bg); color: var(--failing); }
+		.backupd .chip-reason {
+			color: var(--muted);
+			font-size: 0.85rem;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+			max-width: 28rem;
+			display: inline-block;
+			vertical-align: bottom;
+		}
+		.backupd .countdown { color: var(--muted); font-variant-numeric: tabular-nums; }
+		.backupd progress { width: 10rem; height: 0.6rem; accent-color: var(--syncing); }
+		.backupd .progress-label { color: var(--muted); font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+		.backupd .dot, .backupd .phase-dot {
+			width: 10px; height: 10px;
+			border-radius: 50%;
+			flex-shrink: 0;
+			display: inline-block;
+		}
+		.backupd .dot-ok { background: var(--ok); }
+		.backupd .dot-syncing { background: var(--syncing); animation: backupd-pulse 1.2s ease-in-out infinite alternate; }
+		.backupd .dot-pending { background: var(--pending); }
+		.backupd .dot-paused { background: var(--paused); }
+		.backupd .dot-failing { background: var(--failing); }
+		.backupd .dot-atrisk { background: var(--atrisk); }
+		.backupd .dot-unknown { background: var(--unknown); }
+		.backupd .dot.pulsing { animation: backupd-pulse 1.2s ease-in-out infinite alternate; }
+		/* Keyframe names are global no matter where the rule is written,
+		   so they carry the prefix the selectors get from scoping. */
+		@keyframes backupd-pulse { from { opacity: 0.4; } to { opacity: 1; } }
+		@keyframes backupd-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+		.backupd .spinner {
+			display: inline-block;
+			width: 12px; height: 12px;
+			border: 2px solid var(--syncing);
+			border-top-color: transparent;
+			border-radius: 50%;
+			animation: backupd-spin 1s linear infinite;
+			vertical-align: middle;
+		}
+
+		/* Shell */
+		.backupd .shell { display: flex; }
+		.backupd .sidebar {
+			width: 270px;
+			border-right: 1px solid var(--border);
+			background: var(--surface);
+			padding: 0.75rem;
+			flex-shrink: 0;
+		}
+		.backupd .main-content { flex: 1; min-width: 0; padding: 1rem 1.5rem; }
+		.backupd .nav-link, .backupd .dataset-link {
+			display: flex;
+			align-items: center;
+			gap: 0.5rem;
+			padding: 0.35rem 0.5rem;
+			border-radius: 4px;
+			text-decoration: none;
+			color: var(--fg);
+			margin-bottom: 0.1rem;
+		}
+		.backupd .nav-link:hover, .backupd .dataset-link:hover,
+		.backupd .nav-link.active, .backupd .dataset-link.active { background: var(--surface-hover); text-decoration: none; }
+		.backupd .side-heading {
+			margin: 1rem 0 0.35rem;
+			font-size: 0.75rem;
+			font-weight: 600;
+			letter-spacing: 0.06em;
+			text-transform: uppercase;
+			color: var(--muted);
+		}
+		.backupd .dataset-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+		.backupd .dataset-age { margin-left: auto; font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+		.backupd .controls { display: flex; flex-direction: column; gap: 0.4rem; margin: 0.75rem 0; }
+		.backupd .controls .snapshot-row { display: flex; gap: 0.4rem; }
+		.backupd .controls .snapshot-row select { flex: 1; min-width: 0; }
+		.backupd .btn, .backupd select, .backupd textarea {
+			font-family: inherit;
+			color: var(--fg);
+			background: var(--field);
+			border: 1px solid var(--field-border);
+			border-radius: 4px;
+			font-size: 0.85rem;
+		}
+		.backupd .btn {
+			padding: 0.35rem 0.7rem;
+			cursor: pointer;
+		}
+		.backupd .btn:hover { background: var(--surface-hover); }
+		.backupd .btn.warn { border-color: var(--paused); color: var(--paused); font-weight: 500; }
+		.backupd .btn.small { padding: 0.15rem 0.5rem; font-size: 0.8rem; }
+
+		/* Content */
+		.backupd h1 { font-size: 1.4rem; margin: 0.25rem 0 1rem; }
+		.backupd h1 .chip { vertical-align: middle; margin-left: 0.5rem; }
+		.backupd h2 { font-size: 1.05rem; margin: 1.5rem 0 0.5rem; }
+		/* Plain tables (facts, fulfillment, plan). The datagrid tables
+		   bring their own operational-table treatment, so the host rules
+		   stand aside for anything inside a monks-datagrid. */
+		.backupd table:not(monks-datagrid *) { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
+		.backupd th:not(monks-datagrid *), .backupd td:not(monks-datagrid *) { padding: 0.3em 0.9em 0.3em 0; text-align: left; border-bottom: 1px solid var(--border); vertical-align: baseline; }
+		.backupd th:not(monks-datagrid *) { font-weight: 600; font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+		.backupd td.num, .backupd th.num { text-align: right; font-variant-numeric: tabular-nums; }
+		.backupd .muted { color: var(--muted); }
+		.backupd .error-text { color: var(--failing); }
+		.backupd .stale-text { color: var(--atrisk); font-weight: 500; }
+		.backupd .cycle-ok { color: var(--ok); font-weight: 600; }
+		.backupd .cycle-failed { color: var(--failing); font-weight: 600; }
+		.backupd .cycle-paused { color: var(--paused); font-weight: 600; }
+
+		/* Attention (issues) */
+		.backupd .all-clear {
+			color: var(--ok);
+			background: var(--ok-bg);
+			padding: 0.6rem 0.9rem;
+			border-radius: 4px;
+			margin: 0 0 1rem;
+		}
+		.backupd .issues { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1rem; }
+		.backupd .issue {
+			display: flex;
+			align-items: baseline;
+			gap: 0.6rem;
+			padding: 0.5rem 0.75rem;
+			border-radius: 4px;
+			border-left: 4px solid var(--unknown);
+			background: var(--surface);
+			flex-wrap: wrap;
+		}
+		.backupd .issue-critical { border-left-color: var(--failing); background: var(--failing-bg); }
+		.backupd .issue-warning { border-left-color: var(--pending); background: var(--pending-bg); }
+		.backupd .issue-info { border-left-color: var(--paused); background: var(--paused-bg); }
+		.backupd .issue-summary { font-weight: 600; }
+		.backupd .issue-since { color: var(--muted); font-size: 0.85rem; }
+		.backupd .issue-detail { flex-basis: 100%; font-size: 0.85rem; color: var(--detail); font-family: monospace; white-space: pre-wrap; }
+		.backupd .issue .btn { margin-left: auto; }
+
+		/* Now (cycle progress) */
+		.backupd .now {
+			display: flex;
+			align-items: center;
+			gap: 0.75rem;
+			margin-bottom: 1rem;
+			color: var(--muted);
+			flex-wrap: wrap;
+		}
+		.backupd .qdots { display: inline-flex; gap: 3px; align-items: center; }
+		.backupd .qdot { width: 8px; height: 8px; border-radius: 2px; display: inline-block; background: var(--track); }
+		.backupd .qdot-done { background: var(--ok); }
+		.backupd .qdot-failed { background: var(--failing); }
+		.backupd .qdot-skipped { background: var(--paused); }
+		.backupd .qdot-active { background: var(--syncing); animation: backupd-pulse 1.2s ease-in-out infinite alternate; }
+
+		/* Cycle strip (recent checks at a glance) */
+		.backupd .cycle-strip { display: flex; flex-wrap: wrap; gap: 3px; margin: 0.25rem 0 0.75rem; }
+
+		/* Fulfillment */
+		.backupd .shortfall { color: var(--pending); font-weight: 600; }
+
+		/* Plan steps */
+		.backupd .step-status { display: inline-block; width: 14px; height: 14px; vertical-align: middle; }
+		.backupd .step-status.pending { border: 2px solid var(--field-border); border-radius: 50%; }
+		.backupd .step-status.in-progress { border: 2px solid var(--syncing); border-top-color: transparent; border-radius: 50%; animation: backupd-spin 1s linear infinite; }
+		.backupd .step-status.completed::before { content: '✓'; color: var(--ok); font-weight: bold; }
+		.backupd .step-status.failed::before { content: '✗'; color: var(--failing); font-weight: bold; }
+		.backupd .step-log td { border-bottom: none; }
+		.backupd .log-message { font-size: 0.8rem; color: var(--muted); font-family: monospace; display: block; padding: 0.1rem 0 0.1rem 2rem; }
+		.backupd .step-progress td { border-bottom: none; padding-left: 2rem; }
+		.backupd .step-progress progress { width: 16rem; }
+
+		/* Recovery sentence */
+		.backupd .recovery { margin: 0 0 1rem; max-width: 60rem; }
+		.backupd .recovery b { font-weight: 600; }
+		.backupd .recovery.atrisk { color: var(--atrisk); }
+
+		/* Snapshot grid */
+		.backupd .snapshot-present { color: var(--ok); }
+		.backupd .snapshot-absent { color: var(--failing); }
+		.backupd .snapshot-doomed { color: var(--pending); }
+		.backupd .retention-override { color: var(--pending); font-weight: 500; }
+
+		/* Config editor */
+		.backupd #config-editor {
+			width: 100%;
+			min-height: 24rem;
+			font-family: monospace;
+			font-size: 0.9rem;
+			padding: 0.75rem;
+			resize: vertical;
+		}
+		.backupd .config-actions { display: flex; gap: 0.5rem; margin: 0.75rem 0; }
+		.backupd .config-error {
+			background: var(--failing-bg);
+			color: var(--failing);
+			padding: 0.75rem;
+			border-radius: 4px;
+			white-space: pre-wrap;
+			font-family: monospace;
+			font-size: 0.85rem;
+		}
+		.backupd .impact-note { color: var(--muted); font-size: 0.9rem; }
+	</style>
+}

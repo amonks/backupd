@@ -1,7 +1,12 @@
 package logger
 
 import (
+	"bytes"
 	"fmt"
+	"log"
+	"log/slog"
+	"os"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -64,4 +69,44 @@ func TestConcurrent(t *testing.T) {
 		})
 	}
 	wg.Wait()
+}
+
+// TestSetLoggerRoutesLines: a host embedding backupd collects its lines
+// through slog rather than the standard log package, and each line
+// arrives labelled with the logger that wrote it.
+func TestSetLoggerRoutesLines(t *testing.T) {
+	var buf bytes.Buffer
+	SetLogger(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{})))
+	t.Cleanup(func() { SetLogger(nil) })
+
+	New("global").Printf("syncing %q", "/tm")
+
+	out := buf.String()
+	if !strings.Contains(out, `msg="syncing \"/tm\""`) {
+		t.Errorf("line missing from routed output: %s", out)
+	}
+	if !strings.Contains(out, LabelKey+"=global") {
+		t.Errorf("routed line is not labelled with its logger: %s", out)
+	}
+}
+
+// TestSetLoggerNilRestoresTheDefault: the standard log package is the
+// destination when nothing else is installed, which is what the CLI
+// relies on for -logfile.
+func TestSetLoggerNilRestoresTheDefault(t *testing.T) {
+	var routed, standard bytes.Buffer
+	SetLogger(slog.New(slog.NewTextHandler(&routed, &slog.HandlerOptions{})))
+
+	log.SetOutput(&standard)
+	t.Cleanup(func() { log.SetOutput(os.Stderr); SetLogger(nil) })
+
+	SetLogger(nil)
+	New("global").Printf("back to the process log")
+
+	if routed.Len() != 0 {
+		t.Errorf("line still routed after SetLogger(nil): %s", routed.String())
+	}
+	if !strings.Contains(standard.String(), "[global]\tback to the process log") {
+		t.Errorf("line missing from the process log: %q", standard.String())
+	}
 }

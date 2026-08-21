@@ -1,4 +1,4 @@
-package main
+package daemon
 
 import (
 	"fmt"
@@ -18,7 +18,7 @@ templ overview(d pageData) {
 	<h1>Overview</h1>
 	@attentionSection(d)
 	@nowSection(d)
-	@fleetGrid(d.Sys.Datasets)
+	@fleetGrid(d.Base, d.Sys.Datasets)
 	@recordSection(d)
 }
 
@@ -30,17 +30,17 @@ templ attentionSection(d pageData) {
 	} else {
 		<div class="issues">
 			for _, issue := range d.Sys.Issues {
-				@issueCard(issue)
+				@issueCard(d.Base, issue)
 			}
 		</div>
 	}
 }
 
-templ issueCard(issue view.Issue) {
+templ issueCard(base string, issue view.Issue) {
 	<div class={ "issue", "issue-" + issue.Severity.String() }>
 		<span class={ "chip", "chip-" + issue.Severity.String() }>{ issue.Severity.String() }</span>
 		if issue.Dataset != nil {
-			<a href={ templ.SafeURL(datasetHref(*issue.Dataset)) }>{ issue.Dataset.String() }</a>
+			<a href={ templ.SafeURL(datasetHref(base, *issue.Dataset)) }>{ issue.Dataset.String() }</a>
 		}
 		<span class="issue-summary">{ issue.Summary }</span>
 		if !issue.Since.IsZero() {
@@ -132,11 +132,11 @@ templ ageCell(has bool, age time.Duration, stale bool, absent string) {
 templ recordSection(d pageData) {
 	if len(d.Events) > 0 {
 		<h2>Journal</h2>
-		@journalGrid(d.Events)
+		@journalGrid(d.Base, d.Events)
 	}
 	if len(d.Ops) > 0 {
 		<h2>Recent Activity</h2>
-		@opsGrid(d.Ops)
+		@opsGrid(d.Base, d.Ops)
 	}
 	if len(d.Cycles) > 0 {
 		<h2>Cycle History</h2>

@@ -1,4 +1,4 @@
-package main
+package daemon
 
 import (
 	"bytes"
@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -22,15 +23,25 @@ import (
 	"monks.co/backupd/status"
 )
 
-type Backupd struct {
+type Daemon struct {
 	conf       *atom.Atom[*config.Config]
 	state      *atom.Atom[*model.Model]
 	globalLogs *logger.Logger
 	activity   *status.Tracker
 	env        env.Interface
-	addr       string
 	dryrun     bool
-	version    *atom.Atom[int64]
+
+	// log is the structured record of what the daemon does — cycle
+	// outcomes, journal entries, snitch pings — for a host that
+	// collects them. See Options.Logger.
+	log *slog.Logger
+
+	// layout and omitNav are how a host wraps the dashboard in its own
+	// chrome. See Options.
+	layout  Layout
+	omitNav bool
+
+	version *atom.Atom[int64]
 	versionCh  chan struct{}
 	syncNow    chan syncRequest
 	history    *history.History
@@ -60,23 +71,33 @@ type syncRequest struct {
 	dataset model.DatasetName
 }
 
-func New(conf *config.Config, addr string, dryrun bool) *Backupd {
-	e := env.New(conf)
-	b := NewWithEnv(conf, addr, dryrun, e)
-	e.OnProgress = b.activity.Progress
-	return b
-}
+// New builds a daemon from opts. It starts nothing: Run drives the sync
+// loop, Handler returns the dashboard, and Serve puts the two together
+// on a listener of the daemon's own.
+//
+// New installs opts.Logger (or slog.Default()) as the destination for
+// the in-memory ring buffers as well, so every line the daemon writes
+// reaches one place. That call is process-wide — see logger.SetLogger.
+func New(opts Options) *Daemon {
+	e := opts.Env
+	if e == nil {
+		e = env.New(opts.Config)
+	}
+	log := opts.Logger
+	if log == nil {
+		log = slog.Default()
+	}
+	logger.SetLogger(log)
 
-// NewWithEnv builds a daemon around any environment implementation —
-// the real ZFS-over-SSH env, or the sim package's in-memory pair.
-func NewWithEnv(conf *config.Config, addr string, dryrun bool, e env.Interface) *Backupd {
-	b := &Backupd{
-		conf:       atom.New(conf),
+	b := &Daemon{
+		conf:       atom.New(opts.Config),
 		state:      atom.New[*model.Model](nil),
 		globalLogs: logger.New("global"),
 		env:        e,
-		addr:       addr,
-		dryrun:     dryrun,
+		dryrun:     opts.Dryrun,
+		log:        log,
+		layout:     opts.Layout,
+		omitNav:    opts.OmitNav,
 		version:    atom.New[int64](0),
 		versionCh:  make(chan struct{}, 1),
 		syncNow:    make(chan syncRequest, 16),
@@ -87,6 +108,7 @@ func NewWithEnv(conf *config.Config, addr string, dryrun bool, e env.Interface) 
 	b.resume = e.Resume
 	b.snitch = snitch.OK
 	b.wait = b.waitWake
+	e.SetOnProgress(b.activity.Progress)
 	return b
 }
 
@@ -94,7 +116,7 @@ func NewWithEnv(conf *config.Config, addr string, dryrun bool, e env.Interface) 
 // sync-now request arrives (returning the request), or the context is
 // cancelled (returning the context's error). Non-positive durations
 // return immediately.
-func (b *Backupd) waitWake(ctx context.Context, d time.Duration) (*syncRequest, error) {
+func (b *Daemon) waitWake(ctx context.Context, d time.Duration) (*syncRequest, error) {
 	if d <= 0 {
 		return nil, ctx.Err()
 	}
@@ -113,7 +135,7 @@ func (b *Backupd) waitWake(ctx context.Context, d time.Duration) (*syncRequest, 
 // TriggerSync requests an immediate sync — a full cycle (all) or a single
 // dataset — waking the sync loop if it is idle between cycles. It returns
 // false if the request buffer is full.
-func (b *Backupd) TriggerSync(all bool, dataset model.DatasetName) bool {
+func (b *Daemon) TriggerSync(all bool, dataset model.DatasetName) bool {
 	select {
 	case b.syncNow <- syncRequest{all: all, dataset: dataset}:
 		return true
@@ -127,7 +149,7 @@ func (b *Backupd) TriggerSync(all bool, dataset model.DatasetName) bool {
 // state. Sync-now requests interrupt it: a global request ends the idle
 // immediately (the caller starts the next cycle), while a per-dataset
 // request syncs just that dataset and resumes waiting out the interval.
-func (b *Backupd) idle(ctx context.Context, d time.Duration, failures int) error {
+func (b *Daemon) idle(ctx context.Context, d time.Duration, failures int) error {
 	deadline := time.Now().Add(d)
 	remaining := d
 	for {
@@ -162,21 +184,59 @@ func (b *Backupd) idle(ctx context.Context, d time.Duration, failures int) error
 // after a week would want to read. The journal carries the dataset as
 // a structured field; the process log — the only record that survives
 // a restart — gets it as a prefix.
-func (b *Backupd) event(level history.Level, dataset *model.DatasetName, format string, args ...any) {
+func (b *Daemon) event(level history.Level, dataset *model.DatasetName, format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
+	attrs := []slog.Attr{slog.String(EventKey, string(level))}
 	if dataset != nil {
-		b.globalLogs.Printf("'%s': %s", *dataset, msg)
-	} else {
-		b.globalLogs.Printf("%s", msg)
+		attrs = append(attrs, slog.String(DatasetKey, dataset.String()))
 	}
+	b.log.LogAttrs(context.Background(), slogLevel(level), msg, attrs...)
 	b.history.RecordEvent(history.Event{At: time.Now(), Level: level, Dataset: dataset, Message: msg})
 	b.notifyStateChange()
+}
+
+// Attribute keys the daemon logs its structured record under. They are
+// exported and namespaced because a host collects them: alerting on
+// "did the last cycle succeed" should be a query for CycleOKKey, not a
+// substring match against a message.
+const (
+	// EventKey carries a journal entry's level: info, warning, error.
+	EventKey = "backupd.event"
+	// DatasetKey carries the dataset a record concerns.
+	DatasetKey = "backupd.dataset"
+	// CycleOKKey is false on a cycle that failed, including one that
+	// failed only for some datasets.
+	CycleOKKey = "backupd.cycle.ok"
+	// CyclePausedKey is true on a cycle that ran under a global pause.
+	CyclePausedKey = "backupd.cycle.paused"
+	// CycleDatasetsKey counts the datasets a cycle processed, and
+	// CycleFailuresKey names the ones that failed.
+	CycleDatasetsKey = "backupd.cycle.datasets"
+	CycleFailuresKey = "backupd.cycle.failures"
+	// CycleDurationKey is how long the cycle took, in milliseconds.
+	CycleDurationKey = "backupd.cycle.duration_ms"
+	// SnitchOKKey is false when a Dead Man's Snitch ping failed.
+	SnitchOKKey = "backupd.snitch.ok"
+)
+
+// slogLevel maps a journal level onto a slog level, so a host's
+// existing level-based routing (alert on warnings and up) works on
+// backupd's records without knowing backupd's vocabulary.
+func slogLevel(l history.Level) slog.Level {
+	switch l {
+	case history.Error:
+		return slog.LevelError
+	case history.Warning:
+		return slog.LevelWarn
+	default:
+		return slog.LevelInfo
+	}
 }
 
 // applyConfig swaps in a new config. Policy, pause, interval, and snitch
 // changes take effect immediately; the ZFS roots and SSH endpoint were
 // captured by env at startup, so changes there get a restart warning.
-func (b *Backupd) applyConfig(fresh *config.Config) {
+func (b *Daemon) applyConfig(fresh *config.Config) {
 	cur := b.conf.Deref()
 	if fresh.Local.Root != cur.Local.Root ||
 		fresh.Remote.Root != cur.Remote.Root ||
@@ -190,7 +250,7 @@ func (b *Backupd) applyConfig(fresh *config.Config) {
 
 // reloadConfigFromDisk picks up hand-edits to the config file at cycle
 // start. An invalid or unreadable file keeps the current config.
-func (b *Backupd) reloadConfigFromDisk() {
+func (b *Daemon) reloadConfigFromDisk() {
 	cur := b.conf.Deref()
 	if cur.Path == "" {
 		return
@@ -231,7 +291,7 @@ func targetHas(target *model.SnapshotInventory, loc model.Location, snap *model.
 	return false
 }
 
-func (b *Backupd) notifyStateChange() {
+func (b *Daemon) notifyStateChange() {
 	b.version.Swap(func(v int64) int64 { return v + 1 })
 	select {
 	case b.versionCh <- struct{}{}:
@@ -240,7 +300,7 @@ func (b *Backupd) notifyStateChange() {
 }
 
 // updateStep updates a plan step in a thread-safe manner
-func (b *Backupd) updateStep(dataset model.DatasetName, stepIndex int, update func(*model.PlanStep)) {
+func (b *Daemon) updateStep(dataset model.DatasetName, stepIndex int, update func(*model.PlanStep)) {
 	b.state.Swap(func(state *model.Model) *model.Model {
 		currentDS := state.GetDataset(dataset)
 		if currentDS == nil || currentDS.Plan == nil || stepIndex >= len(currentDS.Plan.Steps) {
@@ -252,22 +312,27 @@ func (b *Backupd) updateStep(dataset model.DatasetName, stepIndex int, update fu
 	b.notifyStateChange()
 }
 
-func (b *Backupd) Go(ctx context.Context) error {
+// Go runs the sync loop and serves the dashboard on addr until ctx is
+// cancelled. It is the standalone daemon; a host that owns its own
+// listener runs Run and mounts Handler instead.
+func (b *Daemon) Go(ctx context.Context, addr string) error {
 	g, ctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
-		return b.Serve(ctx)
+		return b.Serve(ctx, addr)
 	})
 
 	g.Go(func() error {
-		return b.Sync(ctx)
+		return b.Run(ctx)
 	})
 
 	return g.Wait()
 }
 
-func (b *Backupd) Serve(ctx context.Context) error {
-	return listenAndServe(ctx, b.addr, b.handler())
+// Serve runs the dashboard on addr until ctx is cancelled. It does not
+// run the sync loop; see Run.
+func (b *Daemon) Serve(ctx context.Context, addr string) error {
+	return listenAndServe(ctx, addr, b.Handler())
 }
 
 // Backoff bounds for failed sync cycles. A failure (e.g. the remote
@@ -280,7 +345,11 @@ const (
 	maxBackoff = 30 * time.Minute
 )
 
-func (b *Backupd) Sync(ctx context.Context) error {
+// Run drives the sync loop until ctx is cancelled: refresh, plan,
+// execute, ping the snitch, wait out the interval, repeat. A failed
+// cycle is retried in-process after a growing backoff rather than
+// returning, so only cancellation ends it.
+func (b *Daemon) Run(ctx context.Context) error {
 	backoff := minBackoff
 	consecutive := 0
 	for {
@@ -336,7 +405,7 @@ func (b *Backupd) Sync(ctx context.Context) error {
 			b.globalLogs.Printf("synced all datasets")
 		}
 
-		b.history.RecordCycle(history.Cycle{
+		cycle := history.Cycle{
 			StartedAt: cycleStart,
 			StoppedAt: time.Now(),
 			OK:        allOK,
@@ -344,7 +413,9 @@ func (b *Backupd) Sync(ctx context.Context) error {
 			Error:     cycleErr,
 			Datasets:  datasets,
 			Failures:  failures,
-		})
+		}
+		b.history.RecordCycle(cycle)
+		b.logCycle(cycle)
 		b.notifyStateChange()
 
 		if allOK {
@@ -357,15 +428,14 @@ func (b *Backupd) Sync(ctx context.Context) error {
 				// trips the dead man's switch.
 				if conf.Paused {
 					b.globalLogs.Printf("paused; skipping deadmanssnitch")
+				} else if err := b.snitch(conf.SnitchID); err != nil {
+					b.log.LogAttrs(context.Background(), slog.LevelError, "snitch ping failed",
+						slog.Bool(SnitchOKKey, false), slog.String("error", err.Error()))
+					b.history.RecordSnitchError(time.Now(), err.Error())
 				} else {
-					b.globalLogs.Printf("alerting deadmanssnitch")
-					if err := b.snitch(conf.SnitchID); err != nil {
-						b.globalLogs.Printf("snitch error: %v", err)
-						b.history.RecordSnitchError(time.Now(), err.Error())
-					} else {
-						b.globalLogs.Printf("snitched success")
-						b.history.RecordSnitch(time.Now())
-					}
+					b.log.LogAttrs(context.Background(), slog.LevelInfo, "snitch pinged",
+						slog.Bool(SnitchOKKey, true))
+					b.history.RecordSnitch(time.Now())
 				}
 			}
 			b.globalLogs.Printf("waiting to restart")
@@ -383,7 +453,7 @@ func (b *Backupd) Sync(ctx context.Context) error {
 	}
 }
 
-func (b *Backupd) refreshAllDatasetsAndPlans(ctx context.Context) error {
+func (b *Daemon) refreshAllDatasetsAndPlans(ctx context.Context) error {
 	b.state.Reset(model.New())
 
 	// First, discover and refresh all datasets
@@ -428,7 +498,7 @@ func (b *Backupd) refreshAllDatasetsAndPlans(ctx context.Context) error {
 	return nil
 }
 
-func (b *Backupd) generatePlansForAllDatasets(ctx context.Context) {
+func (b *Daemon) generatePlansForAllDatasets(ctx context.Context) {
 	state := b.state.Deref()
 	for _, dsName := range state.ListDatasets() {
 		if err := ctx.Err(); err != nil {
@@ -467,7 +537,7 @@ func (b *Backupd) generatePlansForAllDatasets(ctx context.Context) {
 	}
 }
 
-func (b *Backupd) refreshDataset(ctx context.Context, logger *logger.Logger, dataset model.DatasetName) error {
+func (b *Daemon) refreshDataset(ctx context.Context, logger *logger.Logger, dataset model.DatasetName) error {
 	// Refresh *local snapshots
 	localSnapshots, err := b.env.LocalSnapshots(logger, dataset)
 	if err != nil {
@@ -491,7 +561,7 @@ func (b *Backupd) refreshDataset(ctx context.Context, logger *logger.Logger, dat
 
 // syncDataset executes the plan for the given dataset, recording the
 // outcome in history (cancellation is not an outcome).
-func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) error {
+func (b *Daemon) syncDataset(ctx context.Context, dataset model.DatasetName) error {
 	err := b.syncDatasetInner(ctx, dataset)
 	if err != nil && ctx.Err() == nil {
 		b.history.RecordDatasetFailure(dataset, time.Now(), err.Error())
@@ -500,7 +570,7 @@ func (b *Backupd) syncDataset(ctx context.Context, dataset model.DatasetName) er
 	return err
 }
 
-func (b *Backupd) syncDatasetInner(ctx context.Context, dataset model.DatasetName) error {
+func (b *Daemon) syncDatasetInner(ctx context.Context, dataset model.DatasetName) error {
 	b.activity.StartDataset(dataset)
 
 	ds := b.state.Deref().GetDataset(dataset)
@@ -710,7 +780,7 @@ func (b *Backupd) syncDatasetInner(ctx context.Context, dataset model.DatasetNam
 	return resumeErr
 }
 
-func (b *Backupd) handleIncompleteTransfer(ctx context.Context, logger *logger.Logger, dataset model.DatasetName) error {
+func (b *Daemon) handleIncompleteTransfer(ctx context.Context, logger *logger.Logger, dataset model.DatasetName) error {
 	ds := b.state.Deref().GetDataset(dataset)
 	if ds == nil || ds.Current == nil || ds.Current.Remote == nil {
 		return nil
@@ -797,8 +867,19 @@ func listenAndServe(ctx context.Context, addr string, handler http.Handler) erro
 	}
 }
 
-// Plan prints the plan for the given dataset
-func (b *Backupd) Plan(ctx context.Context, dataset model.DatasetName) error {
+// Debug refreshes one dataset from the environment and writes what the
+// daemon would do to it — the diff from current to target, and the plan
+// that would get there — without executing anything. It backs the CLI's
+// -debug flag.
+func (b *Daemon) Debug(ctx context.Context, dataset model.DatasetName, w io.Writer) error {
+	if err := b.refreshDataset(ctx, b.globalLogs, dataset); err != nil {
+		return err
+	}
+	return b.Plan(ctx, dataset, w)
+}
+
+// Plan writes the plan for the given dataset to w.
+func (b *Daemon) Plan(ctx context.Context, dataset model.DatasetName, w io.Writer) error {
 	initialState := b.state.Deref()
 	ds := initialState.GetDataset(dataset)
 
@@ -823,11 +904,11 @@ func (b *Backupd) Plan(ctx context.Context, dataset model.DatasetName) error {
 		return fmt.Errorf("constructing plan: %w", err)
 	}
 
-	fmt.Println("ACHIEVING CHANGE")
-	fmt.Print(ds.Current.Diff(target))
-	fmt.Println("VIA PLAN")
+	fmt.Fprintln(w, "ACHIEVING CHANGE")
+	fmt.Fprint(w, ds.Current.Diff(target))
+	fmt.Fprintln(w, "VIA PLAN")
 	for _, op := range plan.Steps {
-		fmt.Printf("- %s\n", op)
+		fmt.Fprintf(w, "- %s\n", op)
 	}
 
 	if err := model.ValidatePlan(ctx, ds.Current, target, plan, true); err != nil {
@@ -838,7 +919,7 @@ func (b *Backupd) Plan(ctx context.Context, dataset model.DatasetName) error {
 }
 
 // RefreshLocalSnapshots refreshes local snapshot information for all datasets in memory
-func (b *Backupd) RefreshLocalSnapshots(ctx context.Context, logger *logger.Logger) error {
+func (b *Daemon) RefreshLocalSnapshots(ctx context.Context, logger *logger.Logger) error {
 	// Directly update state by refreshing snapshots for all datasets
 	// This is concurrency-safe due to the atom's RWMutex
 	b.state.Swap(func(currentState *model.Model) *model.Model {
@@ -871,13 +952,14 @@ func (b *Backupd) RefreshLocalSnapshots(ctx context.Context, logger *logger.Logg
 	return nil
 }
 
-// CallAPI sends a control request to the running daemon at b.addr and
-// logs the response body. The CLI subcommands (snapshot, pause, resume,
-// sync) are thin wrappers over this.
-func (b *Backupd) CallAPI(ctx context.Context, method, path string) error {
+// CallAPI sends a control request to a running daemon at addr and logs
+// the response body. The CLI subcommands (snapshot, pause, resume,
+// sync) are thin wrappers over this; it needs no daemon of its own,
+// only the address of one.
+func CallAPI(ctx context.Context, addr, method, path string) error {
 	client := &http.Client{Timeout: 30 * time.Second}
 
-	url := fmt.Sprintf("http://%s%s", b.addr, path)
+	url := fmt.Sprintf("http://%s%s", addr, path)
 	req, err := http.NewRequestWithContext(ctx, method, url, nil)
 	if err != nil {
 		return fmt.Errorf("creating request: %w", err)
@@ -902,7 +984,32 @@ func (b *Backupd) CallAPI(ctx context.Context, method, path string) error {
 	return nil
 }
 
-// CreateSnapshot sends a request to the running daemon to create a snapshot
-func (b *Backupd) CreateSnapshot(ctx context.Context, periodicity string) error {
-	return b.CallAPI(ctx, "POST", "/api/snapshot?periodicity="+periodicity)
+// CreateSnapshot asks a running daemon at addr to create a snapshot.
+func CreateSnapshot(ctx context.Context, addr, periodicity string) error {
+	return CallAPI(ctx, addr, "POST", "/api/snapshot?periodicity="+periodicity)
+}
+
+// logCycle emits one structured record per completed cycle: the
+// heartbeat a host alerts on. A failing cycle is logged at error level
+// so level-based routing catches it without reading the attributes.
+func (b *Daemon) logCycle(c history.Cycle) {
+	level := slog.LevelInfo
+	msg := "sync cycle ok"
+	if !c.OK {
+		level = slog.LevelError
+		msg = "sync cycle failed"
+	}
+	attrs := []slog.Attr{
+		slog.Bool(CycleOKKey, c.OK),
+		slog.Bool(CyclePausedKey, c.Paused),
+		slog.Int(CycleDatasetsKey, c.Datasets),
+		slog.Int64(CycleDurationKey, c.StoppedAt.Sub(c.StartedAt).Milliseconds()),
+	}
+	if len(c.Failures) > 0 {
+		attrs = append(attrs, slog.Any(CycleFailuresKey, c.Failures))
+	}
+	if c.Error != "" {
+		attrs = append(attrs, slog.String("error", c.Error))
+	}
+	b.log.LogAttrs(context.Background(), level, msg, attrs...)
 }

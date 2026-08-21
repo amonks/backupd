@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"monks.co/backupd/config"
+	"monks.co/backupd/daemon"
+	"monks.co/backupd/logger"
 	"monks.co/backupd/sim"
 )
 
@@ -62,9 +64,9 @@ func runSim(ctx context.Context, addr string) error {
 	}
 
 	s := sim.Demo(time.Now())
-	b := NewWithEnv(conf, addr, false, s)
-	s.OnProgress = b.activity.Progress
+	d := daemon.New(daemon.Options{Config: conf, Env: s})
 
+	churn := logger.New("sim-churn")
 	go func() {
 		ticker := time.NewTicker(40 * time.Second)
 		defer ticker.Stop()
@@ -73,13 +75,13 @@ func runSim(ctx context.Context, addr string) error {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if err := s.Snapshot(ctx, b.globalLogs, conf.Local.Root, "hourly"); err != nil {
-					b.globalLogs.Printf("sim churn: %s", err)
+				if err := s.Snapshot(ctx, churn, conf.Local.Root, "hourly"); err != nil {
+					churn.Printf("sim churn: %s", err)
 				}
 			}
 		}
 	}()
 
 	log.Printf("sim mode: dashboard at http://%s, config at %s", addr, path)
-	return b.Go(ctx)
+	return d.Go(ctx, addr)
 }

@@ -569,3 +569,7 @@ func (s *Sim) String() string {
 	describe("remote", s.remote)
 	return out.String()
 }
+
+// SetOnProgress installs the transfer-progress callback, satisfying
+// env.Interface.
+func (s *Sim) SetOnProgress(fn func(sent, total int64)) { s.OnProgress = fn }

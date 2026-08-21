@@ -1,4 +1,4 @@
-package main
+package daemon
 
 import (
 	"fmt"
@@ -47,7 +47,7 @@ templ datasetPage(d pageData) {
 		{{ events := eventsForDataset(d.Events, name) }}
 		if len(events) > 0 {
 			<h2>Journal</h2>
-			@journalGrid(events)
+			@journalGrid(d.Base, events)
 		}
 	}
 }

@@ -1,7 +1,13 @@
+# The committed _templ.go files carry repo-root-relative FileNames, so
+# regenerating them means `go tool templ generate -path cmd/backupd` from
+# the repo root — note the flag: a positional path is ignored, and a bare
+# `templ generate` at the root rewrites every app's FileNames as well.
+# This task, run from the module dir, produces module-relative names
+# instead, which is why nothing depends on it (see `tidy` below).
 [[task]]
   id = "templ"
   type = "short"
-  watch = ["*.templ"]
+  watch = ["*.templ", "daemon/*.templ"]
   cmd = "go tool templ generate ."
 
 # This module publishes to a public mirror, so `publish-validate` checks it

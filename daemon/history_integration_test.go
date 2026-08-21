@@ -1,4 +1,4 @@
-package main
+package daemon
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 // reset at the start of the next cycle.
 func TestCycleHistoryRecordsSuccess(t *testing.T) {
 	local, remote := steadyStateExecutors()
-	b := newTestBackupd(testConf(), local, remote)
+	b := newTestDaemon(testConf(), local, remote)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -26,7 +26,7 @@ func TestCycleHistoryRecordsSuccess(t *testing.T) {
 		return nil, ctx.Err()
 	}
 
-	if err := b.Sync(ctx); !errors.Is(err, context.Canceled) {
+	if err := b.Run(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected Sync to return on cancellation, got: %v", err)
 	}
 
@@ -54,7 +54,7 @@ func TestCycleHistoryRecordsFailure(t *testing.T) {
 	remote := &fakeExecutor{name: "remote", handlers: []fakeHandler{
 		{match: "-t filesystem", err: fmt.Errorf("connection refused")},
 	}}
-	b := newTestBackupd(testConf(), local, remote)
+	b := newTestDaemon(testConf(), local, remote)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -63,7 +63,7 @@ func TestCycleHistoryRecordsFailure(t *testing.T) {
 		return nil, ctx.Err()
 	}
 
-	if err := b.Sync(ctx); !errors.Is(err, context.Canceled) {
+	if err := b.Run(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected Sync to return on cancellation, got: %v", err)
 	}
 
