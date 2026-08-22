@@ -1,23 +1,15 @@
 package daemon
 
 import (
-	"context"
 	"encoding/json"
-	"fmt"
-	"io"
-	"io/fs"
 	"net/http/httptest"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
-	"time"
 
-	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 	"github.com/chromedp/chromedp/device"
+
+	"monks.co/pkg/browsertest"
 )
 
 // The narrow and touch layouts are expressed entirely in CSS, and the
@@ -29,28 +21,11 @@ import (
 // under the zoom threshold, and the widest table on the dataset page
 // went unrendered by every fixture. So this file asks a browser.
 //
-// It costs no new module in the mirror's go.sum: chromedp is already
-// in it, under monks.co/pkg/datagrid, which is published and carries a
-// browser suite of its own.
-
-// browserLaunchTimeout is how long headless Chrome gets to print its
-// "DevTools listening on ws://…" line, browserDialTimeout how long its
-// DevTools socket then gets to accept the connection, browserBudget
-// the wall-clock allowance for one test's whole session, and
-// browserStep the allowance for a single waiting action inside it.
-//
-// All are ceilings, not costs, and deliberately loose: the first
-// Chromium launch on a fresh CI builder cold-reads a few hundred MB
-// from a slow image device (specs/ci.md § Chromium in the builder),
-// which is why newBrowser pre-reads the install directory first. The
-// per-step bound is what turns a stalled navigation into a named
-// failure instead of an anonymous session-wide deadline (see CLAUDE.md).
-const (
-	browserLaunchTimeout = 2 * time.Minute
-	browserDialTimeout   = time.Minute
-	browserBudget        = 5 * time.Minute
-	browserStep          = 30 * time.Second
-)
+// The launch, the page-cache pre-read, the console capture and the
+// per-step bounds are monks.co/pkg/browsertest's, shared with every
+// browser suite in the fleet. It is published, so the mirror resolves
+// it with no workspace to fall back on, as it already does for
+// chromedp — which it carries anyway, under monks.co/pkg/datagrid.
 
 // phone is the viewport every assertion here is made at: a small
 // current handset. Mobile and Touch are what put `hover: none` in
@@ -153,14 +128,14 @@ func TestBrowserPhoneLayout(t *testing.T) {
 	server := httptest.NewServer(b.Handler())
 	t.Cleanup(server.Close)
 
-	ctx := newBrowser(t)
+	ctx := browsertest.NewBrowser(t)
 	for _, path := range []string{"/global", busyDataset, "/config"} {
 		t.Run(strings.TrimPrefix(path, "/"), func(t *testing.T) {
 			var raw string
 			if err := chromedp.Run(ctx,
-				step("emulate the phone", chromedp.Emulate(phone)),
-				step("navigate to "+path, chromedp.Navigate(server.URL+path)),
-				step("measure the layout", chromedp.Evaluate(fitProbe, &raw)),
+				browsertest.Step("emulate the phone", chromedp.Emulate(phone)),
+				browsertest.Step("navigate to "+path, chromedp.Navigate(server.URL+path)),
+				browsertest.Step("measure the layout", chromedp.Evaluate(fitProbe, &raw)),
 			); err != nil {
 				t.Fatal(err)
 			}
@@ -185,138 +160,4 @@ func TestBrowserPhoneLayout(t *testing.T) {
 			}
 		})
 	}
-}
-
-// step caps one action at its own allowance and names it. Chromedp's
-// waiting actions are bounded by their context and nothing else, so an
-// unbounded one spends the whole session budget and then reports
-// "context deadline exceeded" naming no wait at all.
-//
-// The bound goes inside the action rather than around the Run: a Run
-// on a derived context ties the browser target to that context, so
-// cancelling it at the end of the first step closes the page every
-// later step needs.
-func step(what string, action chromedp.Action) chromedp.ActionFunc {
-	return func(ctx context.Context) error {
-		ctx, cancel := context.WithTimeout(ctx, browserStep)
-		defer cancel()
-		if err := action.Do(ctx); err != nil {
-			return fmt.Errorf("%s: %w", what, err)
-		}
-		return nil
-	}
-}
-
-func chromePath(t *testing.T) string {
-	t.Helper()
-	for _, candidate := range []string{"google-chrome", "google-chrome-stable", "chromium", "chromium-browser"} {
-		path, err := exec.LookPath(candidate)
-		if err != nil {
-			continue
-		}
-		// On macOS, launching a Chrome.app binary through a symlink makes
-		// its framework loader resolve relative paths from the wrong parent.
-		if resolved, err := filepath.EvalSymlinks(path); err == nil {
-			return resolved
-		}
-		return path
-	}
-	t.Fatal("Chrome/Chromium is required for the backupd browser test")
-	return ""
-}
-
-// warmChromeOnce guards the one pre-read of Chromium's install
-// directory per test binary (see browserLaunchTimeout).
-var warmChromeOnce sync.Once
-
-func newBrowser(t *testing.T) context.Context {
-	t.Helper()
-	chrome := chromePath(t)
-	warmChromeOnce.Do(func() {
-		dir := filepath.Dir(chrome)
-		// resources.pak sits beside every Linux Chrome and Chromium
-		// binary; without it this is a shared bin directory (or macOS's
-		// near-empty Contents/MacOS), where the pre-read would read a
-		// lot and warm nothing.
-		if _, err := os.Stat(filepath.Join(dir, "resources.pak")); err != nil {
-			return
-		}
-		start := time.Now()
-		read := warmPageCache(dir)
-		t.Logf("pre-read %.1fMB under %s into the page cache in %s",
-			float64(read)/(1<<20), dir, time.Since(start).Round(time.Millisecond))
-	})
-	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(),
-		append(chromedp.DefaultExecAllocatorOptions[:],
-			chromedp.ExecPath(chrome),
-			chromedp.UserDataDir(t.TempDir()),
-			chromedp.Flag("headless", "new"),
-			chromedp.Flag("disable-gpu", true),
-			chromedp.Flag("no-sandbox", true),
-			chromedp.WSURLReadTimeout(browserLaunchTimeout),
-		)...)
-	t.Cleanup(cancelAlloc)
-	ctx, cancelBrowser := chromedp.NewContext(allocCtx,
-		chromedp.WithBrowserOption(chromedp.WithDialTimeout(browserDialTimeout)))
-	t.Cleanup(cancelBrowser)
-	ctx, cancelTimeout := context.WithTimeout(ctx, browserBudget)
-	t.Cleanup(cancelTimeout)
-	// Graceful shutdown before the allocator's kill, so Chrome has
-	// released its user-data dir before t.TempDir's RemoveAll runs.
-	t.Cleanup(func() {
-		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-		defer cancel()
-		_ = chromedp.Cancel(cleanup)
-	})
-	captureBrowserConsole(t, ctx)
-	return ctx
-}
-
-// warmPageCache reads every regular file under dir so the kernel's page
-// cache holds it, and returns the bytes read. Symlinks are skipped, as
-// are unreadable entries: a warm-up is best-effort by design, never a
-// reason to fail a test.
-func warmPageCache(dir string) (read int64) {
-	_ = filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || !entry.Type().IsRegular() {
-			return nil
-		}
-		file, err := os.Open(path)
-		if err != nil {
-			return nil
-		}
-		defer file.Close()
-		n, _ := io.Copy(io.Discard, file)
-		read += n
-		return nil
-	})
-	return read
-}
-
-// captureBrowserConsole puts the page's own console output and its
-// uncaught exceptions in the test log, where a layout failure caused by
-// a script error is legible instead of mysterious.
-func captureBrowserConsole(t *testing.T, ctx context.Context) {
-	t.Helper()
-	var mu sync.Mutex
-	chromedp.ListenTarget(ctx, func(event any) {
-		switch event := event.(type) {
-		case *runtime.EventConsoleAPICalled:
-			mu.Lock()
-			defer mu.Unlock()
-			parts := make([]string, 0, len(event.Args))
-			for _, argument := range event.Args {
-				if len(argument.Value) > 0 {
-					parts = append(parts, string(argument.Value))
-				} else if argument.Description != "" {
-					parts = append(parts, argument.Description)
-				}
-			}
-			t.Logf("browser console.%s: %s", event.Type, strings.Join(parts, " "))
-		case *runtime.EventExceptionThrown:
-			mu.Lock()
-			defer mu.Unlock()
-			t.Logf("browser exception: %s", event.ExceptionDetails.Error())
-		}
-	})
 }
