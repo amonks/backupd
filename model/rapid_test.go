@@ -275,14 +275,14 @@ func TestRapidGroupByAdjacency(t *testing.T) {
 }
 
 // genInventory builds a current inventory whose remote, when non-empty,
-// shares at least one snapshot with local, and has no remote-only
-// snapshot newer than the newest shared one. Both constraints reflect
-// how the system actually runs: the remote's contents arrived via
-// transfers from local (so a shared sync point exists), and a
-// remote-only snapshot newer than every shared one can only appear if
-// an operator hand-creates snapshots on the backup target, which the
-// planner (like `zfs receive` without -F rollback modeling) does not
-// support.
+// shares at least one snapshot with local: the remote's contents
+// arrived by transfer from local, so a sync point exists. That is the
+// only constraint. Remote-only snapshots are generated freely, above
+// and below the newest shared one, because the divergent ones are a
+// shape the system really produces — backupd transfers a snapshot and
+// the snapshot is destroyed locally before the next cycle — and
+// excluding them here once hid a wedge that took a dataset out of
+// service for two days.
 func genInventory(t *rapid.T, universe []*Snapshot) *SnapshotInventory {
 	local := NewSnapshots(genSubset(t, "local", universe)...)
 	remote := NewSnapshots()
@@ -303,14 +303,6 @@ func genInventory(t *rapid.T, universe []*Snapshot) *SnapshotInventory {
 			remote.Add(local.Newest())
 		} else {
 			remote = NewSnapshots()
-		}
-	}
-	// Drop remote-only snapshots newer than the newest shared snapshot.
-	if newest := local.Intersection(remote).Newest(); newest != nil {
-		for snap := range remote.Clone().All() {
-			if !local.Has(snap) && newest.Less(snap) {
-				remote.Del(snap)
-			}
 		}
 	}
 	return &SnapshotInventory{Local: local, Remote: remote}

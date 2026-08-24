@@ -41,10 +41,10 @@ type Daemon struct {
 	layout  Layout
 	omitNav bool
 
-	version *atom.Atom[int64]
-	versionCh  chan struct{}
-	syncNow    chan syncRequest
-	history    *history.History
+	version   *atom.Atom[int64]
+	versionCh chan struct{}
+	syncNow   chan syncRequest
+	history   *history.History
 	// boot anchors "since boot" judgments (e.g. how overdue the snitch
 	// ping is before any ping has happened).
 	boot time.Time
@@ -619,6 +619,13 @@ func (b *Daemon) syncDatasetInner(ctx context.Context, dataset model.DatasetName
 		return fmt.Errorf("dataset '%s' not found after refresh", dataset)
 	}
 
+	// Snapshots the remote holds that local no longer has, past the
+	// last shared one. The plan below discards them — they wedge the
+	// dataset otherwise — and each one discarded is journaled by name
+	// as it goes: it is the only thing backupd destroys that no
+	// retention policy asked it to.
+	divergent := model.DivergentRemoteSnapshots(ds.Current)
+
 	// Generate plan
 	localPolicy, remotePolicy, keepBaseline := b.conf.Deref().PolicyFor(dataset.Path())
 	target := model.CalculateTargetInventory(ds.Current, localPolicy, remotePolicy, keepBaseline)
@@ -773,6 +780,23 @@ func (b *Daemon) syncDatasetInner(ctx context.Context, dataset model.DatasetName
 				op.Error = err.Error()
 			}
 			b.history.RecordOp(op)
+
+			if err == nil {
+				if discarded := divergentDiscards(step.Operation, divergent); len(discarded) > 0 {
+					noun := "snapshot"
+					if len(discarded) > 1 {
+						noun = "snapshots"
+					}
+					name := dataset
+					b.history.RecordEvent(history.Event{
+						At:      time.Now(),
+						Level:   history.Warning,
+						Dataset: &name,
+						Message: fmt.Sprintf("discarded remote %s %s: absent locally and newer than the newest shared snapshot, so the dataset could not transfer at all",
+							noun, strings.Join(discarded, ", ")),
+					})
+				}
+			}
 		}
 
 		if err != nil {
@@ -786,6 +810,37 @@ func (b *Daemon) syncDatasetInner(ctx context.Context, dataset model.DatasetName
 		b.history.RecordDatasetSuccess(dataset, time.Now())
 	}
 	return resumeErr
+}
+
+// divergentDiscards names every snapshot a step discarded from the
+// remote because local no longer had it, and nil for every other
+// operation. A range is enumerated rather than reported by its
+// endpoints: these are the only deletions no retention policy asked
+// for, so the journal owes the operator each name.
+//
+// Divergent snapshots are exactly the remote's tail past the newest
+// shared snapshot, and that snapshot is always in the target, so an
+// adjacency group of remote deletions is either wholly divergent or
+// not divergent at all.
+func divergentDiscards(op model.Operation, divergent *model.Snapshots) []string {
+	switch op := op.(type) {
+	case *model.SnapshotDeletion:
+		if op.Location == model.Remote && divergent.Has(op.Snapshot) {
+			return []string{op.Snapshot.Name}
+		}
+	case *model.SnapshotRangeDeletion:
+		if op.Location != model.Remote || !divergent.Has(op.Start) {
+			return nil
+		}
+		var names []string
+		for snap := range divergent.All() {
+			if !snap.Less(op.Start) && !op.End.Less(snap) {
+				names = append(names, snap.Name)
+			}
+		}
+		return names
+	}
+	return nil
 }
 
 func (b *Daemon) handleIncompleteTransfer(ctx context.Context, logger *logger.Logger, dataset model.DatasetName) error {

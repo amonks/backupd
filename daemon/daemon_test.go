@@ -11,6 +11,7 @@ import (
 
 	"monks.co/backupd/config"
 	"monks.co/backupd/env"
+	"monks.co/backupd/history"
 	"monks.co/backupd/logger"
 	"monks.co/backupd/model"
 )
@@ -346,5 +347,116 @@ func TestSyncDatasetUnresumableTransferIsAborted(t *testing.T) {
 	wantLocal := "zfs destroy data/tank/foo@daily-2026-07-01-01:00:00%daily-2026-07-02-01:00:00"
 	if !local.calledMatching(wantLocal) {
 		t.Errorf("expected local range deletion %q, got calls:\n%s", wantLocal, strings.Join(local.calls, "\n"))
+	}
+}
+
+// TestSyncDatasetDiscardsDivergentRemoteTip covers the /movies wedge: a
+// snapshot backupd had already transferred was destroyed locally before
+// the next cycle, leaving the remote's tip absent from local. Every
+// incremental send is based on the remote's tip, so the dataset could
+// never sync again — the planner emitted a transfer its own validation
+// rejected, forever. The tip is now destroyed on the remote, and
+// because that is the one thing backupd destroys that no retention
+// policy asked it to, it is journaled by name.
+func TestSyncDatasetDiscardsDivergentRemoteTip(t *testing.T) {
+	local := &fakeExecutor{name: "local", handlers: []fakeHandler{
+		{match: "-t snapshot", rows: []string{row("data/tank", snapA)}},
+	}}
+	remote := &fakeExecutor{name: "remote", handlers: []fakeHandler{
+		{match: "receive_resume_token", rows: []string{"-"}},
+		{match: "-t snapshot", rows: []string{
+			row("backup/tank", snapA),
+			row("backup/tank", snapB), // transferred, then destroyed locally
+		}},
+		{match: "zfs destroy", rows: nil},
+	}}
+
+	b := newTestDaemon(testConf(), local, remote)
+	b.state.Swap(model.AddLocalDataset("/foo", []*model.Snapshot{snapA}, nil))
+	b.state.Swap(model.AddRemoteDataset("/foo", []*model.Snapshot{snapA, snapB}, nil))
+
+	if err := b.syncDataset(context.Background(), "/foo"); err != nil {
+		t.Fatalf("syncDataset: %v", err)
+	}
+
+	want := "zfs destroy backup/tank/foo@" + snapB.Name
+	if !remote.calledMatching(want) {
+		t.Errorf("expected remote deletion %q, got calls:\n%s", want, strings.Join(remote.calls, "\n"))
+	}
+	if local.calledMatching("zfs destroy") {
+		t.Errorf("expected no local deletion, got calls:\n%s", strings.Join(local.calls, "\n"))
+	}
+
+	var journaled []string
+	for _, e := range b.history.Events() {
+		if strings.Contains(e.Message, "discarded remote snapshot") {
+			if e.Level != history.Warning {
+				t.Errorf("expected the discard journaled at warning level, got %q", e.Level)
+			}
+			journaled = append(journaled, e.Message)
+		}
+	}
+	if len(journaled) != 1 {
+		t.Fatalf("expected exactly one discard journaled, got %d: %v", len(journaled), journaled)
+	}
+	if !strings.Contains(journaled[0], snapB.Name) {
+		t.Errorf("expected the journal entry to name %s, got %q", snapB.Name, journaled[0])
+	}
+}
+
+// TestSyncDatasetJournalsEveryDivergentSnapshotByName pins the promise
+// the singleton case cannot: adjacent divergent snapshots are destroyed
+// as one range operation, and the journal owes the operator every name
+// in it — three of them here, so an entry reporting only the range's
+// endpoints would elide the middle one. These are the only deletions no
+// retention policy asked for.
+func TestSyncDatasetJournalsEveryDivergentSnapshotByName(t *testing.T) {
+	interior := testSnap("daily-2026-07-04-01:00:00", 4000)
+	last := testSnap("daily-2026-07-05-01:00:00", 5000)
+	orphans := []*model.Snapshot{snapB, interior, last}
+
+	local := &fakeExecutor{name: "local", handlers: []fakeHandler{
+		{match: "-t snapshot", rows: []string{row("data/tank", snapA)}},
+	}}
+	remote := &fakeExecutor{name: "remote", handlers: []fakeHandler{
+		{match: "receive_resume_token", rows: []string{"-"}},
+		{match: "-t snapshot", rows: []string{
+			row("backup/tank", snapA),
+			row("backup/tank", snapB),
+			row("backup/tank", interior),
+			row("backup/tank", last),
+		}},
+		{match: "zfs destroy", rows: nil},
+	}}
+
+	b := newTestDaemon(testConf(), local, remote)
+	b.state.Swap(model.AddLocalDataset("/foo", []*model.Snapshot{snapA}, nil))
+	b.state.Swap(model.AddRemoteDataset("/foo", append([]*model.Snapshot{snapA}, orphans...), nil))
+
+	if err := b.syncDataset(context.Background(), "/foo"); err != nil {
+		t.Fatalf("syncDataset: %v", err)
+	}
+
+	want := fmt.Sprintf("zfs destroy backup/tank/foo@%s%%%s", snapB.Name, last.Name)
+	if !remote.calledMatching(want) {
+		t.Fatalf("expected remote range deletion %q, got calls:\n%s", want, strings.Join(remote.calls, "\n"))
+	}
+
+	var journaled []string
+	for _, e := range b.history.Events() {
+		if strings.Contains(e.Message, "discarded remote snapshot") {
+			journaled = append(journaled, e.Message)
+		}
+	}
+	if len(journaled) != 1 {
+		t.Fatalf("expected exactly one discard journaled, got %d: %v", len(journaled), journaled)
+	}
+	if !strings.Contains(journaled[0], "discarded remote snapshots ") {
+		t.Errorf("expected a plural entry, got %q", journaled[0])
+	}
+	for _, snap := range orphans {
+		if !strings.Contains(journaled[0], snap.Name) {
+			t.Errorf("expected the journal entry to name %s, got %q", snap.Name, journaled[0])
+		}
 	}
 }
