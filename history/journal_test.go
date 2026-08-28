@@ -76,15 +76,15 @@ func TestDatasetFailureIncident(t *testing.T) {
 		t.Errorf("expected latest error in incident message, got %q", got)
 	}
 
-	// Recovery: one info entry naming the start of the streak, not the
-	// most recent failure.
+	// Recovery: one info entry naming the length of the streak from its
+	// start, not from the most recent failure — as a duration, since a
+	// message is frozen text with no zone for an instant to be read in.
 	h.RecordDatasetSuccess(ds, t0.Add(3*time.Hour))
 	events = h.Events()
 	if len(events) != 2 {
 		t.Fatalf("recovery should journal, got %d events: %v", len(events), eventMessages(h))
 	}
-	if e := events[0]; e.Level != Info || !strings.Contains(e.Message, "recovered") ||
-		!strings.Contains(e.Message, t0.Format("2006-01-02 15:04")) {
+	if e := events[0]; e.Level != Info || e.Message != "sync recovered (had been failing for 3h)" {
 		t.Errorf("recovery event = %+v", e)
 	}
 
@@ -234,5 +234,21 @@ func TestSnitchIncident(t *testing.T) {
 	}
 	if e := events[0]; e.Level != Info || !strings.Contains(e.Message, "recovered") {
 		t.Errorf("snitch recovery event = %+v", e)
+	}
+}
+
+func TestFailingForWording(t *testing.T) {
+	cases := map[time.Duration]string{
+		30 * time.Second:             "<1m",
+		12 * time.Minute:             "12m",
+		3 * time.Hour:                "3h",
+		3*time.Hour + 12*time.Minute: "3h12m",
+		2 * 24 * time.Hour:           "2d",
+		2*24*time.Hour + 4*time.Hour: "2d4h",
+	}
+	for d, want := range cases {
+		if got := failingFor(d); got != want {
+			t.Errorf("failingFor(%s) = %q, want %q", d, got, want)
+		}
 	}
 }

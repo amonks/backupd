@@ -7,7 +7,9 @@ package daemon
 // survives the dashboard's body-swapping live refresh.
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/a-h/templ"
@@ -15,6 +17,7 @@ import (
 	"monks.co/backupd/model"
 	"monks.co/backupd/view"
 	"monks.co/pkg/datagrid"
+	"monks.co/pkg/localtime"
 )
 
 // ageSortValue keys age columns for sorting. A missing side gets the
@@ -261,6 +264,7 @@ func runsGrid(runs []view.CycleRun) templ.Component {
 			{
 				Key: "period", Label: "period",
 				Text:      fmtRunPeriod,
+				Cell:      runPeriodCell,
 				SortKind:  datagrid.SortNumber,
 				Align:     "start",
 				SortValue: func(r view.CycleRun) string { return fmt.Sprint(r.Last.UnixMilli()) },
@@ -298,13 +302,29 @@ func runsGrid(runs []view.CycleRun) templ.Component {
 	}, runs)
 }
 
-// fmtRunPeriod names a run's span: one cycle by its start, a run by its
-// oldest start and newest stop.
+// fmtRunPeriod names a run's span as the grid's search text — one
+// cycle by its start, a run by its oldest start and newest stop — in
+// marked UTC; runPeriodCell is the same span as localtime stamps.
 func fmtRunPeriod(r view.CycleRun) string {
 	if r.Count == 1 {
-		return r.First.Format(time.DateTime)
+		return localtime.Fallback(r.First, localtime.Second)
 	}
-	return r.First.Format(time.DateTime) + " → " + r.Last.Format(time.DateTime)
+	return localtime.Fallback(r.First, localtime.Second) + " → " + localtime.Fallback(r.Last, localtime.Second)
+}
+
+func runPeriodCell(r view.CycleRun) templ.Component {
+	return templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
+		if err := localtime.Stamp(r.First, localtime.Second).Render(ctx, w); err != nil {
+			return err
+		}
+		if r.Count == 1 {
+			return nil
+		}
+		if _, err := io.WriteString(w, " → "); err != nil {
+			return err
+		}
+		return localtime.Stamp(r.Last, localtime.Second).Render(ctx, w)
+	})
 }
 
 // snapPresence describes one side's relationship to a snapshot: what is
@@ -392,7 +412,8 @@ func snapshotsGrid(ds *model.Dataset) templ.Component {
 			},
 			{
 				Key: "created", Label: "created",
-				Text:      func(r snapRow) string { return r.Snap.Time().Format(time.DateTime) },
+				Text:      func(r snapRow) string { return localtime.Fallback(r.Snap.Time(), localtime.Second) },
+				Cell:      func(r snapRow) templ.Component { return localtime.Stamp(r.Snap.Time(), localtime.Second) },
 				SortKind:  datagrid.SortNumber,
 				Align:     "start",
 				SortValue: func(r snapRow) string { return fmt.Sprint(r.Snap.CreatedAt) },

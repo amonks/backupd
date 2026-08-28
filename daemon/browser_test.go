@@ -9,6 +9,11 @@ import (
 	"github.com/chromedp/chromedp"
 	"github.com/chromedp/chromedp/device"
 
+	"regexp"
+	"time"
+
+	"github.com/chromedp/cdproto/emulation"
+	"monks.co/backupd/history"
 	"monks.co/pkg/browsertest"
 )
 
@@ -159,5 +164,35 @@ func TestBrowserPhoneLayout(t *testing.T) {
 					"nothing zooms it back out", s.What, s.Past)
 			}
 		})
+	}
+}
+
+// The cycle strip's dots compose their hover — start · outcome — from
+// data through the formatter pkg/localtime leaves on the window, since
+// localtime's own title rewrite would replace the whole title with the
+// stamp; and the ordinary "ago" hovers take that rewrite. Both read in
+// the viewer's zone, pinned here away from the host's.
+func TestBrowserHoversReadInTheViewersZone(t *testing.T) {
+	b := demoDaemon(t)
+	start := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+	b.history.RecordCycle(history.Cycle{StartedAt: start, StoppedAt: start.Add(3 * time.Second), OK: true, Datasets: 1})
+	server := httptest.NewServer(b.Handler())
+	t.Cleanup(server.Close)
+
+	ctx := browsertest.NewBrowser(t)
+	var dot, ago string
+	if err := chromedp.Run(ctx,
+		browsertest.Step("pin the viewer's zone", emulation.SetTimezoneOverride("America/Los_Angeles")),
+		browsertest.Step("open the overview", chromedp.Navigate(server.URL+"/global")),
+		browsertest.Step("read a dot's hover", chromedp.Evaluate(`document.querySelector('.qdot[data-at]').title`, &dot)),
+		browsertest.Step("read an ago hover", chromedp.Evaluate(`document.querySelector('time[data-localtime-title]').title`, &ago)),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(dot, "2026-01-15 04:00:00 PST · ok in 3s") {
+		t.Errorf("dot title = %q, want the start in the viewer's zone then the outcome", dot)
+	}
+	if !regexp.MustCompile(`^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d P[DS]T$`).MatchString(ago) {
+		t.Errorf("ago title = %q, want the instant in the viewer's zone", ago)
 	}
 }

@@ -7,8 +7,10 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/a-h/templ"
+	"monks.co/backupd/history"
 )
 
 // The tests here cover the seam between the daemon and a host page. A
@@ -468,5 +470,84 @@ func TestScriptCarriesTheNonce(t *testing.T) {
 	}
 	if !strings.HasPrefix(b.String(), `<script nonce="n0nce">`) {
 		t.Errorf("script lacks the nonce: %.60s", b.String())
+	}
+}
+
+// Every "when" on the dashboard is a localtime stamp — the instant in
+// the element for the viewer's browser to rewrite into their zone, the
+// marked UTC reading as the text a reader without the script gets. The
+// demo fixture is used because it has every surface at once: a cycle
+// strip, issues, a failing dataset with a last failure, a busy one with
+// a plan and log lines, snapshots. Each surface is asserted by its own
+// markup, so one converted stamp cannot stand in for another.
+func TestStampsReadInTheViewersZone(t *testing.T) {
+	b := demoDaemon(t)
+	// The demo primes state without running a cycle; the strip needs one.
+	b.history.RecordCycle(history.Cycle{StartedAt: time.Now().Add(-2 * time.Minute), StoppedAt: time.Now().Add(-time.Minute), OK: true, Datasets: 1})
+	global := renderPage(t, b, "/global", "")
+	busy := renderPage(t, b, busyDataset, "")
+
+	if !strings.Contains(global, `id="monks-localtime-script"`) {
+		t.Errorf("standalone document lacks the localtime script")
+	}
+	stamp := regexp.MustCompile(`<time datetime="\d{4}-\d\d-\d\dT[^"]*Z" data-localtime="(minute|second|day)">[^<]*</time>`)
+	titled := regexp.MustCompile(`<time datetime="\d{4}-\d\d-\d\dT[^"]*Z" data-localtime-title="second" title="\d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC">`)
+	dot := regexp.MustCompile(`class="qdot qdot-[a-z]+" data-at="\d{4}-[^"]*Z" data-outcome="[^"]+" title="\d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC · [^"]+"`)
+
+	for _, c := range []struct{ page, what, surface string }{
+		{global, "global", "the cycle strip's dots carry the instant and the outcome as data"},
+		{global, "global", "an issue's since"},
+		{global, "global", "the sidebar's backed-up age"},
+		{busy, busyDataset, "the recovery sentence's restore point"},
+		{busy, busyDataset, "the recovery sentence's oldest date"},
+		{busy, busyDataset, "a plan step's start"},
+	} {
+		var ok bool
+		switch c.surface {
+		case "the cycle strip's dots carry the instant and the outcome as data":
+			ok = dot.MatchString(c.page)
+			if !ok {
+				t.Logf("cycle strip on %s: %q", c.what, regexp.MustCompile(`<div class="cycle-strip">.{0,300}`).FindString(c.page))
+			}
+		case "an issue's since":
+			ok = strings.Contains(c.page, `class="issue-since">`) && titled.MatchString(c.page)
+		case "the sidebar's backed-up age":
+			ok = regexp.MustCompile(`class="dataset-age[^"]*">\s*<time datetime="[^"]*" data-localtime-title="second"`).MatchString(c.page)
+		case "the recovery sentence's restore point":
+			ok = regexp.MustCompile(`<b>\s*<time datetime="[^"]*" data-localtime="minute">`).MatchString(c.page)
+		case "the recovery sentence's oldest date":
+			ok = strings.Contains(c.page, `data-localtime="day">`)
+		case "a plan step's start":
+			ok = stamp.MatchString(c.page) && strings.Contains(c.page, `class="step-status`)
+		}
+		if !ok {
+			t.Errorf("%s: %s is not a localtime stamp", c.what, c.surface)
+		}
+	}
+
+	// No stamp anywhere is written the old way. Every wall-clock time on
+	// either page is a marked UTC fallback — a stamp's text, a title the
+	// script rewrites or composes, a grid's search value — so a bare one
+	// is a Format call the sweep missed.
+	wallClock := regexp.MustCompile(`\d{4}-\d\d-\d\d \d\d:\d\d(?::\d\d)?( UTC)?`)
+	for _, page := range []string{global, busy} {
+		for _, m := range wallClock.FindAllStringSubmatchIndex(page, -1) {
+			if m[2] < 0 {
+				t.Errorf("a wall-clock time outside a stamp: %q in …%s…", page[m[0]:m[1]], page[max(0, m[0]-120):min(len(page), m[1]+40)])
+			}
+		}
+	}
+
+	// The embedded body renders the same stamps and leaves the script
+	// to the host's head.
+	var page Page
+	e := embeddedDaemon(t, &page)
+	primeState(t, e)
+	renderPage(t, e, "/global", "")
+	if strings.Contains(string(page.Body), `id="monks-localtime-script"`) {
+		t.Errorf("the embedded body carries the script; that is the host's head to render")
+	}
+	if !titled.MatchString(string(page.Body)) {
+		t.Errorf("the embedded body's stamps are not localtime's")
 	}
 }

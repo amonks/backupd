@@ -10,6 +10,7 @@ import (
 	"monks.co/backupd/status"
 	"monks.co/backupd/view"
 	"monks.co/pkg/datagrid"
+	"monks.co/pkg/localtime"
 )
 
 // pageData is everything a dashboard render needs, assembled once per
@@ -57,6 +58,11 @@ templ document(d pageData) {
 			<meta charset="utf-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
 			<title>{ "backupd — " + pageTitle(d) }</title>
+			// The stamps on these pages are localtime's, rewritten into
+			// the viewer's zone by this script; a host that lays the
+			// daemon out in a chrome of its own carries the same script,
+			// and a second copy is a no-op.
+			@localtime.Script()
 		</head>
 		<body class="backupd-standalone-body">
 			@pageBody(d)
@@ -134,22 +140,31 @@ templ statusStrip(d pageData) {
 		</div>
 		<div class="strip-cell strip-facts">
 			if d.Sys.LastCycle != nil {
-				<span class="strip-fact" title={ "started " + d.Sys.LastCycle.StartedAt.Format("2006-01-02 15:04:05") }>
-					last cycle:&nbsp;
-					if d.Sys.LastCycle.Paused {
-						<span class="cycle-paused">paused</span>
-					} else if d.Sys.LastCycle.OK {
-						<span class="cycle-ok">ok</span>
-					} else {
-						<span class="cycle-failed">failed</span>
+				<span class="strip-fact">
+					@localtime.Titled(d.Sys.LastCycle.StartedAt, localtime.Second) {
+						last cycle:&nbsp;
+						if d.Sys.LastCycle.Paused {
+							<span class="cycle-paused">paused</span>
+						} else if d.Sys.LastCycle.OK {
+							<span class="cycle-ok">ok</span>
+						} else {
+							<span class="cycle-failed">failed</span>
+						}
 					}
 				</span>
 			}
 			if d.Sys.SnitchConfigured {
 				if d.Sys.SnitchOverdue {
-					<span class="strip-fact error-text" title="No successful ping within twice the sync interval">snitch: overdue ({ fmtAgo(d.Sys.LastSnitch) })</span>
+					<span class="strip-fact error-text" title="No successful ping within twice the sync interval">
+						{ "snitch: overdue (" }
+						@whenCell(d.Sys.LastSnitch)
+						{ ")" }
+					</span>
 				} else {
-					<span class="strip-fact">snitch: { fmtAgo(d.Sys.LastSnitch) }</span>
+					<span class="strip-fact">
+						{ "snitch: " }
+						@whenCell(d.Sys.LastSnitch)
+					</span>
 				}
 			}
 			<span class="strip-fact">{ fmt.Sprint(d.Sys.DatasetCount) } datasets</span>
@@ -228,7 +243,11 @@ templ sidebarLink(d pageData, dv view.Dataset) {
 		<span class={ "dot", "dot-" + dv.Health.Class(), templ.KV("pulsing", dv.Syncing) } title={ dv.Health.String() + reasonSuffix(dv.Reason) }></span>
 		<span class="dataset-name">{ dv.Name.String() }</span>
 		if dv.HasRemote {
-			<span class={ "dataset-age", templ.KV("error-text", dv.BackupStale) } title={ "backed up " + fmtAgo(dv.NewestRemote) }>{ fmtCompactDuration(dv.BackedUp) }</span>
+			<span class={ "dataset-age", templ.KV("error-text", dv.BackupStale) }>
+				@localtime.Titled(dv.NewestRemote, localtime.Second) {
+					{ fmtCompactDuration(dv.BackedUp) }
+				}
+			</span>
 		} else if dv.HasLocal {
 			<span class="dataset-age error-text" title="Never replicated">never</span>
 		}

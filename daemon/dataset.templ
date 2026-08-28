@@ -9,6 +9,7 @@ import (
 	"monks.co/backupd/model"
 	"monks.co/backupd/status"
 	"monks.co/backupd/view"
+	"monks.co/pkg/localtime"
 )
 
 // datasetPage is one dataset's detail view, ordered by what an
@@ -58,8 +59,13 @@ templ recoverySentence(dv view.Dataset) {
 	if dv.HasRemote {
 		<p class={ "recovery", templ.KV("atrisk", dv.BackupStale) }>
 			If the local pool were lost now, this dataset could be restored as of
-			<b>{ dv.NewestRemote.Format("2006-01-02 15:04") } ({ fmtCompactDuration(dv.BackedUp) } ago)</b>.
-			History reaches back { fmtCompactDuration(dv.Depth) }, to { dv.OldestRemote.Format("2006-01-02") }.
+			<b>
+				@localtime.Stamp(dv.NewestRemote, localtime.Minute)
+				{ " (" + fmtCompactDuration(dv.BackedUp) + " ago)" }
+			</b>.
+			{ "History reaches back " + fmtCompactDuration(dv.Depth) + ", to " }
+			@localtime.Stamp(dv.OldestRemote, localtime.Day)
+			{ "." }
 			if dv.BackupStale {
 				That is older than expected for its cadence.
 			}
@@ -89,7 +95,11 @@ templ factsTable(d pageData, name model.DatasetName, dv view.Dataset) {
 			<th>Snapshotted</th>
 			<td>
 				if dv.HasLocal {
-					<span class={ templ.KV("stale-text", dv.SnapshotsStale) } title={ exactTime(dv.NewestLocal) }>{ fmtCompactDuration(dv.Snapshotted) } ago</span>
+					<span class={ templ.KV("stale-text", dv.SnapshotsStale) }>
+						@localtime.Titled(dv.NewestLocal, localtime.Second) {
+							{ fmtCompactDuration(dv.Snapshotted) + " ago" }
+						}
+					</span>
 					if dv.Cadence > 0 {
 						<span class="muted">(expected every { fmtCompactDuration(dv.Cadence) })</span>
 					}
@@ -102,7 +112,11 @@ templ factsTable(d pageData, name model.DatasetName, dv view.Dataset) {
 			<th>Backed up</th>
 			<td>
 				if dv.HasRemote {
-					<span class={ templ.KV("stale-text", dv.BackupStale) } title={ exactTime(dv.NewestRemote) }>{ fmtCompactDuration(dv.BackedUp) } ago</span>
+					<span class={ templ.KV("stale-text", dv.BackupStale) }>
+						@localtime.Titled(dv.NewestRemote, localtime.Second) {
+							{ fmtCompactDuration(dv.BackedUp) + " ago" }
+						}
+					</span>
 					if dv.Lag > 0 {
 						<span class="muted">({ fmtCompactDuration(dv.Lag) } behind local)</span>
 					}
@@ -118,10 +132,16 @@ templ factsTable(d pageData, name model.DatasetName, dv view.Dataset) {
 			<th>Last sync run</th>
 			<td>
 				if dv.LastFailure != nil && (dv.LastSuccess.IsZero() || dv.LastFailure.At.After(dv.LastSuccess)) {
-					<span class="error-text" title={ exactTime(dv.LastFailure.At) }>failed { fmtAgo(dv.LastFailure.At) }</span>
+					<span class="error-text">
+						{ "failed " }
+						@whenCell(dv.LastFailure.At)
+					</span>
 					&nbsp;<code class="error-text">{ dv.LastFailure.Error }</code>
 				} else if !dv.LastSuccess.IsZero() {
-					<span title={ exactTime(dv.LastSuccess) }>succeeded { fmtAgo(dv.LastSuccess) }</span>
+					<span>
+						{ "succeeded " }
+						@whenCell(dv.LastSuccess)
+					</span>
 				} else {
 					<span class="muted">none since the daemon started</span>
 				}
@@ -131,7 +151,7 @@ templ factsTable(d pageData, name model.DatasetName, dv view.Dataset) {
 			<tr>
 				<th>Last failure</th>
 				<td class="muted">
-					<span title={ exactTime(dv.LastFailure.At) }>{ fmtAgo(dv.LastFailure.At) }</span>
+					@whenCell(dv.LastFailure.At)
 					&nbsp;<code>{ dv.LastFailure.Error }</code>
 				</td>
 			</tr>
@@ -253,7 +273,7 @@ templ planSection(d pageData, name model.DatasetName, ds *model.Dataset) {
 							<td><code>{ step.String() }</code></td>
 							<td>
 								if step.StartedAt != nil {
-									{ step.StartedAt.Format("15:04:05") }
+									@localtime.Stamp(*step.StartedAt, localtime.Second)
 								} else {
 									<span class="muted">—</span>
 								}
@@ -291,7 +311,10 @@ templ planSection(d pageData, name model.DatasetName, ds *model.Dataset) {
 								<tr class="step-log">
 									<td></td>
 									<td colspan="4">
-										<code class="log-message">{ logEntry.LogAt.Format("15:04:05") } { logEntry.Log }</code>
+										<code class="log-message">
+											@localtime.Stamp(logEntry.LogAt, localtime.Second)
+											{ " " + logEntry.Log }
+										</code>
 									</td>
 								</tr>
 							}

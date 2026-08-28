@@ -267,7 +267,10 @@ func (h *History) RecordDatasetSuccess(dataset model.DatasetName, at time.Time) 
 	h.atom.Swap(func(r record) record {
 		name := dataset
 		r = r.withIncidentRecovery(incidentKey(dataset), &name, at, func(inc incident) string {
-			return fmt.Sprintf("sync recovered (had been failing since %s)", inc.Since.Format("2006-01-02 15:04"))
+			// A duration rather than the incident's start: a message is
+			// frozen text with no zone of its own, and every instant a
+			// page shows is rendered for the viewer's zone at read time.
+			return fmt.Sprintf("sync recovered (had been failing for %s)", failingFor(at.Sub(inc.Since)))
 		})
 		lastSuccess := make(map[model.DatasetName]time.Time, len(r.lastSuccess)+1)
 		maps.Copy(lastSuccess, r.lastSuccess)
@@ -340,4 +343,31 @@ func (h *History) LastFailure(dataset model.DatasetName) (Failure, bool) {
 func (h *History) LastSnitch() (time.Time, bool) {
 	at := h.atom.Deref().lastSnitch
 	return at, !at.IsZero()
+}
+
+// failingFor words an incident's length for its recovery message —
+// "3h12m", "2d4h", "<1m" — with no zone in it, so the message is as
+// true in one place as another.
+func failingFor(d time.Duration) string {
+	if d < 0 {
+		d = -d
+	}
+	switch {
+	case d < time.Minute:
+		return "<1m"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		h := int(d.Hours())
+		if m := int(d.Minutes()) - h*60; m != 0 {
+			return fmt.Sprintf("%dh%dm", h, m)
+		}
+		return fmt.Sprintf("%dh", h)
+	default:
+		days := int(d.Hours()) / 24
+		if h := int(d.Hours()) - days*24; h != 0 {
+			return fmt.Sprintf("%dd%dh", days, h)
+		}
+		return fmt.Sprintf("%dd", days)
+	}
 }

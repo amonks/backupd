@@ -18,6 +18,7 @@ import (
 	"monks.co/backupd/status"
 	"monks.co/backupd/view"
 	"monks.co/pkg/datagrid"
+	"monks.co/pkg/localtime"
 )
 
 // pageData is everything a dashboard render needs, assembled once per
@@ -86,13 +87,21 @@ func document(d pageData) templ.Component {
 		var templ_7745c5c3_Var2 string
 		templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.JoinStringErrs("backupd — " + pageTitle(d))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 59, Col: 41}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 60, Col: 41}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var2))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "</title></head><body class=\"backupd-standalone-body\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "</title>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = localtime.Script().Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</head><body class=\"backupd-standalone-body\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -100,7 +109,7 @@ func document(d pageData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</body></html>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "</body></html>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -139,7 +148,7 @@ func pageBody(d pageData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<div class=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<div class=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -152,20 +161,20 @@ func pageBody(d pageData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "\" data-base=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "\" data-base=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var6 string
 		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.ResolveAttributeValue(d.Base)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 73, Col: 82}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 79, Col: 82}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -181,7 +190,7 @@ func pageBody(d pageData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<div class=\"shell\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<div class=\"shell\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -189,7 +198,7 @@ func pageBody(d pageData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<div class=\"main-content\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<div class=\"main-content\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -210,7 +219,7 @@ func pageBody(d pageData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "</div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -218,7 +227,7 @@ func pageBody(d pageData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -264,7 +273,7 @@ func statusStrip(d pageData) templ.Component {
 			templ_7745c5c3_Var7 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<header class=\"strip\"><div class=\"strip-cell strip-verdict\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "<header class=\"strip\"><div class=\"strip-cell strip-verdict\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -273,7 +282,7 @@ func statusStrip(d pageData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "<span class=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<span class=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -286,49 +295,49 @@ func statusStrip(d pageData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var10 string
 		templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(strings.ToUpper(d.Sys.Verdict.String()))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 116, Col: 100}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 122, Col: 100}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "</span> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "</span> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if d.Dryrun {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<span class=\"chip chip-dryrun\" title=\"No transfers or deletions will occur\">DRY RUN</span> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "<span class=\"chip chip-dryrun\" title=\"No transfers or deletions will occur\">DRY RUN</span> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
 		if d.Sys.Reason != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "<span class=\"strip-reason\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<span class=\"strip-reason\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var11 string
 			templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(d.Sys.Reason)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 121, Col: 45}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 127, Col: 45}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "</span>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "</span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "</div><div class=\"strip-cell strip-activity\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "</div><div class=\"strip-cell strip-activity\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -337,7 +346,7 @@ func statusStrip(d pageData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "<span class=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "<span class=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -350,209 +359,235 @@ func statusStrip(d pageData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "\"></span> <span>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\"></span> <span>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var14 string
 		templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(activityLabel(d.Activity, d.Sys.Cycle))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 126, Col: 49}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 132, Col: 49}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "</span> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "</span> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if !d.Activity.Until.IsZero() && (d.Activity.Phase == status.Idle || d.Activity.Phase == status.BackingOff) {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "<span class=\"countdown\" data-until=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "<span class=\"countdown\" data-until=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var15 string
 			templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprint(d.Activity.Until.UnixMilli()))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 128, Col: 81}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 134, Col: 81}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var15)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var16 string
 			templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(fmtUntil(d.Activity.Until))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 128, Col: 112}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 134, Col: 112}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "</span> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "</span> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
 		if d.Activity.Transfer != nil {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "<progress max=\"100\" value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "<progress max=\"100\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var17 string
 			templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.1f", d.Activity.Transfer.Percent()))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 131, Col: 82}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 137, Col: 82}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var17)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "\"></progress> <span class=\"progress-label\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "\"></progress> <span class=\"progress-label\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var18 string
 			templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinStringErrs(transferLabel(*d.Activity.Transfer))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 132, Col: 70}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 138, Col: 70}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "</span>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "</span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "</div><div class=\"strip-cell strip-facts\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "</div><div class=\"strip-cell strip-facts\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if d.Sys.LastCycle != nil {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "<span class=\"strip-fact\" title=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "<span class=\"strip-fact\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var19 string
-			templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.ResolveAttributeValue("started " + d.Sys.LastCycle.StartedAt.Format("2006-01-02 15:04:05"))
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 137, Col: 105}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var19)
+			templ_7745c5c3_Var19 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+				templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+				templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+				if !templ_7745c5c3_IsBuffer {
+					defer func() {
+						templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+						if templ_7745c5c3_Err == nil {
+							templ_7745c5c3_Err = templ_7745c5c3_BufErr
+						}
+					}()
+				}
+				ctx = templ.InitializeContext(ctx)
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "last cycle:&nbsp; ")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				if d.Sys.LastCycle.Paused {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "<span class=\"cycle-paused\">paused</span>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				} else if d.Sys.LastCycle.OK {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "<span class=\"cycle-ok\">ok</span>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				} else {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "<span class=\"cycle-failed\">failed</span>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				}
+				return nil
+			})
+			templ_7745c5c3_Err = localtime.Titled(d.Sys.LastCycle.StartedAt, localtime.Second).Render(templ.WithChildren(ctx, templ_7745c5c3_Var19), templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "\">last cycle:&nbsp; ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			if d.Sys.LastCycle.Paused {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "<span class=\"cycle-paused\">paused</span>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			} else if d.Sys.LastCycle.OK {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "<span class=\"cycle-ok\">ok</span>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "<span class=\"cycle-failed\">failed</span>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "</span> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "</span> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
 		if d.Sys.SnitchConfigured {
 			if d.Sys.SnitchOverdue {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "<span class=\"strip-fact error-text\" title=\"No successful ping within twice the sync interval\">snitch: overdue (")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "<span class=\"strip-fact error-text\" title=\"No successful ping within twice the sync interval\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var20 string
-				templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinStringErrs(fmtAgo(d.Sys.LastSnitch))
+				templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinStringErrs("snitch: overdue (")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 150, Col: 142}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 159, Col: 27}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, ")</span> ")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "<span class=\"strip-fact\">snitch: ")
+				templ_7745c5c3_Err = whenCell(d.Sys.LastSnitch).Render(ctx, templ_7745c5c3_Buffer)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var21 string
-				templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(fmtAgo(d.Sys.LastSnitch))
+				templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(")")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 152, Col: 64}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 161, Col: 11}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "</span> ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "</span> ")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			} else {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "<span class=\"strip-fact\">")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var22 string
+				templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.JoinStringErrs("snitch: ")
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 165, Col: 18}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var22))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = whenCell(d.Sys.LastSnitch).Render(ctx, templ_7745c5c3_Buffer)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "</span> ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "<span class=\"strip-fact\">")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var22 string
-		templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprint(d.Sys.DatasetCount))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 155, Col: 60}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var22))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, " datasets</span> <span class=\"strip-fact\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "<span class=\"strip-fact\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var23 string
-		templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(fmtBytes(d.Sys.LocalUsed))
+		templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprint(d.Sys.DatasetCount))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 156, Col: 55}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 170, Col: 60}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, " local · ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, " datasets</span> <span class=\"strip-fact\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var24 string
-		templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(fmtBytes(d.Sys.RemoteUsed))
+		templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(fmtBytes(d.Sys.LocalUsed))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 156, Col: 95}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 171, Col: 55}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var24))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, " remote</span></div></header>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, " local · ")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var25 string
+		templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(fmtBytes(d.Sys.RemoteUsed))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 171, Col: 95}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, " remote</span></div></header>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -603,91 +638,91 @@ func sidebar(d pageData) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var25 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var25 == nil {
-			templ_7745c5c3_Var25 = templ.NopComponent
+		templ_7745c5c3_Var26 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var26 == nil {
+			templ_7745c5c3_Var26 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "<div class=\"sidebar\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "<div class=\"sidebar\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if !d.OmitNav {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "<nav class=\"nav-links\" aria-label=\"Pages\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<nav class=\"nav-links\" aria-label=\"Pages\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			for _, link := range Nav() {
-				var templ_7745c5c3_Var26 = []any{"nav-link", templ.KV("active", isActive(d, link))}
-				templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var26...)
+				var templ_7745c5c3_Var27 = []any{"nav-link", templ.KV("active", isActive(d, link))}
+				templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var27...)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<a href=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "<a href=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var27 templ.SafeURL
-				templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(Link(d.Base, link.Path)))
+				var templ_7745c5c3_Var28 templ.SafeURL
+				templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(Link(d.Base, link.Path)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 193, Col: 53}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 208, Col: 53}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "\" class=\"")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var28 string
-				templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var26).String())
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 1, Col: 0}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var28)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "\" class=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var29 string
-				templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs(link.Label)
+				templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var27).String())
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 193, Col: 128}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 1, Col: 0}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var29))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var29)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "</a>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "\">")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var30 string
+				templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinStringErrs(link.Label)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 208, Col: 128}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var30))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "</a>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "</nav>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "</nav>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "<div class=\"controls\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "<div class=\"controls\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if d.Conf.Paused {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "<button class=\"btn warn\" data-api=\"/api/resume\">Resume all</button> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "<button class=\"btn warn\" data-api=\"/api/resume\">Resume all</button> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "<button class=\"btn\" data-api=\"/api/pause\" data-confirm=\"Pause all execution? State keeps refreshing, but no transfers or deletions run, and the dead-man's-snitch ping is withheld.\">Pause all</button> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "<button class=\"btn\" data-api=\"/api/pause\" data-confirm=\"Pause all execution? State keeps refreshing, but no transfers or deletions run, and the dead-man's-snitch ping is withheld.\">Pause all</button> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "<button class=\"btn\" data-api=\"/api/sync\">Sync now</button><div class=\"snapshot-row\"><select id=\"snapshot-periodicity\"><option value=\"daily\">daily</option> <option value=\"weekly\">weekly</option> <option value=\"monthly\">monthly</option> <option value=\"yearly\">yearly</option></select> <button class=\"btn\" id=\"snapshot-btn\">Snapshot</button></div></div><nav class=\"datasets\" aria-label=\"Datasets\"><div class=\"side-heading\">Datasets</div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "<button class=\"btn\" data-api=\"/api/sync\">Sync now</button><div class=\"snapshot-row\"><select id=\"snapshot-periodicity\"><option value=\"daily\">daily</option> <option value=\"weekly\">weekly</option> <option value=\"monthly\">monthly</option> <option value=\"yearly\">yearly</option></select> <button class=\"btn\" id=\"snapshot-btn\">Snapshot</button></div></div><nav class=\"datasets\" aria-label=\"Datasets\"><div class=\"side-heading\">Datasets</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -697,7 +732,7 @@ func sidebar(d pageData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "</nav></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "</nav></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -724,121 +759,108 @@ func sidebarLink(d pageData, dv view.Dataset) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var30 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var30 == nil {
-			templ_7745c5c3_Var30 = templ.NopComponent
+		templ_7745c5c3_Var31 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var31 == nil {
+			templ_7745c5c3_Var31 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		var templ_7745c5c3_Var31 = []any{"dataset-link", templ.KV("active", dv.Name.Path() == d.Page && d.Page != "global" && d.Page != "config")}
-		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var31...)
+		var templ_7745c5c3_Var32 = []any{"dataset-link", templ.KV("active", dv.Name.Path() == d.Page && d.Page != "global" && d.Page != "config")}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var32...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "<a href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "<a href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var32 templ.SafeURL
-		templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(datasetHref(d.Base, dv.Name)))
+		var templ_7745c5c3_Var33 templ.SafeURL
+		templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(datasetHref(d.Base, dv.Name)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 227, Col: 54}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 242, Col: 54}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var32))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "\" class=\"")
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var33))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var33 string
-		templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var31).String())
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "\" class=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var34 string
+		templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var32).String())
 		if templ_7745c5c3_Err != nil {
 			return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 1, Col: 0}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var33)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var34)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var34 = []any{"dot", "dot-" + dv.Health.Class(), templ.KV("pulsing", dv.Syncing)}
-		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var34...)
+		var templ_7745c5c3_Var35 = []any{"dot", "dot-" + dv.Health.Class(), templ.KV("pulsing", dv.Syncing)}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var35...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "<span class=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var35 string
-		templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var34).String())
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 1, Col: 0}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var35)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "\" title=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "<span class=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var36 string
-		templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.ResolveAttributeValue(dv.Health.String() + reasonSuffix(dv.Reason))
+		templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var35).String())
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 228, Col: 137}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 1, Col: 0}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var36)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "\"></span> <span class=\"dataset-name\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "\" title=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var37 string
-		templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.JoinStringErrs(dv.Name.String())
+		templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.ResolveAttributeValue(dv.Health.String() + reasonSuffix(dv.Reason))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 229, Col: 47}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 243, Col: 137}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var37))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var37)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "</span> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "\"></span> <span class=\"dataset-name\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var38 string
+		templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(dv.Name.String())
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 244, Col: 47}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var38))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, "</span> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if dv.HasRemote {
-			var templ_7745c5c3_Var38 = []any{"dataset-age", templ.KV("error-text", dv.BackupStale)}
-			templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var38...)
+			var templ_7745c5c3_Var39 = []any{"dataset-age", templ.KV("error-text", dv.BackupStale)}
+			templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var39...)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, "<span class=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var39 string
-			templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var38).String())
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 1, Col: 0}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var39)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, "\" title=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, "<span class=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var40 string
-			templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.ResolveAttributeValue("backed up " + fmtAgo(dv.NewestRemote))
+			templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var39).String())
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 231, Col: 119}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 1, Col: 0}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var40)
 			if templ_7745c5c3_Err != nil {
@@ -848,12 +870,30 @@ func sidebarLink(d pageData, dv view.Dataset) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var41 string
-			templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.JoinStringErrs(fmtCompactDuration(dv.BackedUp))
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 231, Col: 155}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var41))
+			templ_7745c5c3_Var41 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+				templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+				templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+				if !templ_7745c5c3_IsBuffer {
+					defer func() {
+						templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+						if templ_7745c5c3_Err == nil {
+							templ_7745c5c3_Err = templ_7745c5c3_BufErr
+						}
+					}()
+				}
+				ctx = templ.InitializeContext(ctx)
+				var templ_7745c5c3_Var42 string
+				templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.JoinStringErrs(fmtCompactDuration(dv.BackedUp))
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 248, Col: 38}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var42))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				return nil
+			})
+			templ_7745c5c3_Err = localtime.Titled(dv.NewestRemote, localtime.Second).Render(templ.WithChildren(ctx, templ_7745c5c3_Var41), templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -916,13 +956,13 @@ func healthChip(dv view.Dataset) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var42 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var42 == nil {
-			templ_7745c5c3_Var42 = templ.NopComponent
+		templ_7745c5c3_Var43 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var43 == nil {
+			templ_7745c5c3_Var43 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		var templ_7745c5c3_Var43 = []any{"chip", "chip-" + dv.Health.Class()}
-		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var43...)
+		var templ_7745c5c3_Var44 = []any{"chip", "chip-" + dv.Health.Class()}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var44...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -930,12 +970,12 @@ func healthChip(dv view.Dataset) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var44 string
-		templ_7745c5c3_Var44, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var43).String())
+		var templ_7745c5c3_Var45 string
+		templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var44).String())
 		if templ_7745c5c3_Err != nil {
 			return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 1, Col: 0}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var44)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var45)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -943,12 +983,12 @@ func healthChip(dv view.Dataset) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var45 string
-		templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.JoinStringErrs(dv.Health.String())
+		var templ_7745c5c3_Var46 string
+		templ_7745c5c3_Var46, templ_7745c5c3_Err = templ.JoinStringErrs(dv.Health.String())
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 264, Col: 73}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 283, Col: 73}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var45))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var46))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -961,12 +1001,12 @@ func healthChip(dv view.Dataset) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var46 string
-			templ_7745c5c3_Var46, templ_7745c5c3_Err = templ.ResolveAttributeValue(syncingTitle(dv))
+			var templ_7745c5c3_Var47 string
+			templ_7745c5c3_Var47, templ_7745c5c3_Err = templ.ResolveAttributeValue(syncingTitle(dv))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 266, Col: 48}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 285, Col: 48}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var46)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var47)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -980,12 +1020,12 @@ func healthChip(dv view.Dataset) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var47 string
-			templ_7745c5c3_Var47, templ_7745c5c3_Err = templ.ResolveAttributeValue(dv.Reason)
+			var templ_7745c5c3_Var48 string
+			templ_7745c5c3_Var48, templ_7745c5c3_Err = templ.ResolveAttributeValue(dv.Reason)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 269, Col: 45}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 288, Col: 45}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var47)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var48)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -993,12 +1033,12 @@ func healthChip(dv view.Dataset) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var48 string
-			templ_7745c5c3_Var48, templ_7745c5c3_Err = templ.JoinStringErrs(dv.Reason)
+			var templ_7745c5c3_Var49 string
+			templ_7745c5c3_Var49, templ_7745c5c3_Err = templ.JoinStringErrs(dv.Reason)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 269, Col: 59}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 288, Col: 59}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var48))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var49))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1047,9 +1087,9 @@ func styles() templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var49 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var49 == nil {
-			templ_7745c5c3_Var49 = templ.NopComponent
+		templ_7745c5c3_Var50 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var50 == nil {
+			templ_7745c5c3_Var50 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
 		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 76, "<style>\n\t\t.backupd {\n\t\t\t--ok: light-dark(#2e7d32, #81c784);\n\t\t\t--ok-bg: light-dark(#e8f5e9, rgba(129, 199, 132, 0.14));\n\t\t\t--syncing: light-dark(#1565c0, #64b5f6);\n\t\t\t--syncing-bg: light-dark(#e3f2fd, rgba(100, 181, 246, 0.14));\n\t\t\t--pending: light-dark(#ef6c00, #ffb74d);\n\t\t\t--pending-bg: light-dark(#fff3e0, rgba(255, 183, 77, 0.14));\n\t\t\t--paused: light-dark(#607d8b, #90a4ae);\n\t\t\t--paused-bg: light-dark(#eceff1, rgba(144, 164, 174, 0.14));\n\t\t\t--failing: light-dark(#c62828, #ef9a9a);\n\t\t\t--failing-bg: light-dark(#ffebee, rgba(239, 154, 154, 0.14));\n\t\t\t--atrisk: light-dark(#d84315, #ff8a65);\n\t\t\t--atrisk-bg: light-dark(#fbe9e7, rgba(255, 138, 101, 0.14));\n\t\t\t--unknown: light-dark(#757575, #9e9e9e);\n\t\t\t--unknown-bg: light-dark(#f5f5f5, rgba(158, 158, 158, 0.12));\n\t\t\t--dryrun: light-dark(#b26a00, #ffd54f);\n\t\t\t--dryrun-bg: light-dark(#fff8e1, rgba(255, 213, 79, 0.12));\n\t\t\t--dryrun-border: light-dark(#ffe082, rgba(255, 213, 79, 0.4));\n\n\t\t\t--fg: light-dark(#212121, #e6edf3);\n\t\t\t--detail: light-dark(#444, #b6c2cf);\n\t\t\t--muted: light-dark(#757575, #99a5b3);\n\t\t\t--border: light-dark(#e0e0e0, #2c3442);\n\t\t\t--surface: light-dark(#fafafa, #151b23);\n\t\t\t--surface-hover: light-dark(#e8e8e8, rgba(255, 255, 255, 0.07));\n\t\t\t--field: light-dark(#ffffff, #0d1117);\n\t\t\t--field-border: light-dark(#bbb, #3d4654);\n\t\t\t--track: light-dark(#ddd, #2c3442);\n\n\t\t\tcolor: var(--fg);\n\t\t\tfont-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif;\n\t\t}\n\t\t.backupd *, .backupd *::before, .backupd *::after { box-sizing: border-box; }\n\t\t/* Every <code> on these pages holds a path, a snapshot name, or a\n\t\t   ZFS error — one long token with no spaces to break at, which at\n\t\t   a phone's width runs straight off the side of whatever holds\n\t\t   it. break-word rather than anywhere: it breaks only a line that\n\t\t   would otherwise overflow, and leaves intrinsic min-content\n\t\t   widths alone, so a table's column algorithm sees what it saw\n\t\t   before. */\n\t\t.backupd code { font-size: 0.9em; overflow-wrap: break-word; }\n\t\t.backupd a { color: inherit; }\n\n\t\t/* The standalone shell: the daemon owns the document, so the\n\t\t   strip sits at the top and the two panes scroll independently\n\t\t   under it. Embedded, the daemon owns a box in someone else's\n\t\t   document — the shell flows, the sidebar sticks, and the host\n\t\t   page does the scrolling. */\n\t\tbody.backupd-standalone-body { margin: 0; }\n\t\t.backupd.standalone {\n\t\t\theight: 100vh;\n\t\t\tdisplay: flex;\n\t\t\tflex-direction: column;\n\t\t}\n\t\t.backupd.standalone .shell { flex: 1; min-height: 0; }\n\t\t.backupd.standalone .sidebar { overflow-y: auto; }\n\t\t.backupd.standalone .main-content { overflow-y: auto; }\n\t\t.backupd:not(.standalone) .sidebar {\n\t\t\tposition: sticky;\n\t\t\ttop: 0;\n\t\t\talign-self: flex-start;\n\t\t\tmax-height: 100vh;\n\t\t\toverflow-y: auto;\n\t\t}\n\n\t\t/* Status strip */\n\t\t.backupd .strip {\n\t\t\tdisplay: flex;\n\t\t\talign-items: center;\n\t\t\tgap: 1.25rem;\n\t\t\tpadding: 0.5rem 1rem;\n\t\t\tborder-bottom: 1px solid var(--border);\n\t\t\tbackground: var(--surface);\n\t\t\tflex-wrap: wrap;\n\t\t}\n\t\t.backupd .strip-cell { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }\n\t\t/* The basis is what makes the strip wrap instead of crush. The\n\t\t   activity cell holds a sentence, a progress bar and a transfer\n\t\t   label; asked to share a row with a long verdict reason it will\n\t\t   otherwise shrink to a column of one-word lines with the bar as\n\t\t   a stub, because min-width: 0 lets it. A basis wide enough to be\n\t\t   worth reading sends it to a row of its own first. */\n\t\t.backupd .strip-activity { flex: 1 1 24rem; }\n\t\t.backupd .strip-facts { margin-left: auto; gap: 1rem; color: var(--muted); font-size: 0.85rem; }\n\t\t.backupd .strip-fact { white-space: nowrap; }\n\t\t.backupd .strip-reason { color: var(--muted); font-size: 0.9rem; }\n\t\t.backupd .chip {\n\t\t\tdisplay: inline-block;\n\t\t\tpadding: 0.15rem 0.6rem;\n\t\t\tborder-radius: 999px;\n\t\t\tfont-size: 0.75rem;\n\t\t\tfont-weight: 600;\n\t\t\tletter-spacing: 0.03em;\n\t\t\twhite-space: nowrap;\n\t\t}\n\t\t.backupd .chip-ok { background: var(--ok-bg); color: var(--ok); }\n\t\t.backupd .chip-syncing { background: var(--syncing-bg); color: var(--syncing); }\n\t\t.backupd .chip-pending { background: var(--pending-bg); color: var(--pending); }\n\t\t.backupd .chip-paused { background: var(--paused-bg); color: var(--paused); }\n\t\t.backupd .chip-failing { background: var(--failing-bg); color: var(--failing); }\n\t\t.backupd .chip-atrisk { background: var(--atrisk-bg); color: var(--atrisk); }\n\t\t.backupd .chip-unknown { background: var(--unknown-bg); color: var(--unknown); }\n\t\t.backupd .chip-dryrun { background: var(--dryrun-bg); color: var(--dryrun); border: 1px solid var(--dryrun-border); }\n\t\t.backupd .chip-info { background: var(--paused-bg); color: var(--paused); }\n\t\t.backupd .chip-warning { background: var(--pending-bg); color: var(--pending); }\n\t\t.backupd .chip-critical { background: var(--failing-bg); color: var(--failing); }\n\t\t.backupd .chip-reason {\n\t\t\tcolor: var(--muted);\n\t\t\tfont-size: 0.85rem;\n\t\t\toverflow: hidden;\n\t\t\ttext-overflow: ellipsis;\n\t\t\twhite-space: nowrap;\n\t\t\t/* A cap, not a width: 28rem is wider than a phone, where an\n\t\t\t   uncapped chip pushes the strip off the screen instead of\n\t\t\t   ellipsing. */\n\t\t\tmax-width: min(28rem, 100%);\n\t\t\tdisplay: inline-block;\n\t\t\tvertical-align: bottom;\n\t\t}\n\t\t.backupd .countdown { color: var(--muted); font-variant-numeric: tabular-nums; }\n\t\t/* flex: none for the same reason: in the strip the bar is a fixed\n\t\t   gauge, and a shrunk one reads as a different number. */\n\t\t.backupd progress { width: 10rem; height: 0.6rem; accent-color: var(--syncing); flex: none; }\n\t\t.backupd .progress-label { color: var(--muted); font-size: 0.85rem; font-variant-numeric: tabular-nums; }\n\t\t.backupd .dot, .backupd .phase-dot {\n\t\t\twidth: 10px; height: 10px;\n\t\t\tborder-radius: 50%;\n\t\t\tflex-shrink: 0;\n\t\t\tdisplay: inline-block;\n\t\t}\n\t\t.backupd .dot-ok { background: var(--ok); }\n\t\t.backupd .dot-syncing { background: var(--syncing); animation: backupd-pulse 1.2s ease-in-out infinite alternate; }\n\t\t.backupd .dot-pending { background: var(--pending); }\n\t\t.backupd .dot-paused { background: var(--paused); }\n\t\t.backupd .dot-failing { background: var(--failing); }\n\t\t.backupd .dot-atrisk { background: var(--atrisk); }\n\t\t.backupd .dot-unknown { background: var(--unknown); }\n\t\t.backupd .dot.pulsing { animation: backupd-pulse 1.2s ease-in-out infinite alternate; }\n\t\t/* Keyframe names are global no matter where the rule is written,\n\t\t   so they carry the prefix the selectors get from scoping. */\n\t\t@keyframes backupd-pulse { from { opacity: 0.4; } to { opacity: 1; } }\n\t\t@keyframes backupd-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }\n\t\t.backupd .spinner {\n\t\t\tdisplay: inline-block;\n\t\t\twidth: 12px; height: 12px;\n\t\t\tborder: 2px solid var(--syncing);\n\t\t\tborder-top-color: transparent;\n\t\t\tborder-radius: 50%;\n\t\t\tanimation: backupd-spin 1s linear infinite;\n\t\t\tvertical-align: middle;\n\t\t}\n\n\t\t/* Shell */\n\t\t.backupd .shell { display: flex; }\n\t\t.backupd .sidebar {\n\t\t\twidth: 270px;\n\t\t\tborder-right: 1px solid var(--border);\n\t\t\tbackground: var(--surface);\n\t\t\tpadding: 0.75rem;\n\t\t\tflex-shrink: 0;\n\t\t}\n\t\t.backupd .main-content { flex: 1; min-width: 0; padding: 1rem 1.5rem; }\n\t\t.backupd .nav-link, .backupd .dataset-link {\n\t\t\tdisplay: flex;\n\t\t\talign-items: center;\n\t\t\tgap: 0.5rem;\n\t\t\tpadding: 0.35rem 0.5rem;\n\t\t\tborder-radius: 4px;\n\t\t\ttext-decoration: none;\n\t\t\tcolor: var(--fg);\n\t\t\tmargin-bottom: 0.1rem;\n\t\t}\n\t\t.backupd .nav-link:hover, .backupd .dataset-link:hover,\n\t\t.backupd .nav-link.active, .backupd .dataset-link.active { background: var(--surface-hover); text-decoration: none; }\n\t\t.backupd .side-heading {\n\t\t\tmargin: 1rem 0 0.35rem;\n\t\t\tfont-size: 0.75rem;\n\t\t\tfont-weight: 600;\n\t\t\tletter-spacing: 0.06em;\n\t\t\ttext-transform: uppercase;\n\t\t\tcolor: var(--muted);\n\t\t}\n\t\t.backupd .dataset-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n\t\t.backupd .dataset-age { margin-left: auto; font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; }\n\t\t.backupd .controls { display: flex; flex-direction: column; gap: 0.4rem; margin: 0.75rem 0; }\n\t\t.backupd .controls .snapshot-row { display: flex; gap: 0.4rem; }\n\t\t.backupd .controls .snapshot-row select { flex: 1; min-width: 0; }\n\t\t.backupd .btn, .backupd select, .backupd textarea {\n\t\t\tfont-family: inherit;\n\t\t\tcolor: var(--fg);\n\t\t\tbackground: var(--field);\n\t\t\tborder: 1px solid var(--field-border);\n\t\t\tborder-radius: 4px;\n\t\t\tfont-size: 0.85rem;\n\t\t}\n\t\t.backupd .btn {\n\t\t\tpadding: 0.35rem 0.7rem;\n\t\t\tcursor: pointer;\n\t\t}\n\t\t.backupd .btn:hover { background: var(--surface-hover); }\n\t\t.backupd .btn.warn { border-color: var(--paused); color: var(--paused); font-weight: 500; }\n\t\t.backupd .btn.small { padding: 0.15rem 0.5rem; font-size: 0.8rem; }\n\n\t\t/* Content */\n\t\t/* break-word for the same reason <code> carries it: the h1 on a\n\t\t   dataset page is a ZFS path, and a slash is not a break\n\t\t   opportunity. */\n\t\t.backupd h1 { font-size: 1.4rem; margin: 0.25rem 0 1rem; overflow-wrap: break-word; }\n\t\t.backupd h1 .chip { vertical-align: middle; margin-left: 0.5rem; }\n\t\t.backupd h2 { font-size: 1.05rem; margin: 1.5rem 0 0.5rem; }\n\t\t/* Plain tables (facts, fulfillment, plan). The datagrid tables\n\t\t   bring their own operational-table treatment, so the host rules\n\t\t   stand aside for anything inside a monks-datagrid. */\n\t\t.backupd table:not(monks-datagrid *) { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }\n\t\t.backupd th:not(monks-datagrid *), .backupd td:not(monks-datagrid *) { padding: 0.3em 0.9em 0.3em 0; text-align: left; border-bottom: 1px solid var(--border); vertical-align: baseline; }\n\t\t.backupd th:not(monks-datagrid *) { font-weight: 600; font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }\n\t\t.backupd td.num, .backupd th.num { text-align: right; font-variant-numeric: tabular-nums; }\n\t\t/* A column-shaped table — one whose cells mean nothing stacked —\n\t\t   scrolls inside its own box rather than widening the page. The\n\t\t   table keeps width:100% and no min-width, so it squeezes first\n\t\t   and only scrolls once something in it genuinely cannot fit. */\n\t\t.backupd .table-scroll { overflow-x: auto; margin-bottom: 1rem; }\n\t\t.backupd .table-scroll table:not(monks-datagrid *) { margin-bottom: 0; }\n\t\t.backupd .muted { color: var(--muted); }\n\t\t.backupd .error-text { color: var(--failing); }\n\t\t.backupd .stale-text { color: var(--atrisk); font-weight: 500; }\n\t\t.backupd .cycle-ok { color: var(--ok); font-weight: 600; }\n\t\t.backupd .cycle-failed { color: var(--failing); font-weight: 600; }\n\t\t.backupd .cycle-paused { color: var(--paused); font-weight: 600; }\n\n\t\t/* Attention (issues) */\n\t\t.backupd .all-clear {\n\t\t\tcolor: var(--ok);\n\t\t\tbackground: var(--ok-bg);\n\t\t\tpadding: 0.6rem 0.9rem;\n\t\t\tborder-radius: 4px;\n\t\t\tmargin: 0 0 1rem;\n\t\t}\n\t\t.backupd .issues { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1rem; }\n\t\t.backupd .issue {\n\t\t\tdisplay: flex;\n\t\t\talign-items: baseline;\n\t\t\tgap: 0.6rem;\n\t\t\tpadding: 0.5rem 0.75rem;\n\t\t\tborder-radius: 4px;\n\t\t\tborder-left: 4px solid var(--unknown);\n\t\t\tbackground: var(--surface);\n\t\t\tflex-wrap: wrap;\n\t\t}\n\t\t.backupd .issue-critical { border-left-color: var(--failing); background: var(--failing-bg); }\n\t\t.backupd .issue-warning { border-left-color: var(--pending); background: var(--pending-bg); }\n\t\t.backupd .issue-info { border-left-color: var(--paused); background: var(--paused-bg); }\n\t\t.backupd .issue-summary { font-weight: 600; }\n\t\t.backupd .issue-since { color: var(--muted); font-size: 0.85rem; }\n\t\t/* pre-wrap keeps the detail's own line breaks, but it does not\n\t\t   break a long unbroken run — and these details are snapshot\n\t\t   names and ZFS paths, which is exactly that. */\n\t\t.backupd .issue-detail { flex-basis: 100%; font-size: 0.85rem; color: var(--detail); font-family: monospace; white-space: pre-wrap; overflow-wrap: anywhere; }\n\t\t.backupd .issue .btn { margin-left: auto; }\n\n\t\t/* Now (cycle progress) */\n\t\t.backupd .now {\n\t\t\tdisplay: flex;\n\t\t\talign-items: center;\n\t\t\tgap: 0.75rem;\n\t\t\tmargin-bottom: 1rem;\n\t\t\tcolor: var(--muted);\n\t\t\tflex-wrap: wrap;\n\t\t}\n\t\t.backupd .qdots { display: inline-flex; gap: 3px; align-items: center; }\n\t\t.backupd .qdot { width: 8px; height: 8px; border-radius: 2px; display: inline-block; background: var(--track); }\n\t\t.backupd .qdot-done { background: var(--ok); }\n\t\t.backupd .qdot-failed { background: var(--failing); }\n\t\t.backupd .qdot-skipped { background: var(--paused); }\n\t\t.backupd .qdot-active { background: var(--syncing); animation: backupd-pulse 1.2s ease-in-out infinite alternate; }\n\n\t\t/* Cycle strip (recent checks at a glance) */\n\t\t.backupd .cycle-strip { display: flex; flex-wrap: wrap; gap: 3px; margin: 0.25rem 0 0.75rem; }\n\n\t\t/* Fulfillment */\n\t\t.backupd .shortfall { color: var(--pending); font-weight: 600; }\n\n\t\t/* Plan steps */\n\t\t.backupd .step-status { display: inline-block; width: 14px; height: 14px; vertical-align: middle; }\n\t\t.backupd .step-status.pending { border: 2px solid var(--field-border); border-radius: 50%; }\n\t\t.backupd .step-status.in-progress { border: 2px solid var(--syncing); border-top-color: transparent; border-radius: 50%; animation: backupd-spin 1s linear infinite; }\n\t\t.backupd .step-status.completed::before { content: '✓'; color: var(--ok); font-weight: bold; }\n\t\t.backupd .step-status.failed::before { content: '✗'; color: var(--failing); font-weight: bold; }\n\t\t.backupd .step-log td { border-bottom: none; }\n\t\t.backupd .log-message { font-size: 0.8rem; color: var(--muted); font-family: monospace; display: block; padding: 0.1rem 0 0.1rem 2rem; }\n\t\t.backupd .step-progress td { border-bottom: none; padding-left: 2rem; }\n\t\t.backupd .step-progress progress { width: 16rem; }\n\n\t\t/* Recovery sentence */\n\t\t.backupd .recovery { margin: 0 0 1rem; max-width: 60rem; }\n\t\t.backupd .recovery b { font-weight: 600; }\n\t\t.backupd .recovery.atrisk { color: var(--atrisk); }\n\n\t\t/* Snapshot grid */\n\t\t.backupd .snapshot-present { color: var(--ok); }\n\t\t.backupd .snapshot-absent { color: var(--failing); }\n\t\t.backupd .snapshot-doomed { color: var(--pending); }\n\t\t.backupd .retention-override { color: var(--pending); font-weight: 500; }\n\n\t\t/* Config editor */\n\t\t.backupd #config-editor {\n\t\t\twidth: 100%;\n\t\t\tmin-height: 24rem;\n\t\t\tfont-family: monospace;\n\t\t\tfont-size: 0.9rem;\n\t\t\tpadding: 0.75rem;\n\t\t\tresize: vertical;\n\t\t}\n\t\t.backupd .config-actions { display: flex; gap: 0.5rem; margin: 0.75rem 0; }\n\t\t.backupd .config-error {\n\t\t\tbackground: var(--failing-bg);\n\t\t\tcolor: var(--failing);\n\t\t\tpadding: 0.75rem;\n\t\t\tborder-radius: 4px;\n\t\t\twhite-space: pre-wrap;\n\t\t\tfont-family: monospace;\n\t\t\tfont-size: 0.85rem;\n\t\t}\n\t\t.backupd .impact-note { color: var(--muted); font-size: 0.9rem; }\n\n\t\t/* ---- Touch ----------------------------------------------------\n\t\t   Two things change when there is no pointer to hover with, and\n\t\t   neither is a question of width: a tablet in landscape has the\n\t\t   width and still has fingers.\n\n\t\t   16px is the size below which a phone browser zooms the page in\n\t\t   to meet a field taking focus, and it never zooms back out — so\n\t\t   every control you type into is floored there. Everything on\n\t\t   these pages is deliberately smaller than that: this is a dense\n\t\t   dashboard read at a desk, and the floor is a separate rule so\n\t\t   the desk keeps its density. An ops host may well floor its own\n\t\t   controls the same way (monks.co/pkg/opsui does), but a daemon\n\t\t   that can be embedded anywhere cannot count on it.\n\n\t\t   16px, not 1rem: the zoom threshold is an absolute computed\n\t\t   size, and a host that sets a root font-size below 100% would\n\t\t   leave a 1rem floor under it with the trap still open.\n\n\t\t   !important for the reason opsui's own floor carries it: the\n\t\t   floor has to win against rules that legitimately size a control\n\t\t   smaller, and one of them is right here — #config-editor sets a\n\t\t   font-size from an id, which outranks any selector this block\n\t\t   could write. Without it the config editor is the one control on\n\t\t   these pages you actually type into and the one the floor misses.\n\n\t\t   The search fields inside a datagrid are floored from here too,\n\t\t   reaching across a boundary the rest of this sheet respects. The\n\t\t   better home is monks.co/pkg/datagrid's own stylesheet, where\n\t\t   every consumer would get it; until it has one, a grid whose\n\t\t   search box zooms the page is this page's problem, and an\n\t\t   embedded grid is inside .backupd either way. Nothing is typed\n\t\t   into a checkbox or a radio, so neither zooms and neither wants\n\t\t   the size.\n\n\t\t   The buttons follow the fields up rather than staying at\n\t\t   0.85rem: they sit in the same rows, a 12px button against 16px\n\t\t   text reads as a mistake, and they are the tap targets. 29px of\n\t\t   button clears the WCAG 2.5.8 minimum and neither platform's\n\t\t   own. .small does not stay small here — it is used for exactly\n\t\t   one thing, the remedy button on an issue card, which on a phone\n\t\t   is the likeliest thing in the whole app to be tapped: you\n\t\t   opened the dashboard because something was red. */\n\t\t@media (hover: none) {\n\t\t\t.backupd select,\n\t\t\t.backupd textarea,\n\t\t\t.backupd input:not([type=\"checkbox\"]):not([type=\"radio\"]) { font-size: 16px !important; }\n\t\t\t.backupd .btn, .backupd .btn.small { font-size: 16px; padding: 0.7rem 1rem; }\n\t\t\t.backupd .nav-link, .backupd .dataset-link { padding-block: 0.55rem; }\n\t\t}\n\n\t\t/* ---- Narrow ---------------------------------------------------\n\t\t   A 270px pane beside the content is most of a phone's width, so\n\t\t   at 820px the shell stops being two panes. That number is where\n\t\t   the pane stops leaving the content a readable measure — 270 of\n\t\t   sidebar and 48 of gutter off 820 leaves about 500px of text,\n\t\t   and below that the pane is taking more than it gives. It is\n\t\t   also, not by accident, where monks.co/pkg/opsui's masthead\n\t\t   wraps: on an ops page the chrome and the shell below it break\n\t\t   at the same width rather than one at a time.\n\n\t\t   `display: contents` dissolves the sidebar's box so its three\n\t\t   groups become siblings of the content and can be ordered around\n\t\t   it. The page links lead, the way a subnav does; the controls and\n\t\t   the dataset list follow, because on a phone the page you asked\n\t\t   for should be the thing under the fold, and both the dataset\n\t\t   page and the overview carry the buttons that matter inline\n\t\t   anyway. Nothing is hidden behind a toggle: the whole list stays\n\t\t   on the page, one scroll away, and there is no open/closed state\n\t\t   to lose — the live refresh replaces this subtree wholesale every\n\t\t   time the daemon's state changes, which is often during a sync. */\n\t\t@media (max-width: 820px) {\n\t\t\t.backupd .shell { flex-direction: column; }\n\t\t\t.backupd .sidebar { display: contents; }\n\t\t\t.backupd .nav-links { order: 1; }\n\t\t\t.backupd .main-content { order: 2; }\n\t\t\t.backupd .controls { order: 3; }\n\t\t\t.backupd .datasets { order: 4; }\n\n\t\t\t/* Whichever shell we are in, the page scrolls as one. Two\n\t\t\t   panes that scroll independently is a good desk and a bad\n\t\t\t   phone: stacked, the second one is a scroll trap. */\n\t\t\t.backupd.standalone { height: auto; }\n\t\t\t.backupd.standalone .shell { flex: none; min-height: 0; }\n\t\t\t.backupd.standalone .main-content { overflow-y: visible; }\n\n\t\t\t/* The sidebar's padding went with its box; the groups carry\n\t\t\t   their own, sized so link text lines up with the content's\n\t\t\t   own 1rem gutter. */\n\t\t\t.backupd .nav-links, .backupd .controls, .backupd .datasets { padding-inline: 0.5rem; }\n\t\t\t.backupd .main-content { padding: 0.75rem 1rem; }\n\n\t\t\t.backupd .nav-links {\n\t\t\t\tdisplay: flex;\n\t\t\t\tflex-wrap: wrap;\n\t\t\t\tgap: 0.15rem;\n\t\t\t\tpadding-block: 0.4rem;\n\t\t\t\tbackground: var(--surface);\n\t\t\t\tborder-bottom: 1px solid var(--border);\n\t\t\t}\n\t\t\t.backupd .nav-links .nav-link { margin-bottom: 0; }\n\t\t\t.backupd .controls {\n\t\t\t\tflex-direction: row;\n\t\t\t\tflex-wrap: wrap;\n\t\t\t\tmargin: 0;\n\t\t\t\tpadding-block: 0.75rem;\n\t\t\t\tborder-top: 1px solid var(--border);\n\t\t\t}\n\t\t\t/* A child combinator, because the snapshot button is a .btn\n\t\t\t   inside .snapshot-row and a descendant selector hands it a\n\t\t\t   basis it then wins the row with — leaving the periodicity\n\t\t\t   you read a sixth of the width and the button you tap two\n\t\t\t   thirds of it. */\n\t\t\t.backupd .controls > .btn { flex: 1 1 8rem; }\n\t\t\t.backupd .controls .snapshot-row { flex: 1 1 14rem; }\n\t\t\t.backupd .datasets { padding-bottom: 1rem; }\n\n\t\t\t/* The strip's three cells each take a row. Left to flex, the\n\t\t\t   verdict's reason squeezes the activity cell to a column of\n\t\t\t   single words and the countdown lands off the screen. */\n\t\t\t.backupd .strip { gap: 0.3rem 1rem; padding: 0.5rem 0.75rem; }\n\t\t\t.backupd .strip-cell { flex-wrap: wrap; }\n\t\t\t.backupd .strip-verdict, .backupd .strip-activity, .backupd .strip-facts { flex: 1 1 100%; }\n\t\t\t.backupd .strip-facts { margin-left: 0; gap: 0.2rem 0.9rem; }\n\t\t\t.backupd .strip-activity progress { width: auto; flex: 1 1 6rem; }\n\n\t\t\t/* The facts table is label-and-value, not columns, so it\n\t\t\t   stacks instead of scrolling: two columns at this width\n\t\t\t   leave the value about ten characters. */\n\t\t\t.backupd .facts, .backupd .facts tbody, .backupd .facts tr, .backupd .facts th, .backupd .facts td { display: block; }\n\t\t\t.backupd .facts tr { padding: 0.45rem 0; border-bottom: 1px solid var(--border); }\n\t\t\t.backupd .facts th, .backupd .facts td { padding: 0; border-bottom: none; }\n\t\t\t.backupd .facts th { margin-bottom: 0.1rem; }\n\n\t\t\t/* A plan step's log lines are already indented under their\n\t\t\t   step by the table; another 2rem of it at this width leaves\n\t\t\t   nothing to read them in. */\n\t\t\t.backupd .log-message { padding-left: 0.5rem; }\n\t\t\t.backupd .step-progress td { padding-left: 0.5rem; }\n\t\t\t.backupd .step-progress progress { width: 100%; }\n\n\t\t\t.backupd h1 { font-size: 1.25rem; }\n\t\t\t.backupd .controls-row { flex-wrap: wrap; }\n\t\t}\n\t</style>")

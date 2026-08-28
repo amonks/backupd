@@ -13,6 +13,7 @@ import (
 	"monks.co/backupd/history"
 	"monks.co/backupd/model"
 	"monks.co/backupd/view"
+	"monks.co/pkg/localtime"
 )
 
 templ renderRetention(conf *config.Config, dataset string) {
@@ -27,8 +28,12 @@ templ datasetLink(base string, name model.DatasetName) {
 	<a href={ templ.SafeURL(datasetHref(base, name)) }>{ name.String() }</a>
 }
 
+// whenCell is the daemon's relative wording with the instant in the
+// title, local to the viewer: what every "when" on these pages is.
 templ whenCell(at time.Time) {
-	<span title={ exactTime(at) }>{ fmtAgo(at) }</span>
+	@localtime.Titled(at, localtime.Second) {
+		{ fmtAgo(at) }
+	}
 }
 
 templ codeCell(s string) {

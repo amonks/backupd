@@ -7,6 +7,7 @@ import (
 	"monks.co/backupd/history"
 	"monks.co/backupd/status"
 	"monks.co/backupd/view"
+	"monks.co/pkg/localtime"
 )
 
 // overview is the operator's landing page, ordered by session
@@ -44,7 +45,10 @@ templ issueCard(base string, issue view.Issue) {
 		}
 		<span class="issue-summary">{ issue.Summary }</span>
 		if !issue.Since.IsZero() {
-			<span class="issue-since" title={ exactTime(issue.Since) }>since { fmtAgo(issue.Since) }</span>
+			<span class="issue-since">
+				{ "since " }
+				@whenCell(issue.Since)
+			</span>
 		}
 		@issueAction(issue)
 		if issue.Detail != "" {
@@ -93,7 +97,12 @@ templ nowSection(d pageData) {
 			</div>
 		case status.Idle:
 			<div class="now">
-				<span>next cycle <span class="countdown" data-until={ fmt.Sprint(d.Activity.Until.UnixMilli()) }>{ fmtUntil(d.Activity.Until) }</span> (at { d.Activity.Until.Format("15:04") })</span>
+				<span>
+					next cycle <span class="countdown" data-until={ fmt.Sprint(d.Activity.Until.UnixMilli()) }>{ fmtUntil(d.Activity.Until) }</span>
+					{ "(at " }
+					@localtime.Stamp(d.Activity.Until, localtime.Minute)
+					{ ")" }
+				</span>
 				@lastCycleNote(d)
 			</div>
 		case status.BackingOff:
@@ -106,7 +115,11 @@ templ nowSection(d pageData) {
 
 templ lastCycleNote(d pageData) {
 	if c := d.Sys.LastCycle; c != nil && c.OK && !c.Paused {
-		<span class="muted">last cycle finished { fmtAgo(c.StoppedAt) } in { c.Duration().Round(time.Second).String() }</span>
+		<span class="muted">
+			{ "last cycle finished " }
+			@whenCell(c.StoppedAt)
+			{ " in " + c.Duration().Round(time.Second).String() }
+		</span>
 	}
 }
 
@@ -174,15 +187,24 @@ func stripClass(c history.Cycle) string {
 	}
 }
 
-func stripTitle(c history.Cycle) string {
-	title := fmt.Sprintf("%s · %s in %s",
-		c.StartedAt.Format(time.DateTime),
-		view.OutcomeOf(c).String(),
-		c.Duration().Round(time.Second))
+// stripOutcome is what a dot's hover says after the cycle's start:
+// the outcome, the duration, and the detail when there is one.
+func stripOutcome(c history.Cycle) string {
+	s := fmt.Sprintf("%s in %s", view.OutcomeOf(c).String(), c.Duration().Round(time.Second))
 	if d := view.CycleDetail(c); d != "" {
-		title += " · " + d
+		s += " · " + d
 	}
-	return title
+	return s
+}
+
+// stripTitle is the dot's hover as the server writes it: the start in
+// marked UTC, then the outcome. localtime's own title rewrite would
+// replace the whole title with the stamp, so the dot carries the
+// instant and the outcome as data and the dashboard's script composes
+// the local reading itself (localizeTitles), through the formatter
+// localtime leaves on the window.
+func stripTitle(c history.Cycle) string {
+	return localtime.Fallback(c.StartedAt, localtime.Second) + " · " + stripOutcome(c)
 }
 
 // cycleStrip shows recent cycles at a glance, one cell per cycle,
@@ -190,14 +212,8 @@ func stripTitle(c history.Cycle) string {
 templ cycleStrip(cycles []history.Cycle) {
 	<div class="cycle-strip">
 		for _, c := range stripCycles(cycles, stripLen) {
-			<span class={ "qdot", "qdot-" + stripClass(c) } title={ stripTitle(c) }></span>
+			<span class={ "qdot", "qdot-" + stripClass(c) } data-at={ localtime.Attr(c.StartedAt) } data-outcome={ stripOutcome(c) } title={ stripTitle(c) }></span>
 		}
 	</div>
 }
 
-func exactTime(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	return t.Format("2006-01-02 15:04:05")
-}

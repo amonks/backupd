@@ -34,6 +34,21 @@ templ script() {
 		});
 	}, 1000);
 
+	// ---- Composed titles -----------------------------------------------
+	// A title that says more than the instant — the cycle strip's dots
+	// say "start · outcome in duration" — cannot take pkg/localtime's
+	// title rewrite, which replaces the whole title with the stamp. The
+	// dot carries the instant (data-at) and the rest (data-outcome), and
+	// the title is composed here through the formatter localtime leaves
+	// on the window; without it the server's marked-UTC title stands.
+	function localizeTitles(root) {
+		if (!window.MonksLocalTime) return;
+		root.querySelectorAll('[data-at][data-outcome]').forEach(el => {
+			el.title = MonksLocalTime.format(el.dataset.at, 'second') + ' · ' + el.dataset.outcome;
+		});
+	}
+	localizeTitles(ROOT);
+
 	// ---- Control buttons -----------------------------------------------
 	// Any element with data-api posts to that endpoint, optionally
 	// confirming first. The page updates via the state-change poll.
@@ -188,6 +203,7 @@ templ script() {
 			window: window.scrollY,
 		};
 		current.replaceChildren(...fresh.childNodes);
+		localizeTitles(current);
 		const newSidebar = current.querySelector('.sidebar');
 		const newMain = current.querySelector('.main-content');
 		if (newSidebar) newSidebar.scrollTop = scrolls.sidebar;
