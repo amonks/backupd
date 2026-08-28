@@ -1,11 +1,14 @@
 package daemon
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/a-h/templ"
 )
 
 // The tests here cover the seam between the daemon and a host page. A
@@ -451,5 +454,19 @@ func TestEveryCustomPropertyIsDefined(t *testing.T) {
 		if !defined[name] {
 			t.Errorf("stylesheet reads %s but never defines it", name)
 		}
+	}
+}
+
+// The dashboard's script carries the request's CSP nonce when the
+// context has one (serve.Mux stamps the proxy's), so the deployed app
+// isn't on the proxy's inline work-list and keeps its behavior under
+// enforcement.
+func TestScriptCarriesTheNonce(t *testing.T) {
+	var b strings.Builder
+	if err := script().Render(templ.WithNonce(context.Background(), "n0nce"), &b); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(b.String(), `<script nonce="n0nce">`) {
+		t.Errorf("script lacks the nonce: %.60s", b.String())
 	}
 }

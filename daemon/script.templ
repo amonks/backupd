@@ -6,7 +6,7 @@ package daemon
 // body in place (preserving scroll positions) rather than reloading,
 // which keeps the page readable while a sync is writing progress.
 templ script() {
-	<script>
+	<script if templ.GetNonce(ctx) != "" { nonce={ templ.GetNonce(ctx) } }>
 	// ---- Mount point ---------------------------------------------------
 	// Every request the page makes is relative to where the dashboard is
 	// mounted, which the server wrote onto the root element. Reading it
