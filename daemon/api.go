@@ -579,6 +579,19 @@ func (b *Daemon) View() view.System {
 	return b.viewOf(b.state.Deref(), b.conf.Deref(), b.activity.Get())
 }
 
+// Activity is one consistent snapshot of what the sync loop is doing
+// right now — the same tracker state the dashboard and /api/state
+// render. Alongside View it serves a host that watches the daemon
+// rather than renders it, at a finer grain than View's derivations:
+// its Transfer field is non-nil while a transfer is in flight — set at
+// the first bytes moved, cleared when the loop moves on to the next
+// step, dataset, or wait — which is what a host consults before doing
+// something disruptive to the process. It is a snapshot, not a lock:
+// the loop can start a transfer right after it is taken.
+func (b *Daemon) Activity() status.Activity {
+	return b.activity.Get()
+}
+
 // viewOf is the one place the derivation is assembled. Both View and
 // the page render go through it, so "an exported metric cannot disagree
 // with the dashboard" is structural rather than two literals somebody
