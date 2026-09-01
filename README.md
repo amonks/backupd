@@ -566,6 +566,7 @@ chrome of the site it is part of.
 d := daemon.New(daemon.Options{
 	Config: conf,           // the only required field
 	Logger: slog.Default(), // structured records go here
+	Snitch: checkIn,        // optional context-aware check-in client
 	Layout: myLayout,       // wrap each page in your own HTML
 	OmitNav: true,          // ...and render its nav yourself
 })
@@ -576,6 +577,13 @@ http.Handle("/", d.Handler())     // the dashboard and control API
 
 `Options{Config: conf}` alone gives you exactly what the command does;
 every other field has a working default.
+
+`Options.Snitch` is `func(context.Context, string) error`. `Run` passes
+its caller context through to the check-in after a successful cycle, so
+an embedding host can supply its own HTTP transport and tracing. Nil
+uses the standalone client's context-bound request; it drains and
+closes the response so its connection can be reused, and treats only a
+2xx response as a successful check-in.
 
 | API | Purpose |
 |-----|---------|

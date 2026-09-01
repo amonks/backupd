@@ -25,7 +25,7 @@ import (
 
 func newSimDaemon(conf *config.Config, s *sim.Sim) *Daemon {
 	b := New(Options{Config: conf, Env: s})
-	b.snitch = func(string) error { return nil }
+	b.snitch = func(context.Context, string) error { return nil }
 	b.state.Reset(model.New())
 	return b
 }
@@ -254,7 +254,7 @@ func TestSimPausedCycleExecutesNothing(t *testing.T) {
 	conf.SnitchID = "test-snitch"
 	b := newSimDaemon(conf, s)
 	snitched := 0
-	b.snitch = func(string) error { snitched++; return nil }
+	b.snitch = func(context.Context, string) error { snitched++; return nil }
 	runCycles(t, b, 1)
 
 	if muts := s.Mutations(); len(muts) != 0 {

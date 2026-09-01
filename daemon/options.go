@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"html/template"
 	"log/slog"
 	"net/http"
@@ -30,6 +31,12 @@ type Options struct {
 	// slog.Default(). New also routes the in-memory ring buffers here
 	// (see logger.SetLogger), which is process-wide.
 	Logger *slog.Logger
+
+	// Snitch checks a configured Dead Man's Snitch in after a
+	// successful cycle. Nil uses the standalone daemon's HTTP client.
+	// A host can replace it to integrate its own HTTP transport and
+	// tracing; Run passes its caller context through unchanged.
+	Snitch func(context.Context, string) error
 
 	// Layout wraps every dashboard page in host-owned HTML. Nil means
 	// backupd renders its own complete document.

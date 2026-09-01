@@ -56,8 +56,9 @@ type Daemon struct {
 	// resume is env.Resume, injectable for tests.
 	resume func(context.Context, *logger.Logger, model.DatasetName, string) error
 
-	// snitch pings Dead Man's Snitch, injectable for tests.
-	snitch func(id string) error
+	// snitch pings Dead Man's Snitch. Options supplies the host's
+	// implementation; the standalone default lives in package snitch.
+	snitch func(context.Context, string) error
 
 	// wait blocks for a duration, returning early with a sync-now
 	// request if one arrives; injectable for tests.
@@ -87,6 +88,10 @@ func New(opts Options) *Daemon {
 	if log == nil {
 		log = slog.Default()
 	}
+	snitchOK := opts.Snitch
+	if snitchOK == nil {
+		snitchOK = snitch.OK
+	}
 	// Only a host's own logger is installed as the ring sink. Passing
 	// slog.Default() here instead would work — its handler writes
 	// through the log package either way — but it would change the
@@ -111,10 +116,10 @@ func New(opts Options) *Daemon {
 		syncNow:    make(chan syncRequest, 16),
 		history:    history.New(),
 		boot:       time.Now(),
+		snitch:     snitchOK,
 	}
 	b.activity = status.New(b.notifyStateChange)
 	b.resume = e.Resume
-	b.snitch = snitch.OK
 	b.wait = b.waitWake
 	e.SetOnProgress(b.activity.Progress)
 	return b
@@ -436,7 +441,7 @@ func (b *Daemon) Run(ctx context.Context) error {
 				// trips the dead man's switch.
 				if conf.Paused {
 					b.globalLogs.Printf("paused; skipping deadmanssnitch")
-				} else if err := b.snitch(conf.SnitchID); err != nil {
+				} else if err := b.snitch(ctx, conf.SnitchID); err != nil {
 					b.log.LogAttrs(context.Background(), slog.LevelError, "snitch ping failed",
 						slog.Bool(SnitchOKKey, false), slog.String("error", err.Error()))
 					b.history.RecordSnitchError(time.Now(), err.Error())

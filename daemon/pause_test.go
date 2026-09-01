@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,8 @@ import (
 	"time"
 
 	"monks.co/backupd/config"
+	"monks.co/backupd/env"
+	"monks.co/backupd/logger"
 	"monks.co/backupd/model"
 )
 
@@ -130,7 +133,7 @@ func TestGlobalPauseSuppressesSnitch(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var snitched bool
-	b.snitch = func(string) error { snitched = true; return nil }
+	b.snitch = func(context.Context, string) error { snitched = true; return nil }
 	b.wait = func(ctx context.Context, d time.Duration) (*syncRequest, error) {
 		cancel()
 		return nil, ctx.Err()
@@ -153,7 +156,7 @@ func TestSnitchPingsWhenNotPaused(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var snitched bool
-	b.snitch = func(string) error { snitched = true; return nil }
+	b.snitch = func(context.Context, string) error { snitched = true; return nil }
 	b.wait = func(ctx context.Context, d time.Duration) (*syncRequest, error) {
 		cancel()
 		return nil, ctx.Err()
@@ -164,6 +167,49 @@ func TestSnitchPingsWhenNotPaused(t *testing.T) {
 	}
 	if !snitched {
 		t.Error("expected snitch ping after a successful unpaused cycle")
+	}
+}
+
+func TestSnitchOptionReceivesRunContext(t *testing.T) {
+	local, remote := steadyStateExecutors()
+	conf := testConf()
+	conf.SnitchID = "test-snitch"
+
+	type contextKey struct{}
+	runCtx, cancel := context.WithCancel(context.WithValue(t.Context(), contextKey{}, "run"))
+	defer cancel()
+	var called bool
+	b := New(Options{
+		Config: conf,
+		Env: &env.Env{
+			Local:  env.NewZFS(conf.Local.Root, local),
+			Remote: env.NewZFS(conf.Remote.Root, remote),
+		},
+		Snitch: func(ctx context.Context, id string) error {
+			called = true
+			if got := ctx.Value(contextKey{}); got != "run" {
+				t.Errorf("snitch context value = %v, want run", got)
+			}
+			if id != conf.SnitchID {
+				t.Errorf("snitch id = %q, want %q", id, conf.SnitchID)
+			}
+			return nil
+		},
+	})
+	b.resume = func(context.Context, *logger.Logger, model.DatasetName, string) error {
+		return fmt.Errorf("unexpected resume call")
+	}
+	b.state.Reset(model.New())
+	b.wait = func(context.Context, time.Duration) (*syncRequest, error) {
+		cancel()
+		return nil, runCtx.Err()
+	}
+
+	if err := b.Run(runCtx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected Run to return on cancellation, got: %v", err)
+	}
+	if !called {
+		t.Fatal("injected snitch was not called")
 	}
 }
 

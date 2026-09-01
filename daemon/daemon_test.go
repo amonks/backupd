@@ -91,7 +91,7 @@ func newTestDaemon(conf *config.Config, local, remote *fakeExecutor) *Daemon {
 	b.resume = func(context.Context, *logger.Logger, model.DatasetName, string) error {
 		return fmt.Errorf("unexpected resume call")
 	}
-	b.snitch = func(string) error { return nil }
+	b.snitch = func(context.Context, string) error { return nil }
 	b.state.Reset(model.New())
 	return b
 }
