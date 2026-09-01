@@ -3,7 +3,6 @@ package env
 import (
 	"context"
 	"fmt"
-	"path"
 
 	"monks.co/backupd/config"
 	"monks.co/backupd/logger"
@@ -52,19 +51,18 @@ func (env *Env) Resume(ctx context.Context, logger *logger.Logger, dataset model
 	return nil
 }
 
+// TransferInitialSnapshot sends a full snapshot into a remote dataset
+// that does not exist yet. The receive creates only the leaf: a nested
+// dataset's remote parent must already exist, which it does whenever
+// the parent — itself a dataset under the same root — has replicated,
+// and the daemon holds the child back until then. The parent is never
+// created here: a plain create cannot succeed under an encrypted
+// remote whose keys are never loaded, and an empty placeholder would
+// collide with the parent's own initial receive.
 func (env *Env) TransferInitialSnapshot(ctx context.Context, logger *logger.Logger, dataset model.DatasetName, snapshot string) error {
 	if env.Local.readOnly || env.Remote.readOnly {
 		panic("read only")
 	}
-	// Ensure parent dataset exists on the remote so zfs receive can create
-	// the leaf dataset. Without this, receives into nested paths like
-	// /home/thor fail because the intermediate /home dataset doesn't exist.
-	if parent := path.Dir(dataset.Path()); parent != "." && parent != "/" {
-		if err := env.Remote.CreateDataset(logger, model.DatasetName(parent)); err != nil {
-			return fmt.Errorf("creating parent dataset '%s' on remote: %w", parent, err)
-		}
-	}
-
 	sendArgs := []string{"zfs", "send", "--raw",
 		fmt.Sprintf("%s@%s", env.Local.WithPrefix(dataset), snapshot)}
 	send := env.Local.Command(sendArgs...)

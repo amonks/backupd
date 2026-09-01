@@ -277,6 +277,12 @@ func (s *Sim) AbortRemoteResumable(l *logger.Logger, name model.DatasetName) err
 	ds.resumeToken = ""
 	ds.resumeEnd = nil
 	ds.resumeSent = 0
+	// A dataset that was nothing but the partial state of an
+	// interrupted full receive is destroyed with that state, like
+	// `zfs receive -A`, so a fresh full receive can target it again.
+	if ds.snaps.Len() == 0 {
+		delete(s.remote, name)
+	}
 	return nil
 }
 
@@ -414,11 +420,19 @@ func (s *Sim) transfer(ctx context.Context, l *logger.Logger, name model.Dataset
 	}
 
 	if start == nil {
-		// Initial transfer: like `zfs create -p` + receive, parents
-		// spring into existence remotely.
-		if remoteDS, has := s.remote[name]; has && remoteDS.snaps.Len() > 0 {
+		// Like zfs receive: a full stream refuses any existing
+		// destination, even an empty one…
+		if _, has := s.remote[name]; has {
 			s.mu.Unlock()
 			return fmt.Errorf("cannot receive new filesystem stream: destination '%s' exists", name)
+		}
+		// …and creates only the leaf: the parent dataset must already
+		// exist on the remote.
+		if parent := path.Dir(name.Path()); parent != "." && parent != "/" && parent != "" {
+			if _, has := s.remote[model.DatasetName(parent)]; !has {
+				s.mu.Unlock()
+				return fmt.Errorf("cannot receive new filesystem stream: parent '%s' does not exist", parent)
+			}
 		}
 	} else {
 		remoteDS, has := s.remote[name]
@@ -473,13 +487,7 @@ func (s *Sim) transfer(ctx context.Context, l *logger.Logger, name model.Dataset
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// Create the dataset (and, on initial transfer, its parents, like
-	// the real env's `zfs create -p`).
-	if start == nil {
-		for parent := path.Dir(name.Path()); parent != "." && parent != "/" && parent != ""; parent = path.Dir(parent) {
-			s.seed(s.remote, model.DatasetName(parent), nil)
-		}
-	}
+	// Create the dataset, like the receive of an initial transfer.
 	s.seed(s.remote, name, nil)
 	s.remote[name].snaps.Add(end)
 	if start == nil {

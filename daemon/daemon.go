@@ -9,6 +9,7 @@ import (
 	"log"
 	"log/slog"
 	"net/http"
+	"path"
 	"strings"
 	"time"
 
@@ -572,6 +573,39 @@ func (b *Daemon) refreshDataset(ctx context.Context, logger *logger.Logger, data
 	return nil
 }
 
+// remoteParentReady decides whether an initial transfer into dataset
+// has a remote parent to be received under. A nested dataset's parent
+// is itself a dataset under the same root, replicated ahead of its
+// children by the shortest-name-first cycle order, so it is never
+// created on the remote — a plain create cannot succeed under an
+// encrypted remote whose keys are never loaded, and an empty
+// placeholder would collide with the parent's own initial receive.
+// "Exists on the remote" is Metrics.HasRemote, from the cycle-start
+// enumeration; the snapshot count is what unblocks a child within
+// the cycle, once the parent's own transfer step has applied. The
+// error says what the dataset is waiting for: a parent with no
+// snapshots anywhere is freshly created, and any snapshot of it —
+// the next recursive one, or one taken now — ends the wait.
+func (b *Daemon) remoteParentReady(dataset model.DatasetName) error {
+	parent := path.Dir(dataset.Path())
+	if parent == "." || parent == "/" || parent == "" {
+		return nil
+	}
+	ds := b.state.Deref().GetDataset(model.DatasetName(parent))
+	if ds == nil || ds.Current == nil {
+		// A parent the model doesn't know has no snapshots to wait
+		// for; let the receive itself report whatever is wrong.
+		return nil
+	}
+	if ds.Metrics.HasRemote || ds.Current.Remote.Len() > 0 {
+		return nil
+	}
+	if ds.Current.Local.Len() == 0 {
+		return fmt.Errorf("waiting for parent dataset '%s' to get its first snapshot: this dataset cannot be received until its parent exists on the remote, and the parent cannot replicate until it has a snapshot — the next recursive snapshot ends the wait, and so does taking one now", parent)
+	}
+	return fmt.Errorf("waiting for parent dataset '%s' to replicate: this dataset cannot be received until its parent exists on the remote", parent)
+}
+
 // syncDataset executes the plan for the given dataset, recording the
 // outcome in history (cancellation is not an outcome).
 func (b *Daemon) syncDataset(ctx context.Context, dataset model.DatasetName) error {
@@ -675,6 +709,15 @@ func (b *Daemon) syncDatasetInner(ctx context.Context, dataset model.DatasetName
 		// state, so transfers can't proceed; deletions still can.
 		if resumeErr != nil && model.IsTransfer(step.Operation) {
 			return resumeErr
+		}
+
+		// An initial transfer's receive creates only the leaf: until
+		// the remote parent exists, this dataset waits, saying so —
+		// see remoteParentReady.
+		if _, isInitial := step.Operation.(*model.InitialSnapshotTransfer); isInitial {
+			if err := b.remoteParentReady(dataset); err != nil {
+				return err
+			}
 		}
 
 		// Get logger from the step's ProcessLogs

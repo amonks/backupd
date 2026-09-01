@@ -409,6 +409,130 @@ func TestSimFailingDatasetSurfaces(t *testing.T) {
 	}
 }
 
+// TestSimNestedDatasetWaitsForParent: an initial transfer into a
+// nested path needs its remote parent dataset, and the parent is
+// itself a dataset under the same root — it is received when its own
+// first snapshot replicates, never created on the remote. Until then
+// the child must wait, saying so, rather than attempt a create: on an
+// encrypted remote whose keys are never loaded a plain create cannot
+// succeed, and an empty placeholder would collide with the parent's
+// own initial receive later.
+func TestSimNestedDatasetWaitsForParent(t *testing.T) {
+	s := sim.New()
+	now := time.Now()
+	// A freshly created subtree: the parent has no snapshots at all;
+	// only the child was hand-snapshotted.
+	s.SeedLocal("/projects")
+	child := simSnap("/projects/wip", "manual-a", now.Add(-time.Hour).Unix())
+	s.SeedLocal("/projects/wip", child)
+
+	conf := simConf(map[string]int{"daily": 2, "manual": 5}, map[string]int{"daily": 2, "manual": 5}, true)
+	b := newSimDaemon(conf, s)
+	runCycles(t, b, 1)
+
+	// The child is failing with a message naming what it waits for.
+	sys := computeView(b, now)
+	childDS, _ := sys.Get("/projects/wip")
+	if childDS.Health != view.HealthFailing || !strings.Contains(childDS.Reason, "waiting for parent dataset '/projects'") {
+		t.Fatalf("expected /projects/wip waiting on its parent, got %s (%s)", childDS.Health, childDS.Reason)
+	}
+
+	// Nothing created a remote parent: no placeholder to collide with
+	// the parent's own initial receive.
+	remotes, err := s.RemoteDatasets(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(remotes) != 0 {
+		t.Fatalf("expected no remote datasets, got %+v\n%s", remotes, s)
+	}
+
+	// The parent's first snapshot (the next recursive snapshot covers
+	// every dataset) unblocks the subtree: parent replicates first,
+	// then the child, and both converge.
+	if err := s.Snapshot(context.Background(), nil, "tank", "daily"); err != nil {
+		t.Fatal(err)
+	}
+	runCycles(t, b, 1)
+	assertConverged(t, s, conf, "/projects")
+	assertConverged(t, s, conf, "/projects/wip")
+	if !s.Inventory("/projects/wip").Remote.Has(child) {
+		t.Fatalf("expected the child's snapshot on the remote:\n%s", s)
+	}
+	sys = computeView(b, now)
+	childDS, _ = sys.Get("/projects/wip")
+	if childDS.Health == view.HealthFailing {
+		t.Fatalf("expected /projects/wip to recover, got %s (%s)", childDS.Health, childDS.Reason)
+	}
+}
+
+// TestSimNestedChildProceedsUnderEmptyRemoteParent: existence, not
+// snapshot count, is what a child's receive needs from its remote
+// parent. A parent dataset that exists remotely with no snapshots —
+// a placeholder left by the retired create-parent behavior, or a
+// parent whose remote snapshots were all pruned — must not hold its
+// children back.
+func TestSimNestedChildProceedsUnderEmptyRemoteParent(t *testing.T) {
+	s := sim.New()
+	now := time.Now()
+	s.SeedLocal("/projects")
+	s.SeedRemote("/projects")
+	child := simSnap("/projects/wip", "manual-a", now.Add(-time.Hour).Unix())
+	s.SeedLocal("/projects/wip", child)
+
+	conf := simConf(map[string]int{"daily": 2, "manual": 5}, map[string]int{"daily": 2, "manual": 5}, true)
+	b := newSimDaemon(conf, s)
+	runCycles(t, b, 1)
+
+	if !s.Inventory("/projects/wip").Remote.Has(child) {
+		t.Fatalf("expected the child's snapshot on the remote:\n%s", s)
+	}
+	sys := computeView(b, now)
+	childDS, _ := sys.Get("/projects/wip")
+	if childDS.Health == view.HealthFailing {
+		t.Fatalf("expected /projects/wip to replicate under the empty parent, got %s (%s)", childDS.Health, childDS.Reason)
+	}
+}
+
+// TestSimNestedChildWaitsWhenParentPolicyRetainsNothing pins the wait
+// that does not resolve itself: a parent whose remote policy retains
+// nothing never replicates, so a child under it with a normal policy
+// waits every cycle, saying it waits on the parent's replication —
+// the operator's move is to give the parent a remote policy (or move
+// the child), and the spec says so.
+func TestSimNestedChildWaitsWhenParentPolicyRetainsNothing(t *testing.T) {
+	s := sim.New()
+	now := time.Now()
+	parentSnap := simSnap("/p", "daily-a", now.Add(-2*time.Hour).Unix())
+	s.SeedLocal("/p", parentSnap)
+	child := simSnap("/p/c", "daily-b", now.Add(-time.Hour).Unix())
+	s.SeedLocal("/p/c", child)
+
+	conf := simConf(map[string]int{"daily": 2}, map[string]int{"daily": 2}, true)
+	kb := false
+	parentOverride := &config.Override{KeepBaseline: &kb}
+	parentOverride.Remote.Policy = map[string]int{"daily": 0}
+	conf.Overrides = map[string]*config.Override{
+		"/p":   parentOverride,
+		"/p/c": {}, // restore the globals for the child
+	}
+	b := newSimDaemon(conf, s)
+	runCycles(t, b, 1)
+
+	sys := computeView(b, now)
+	childDS, _ := sys.Get("/p/c")
+	if childDS.Health != view.HealthFailing || !strings.Contains(childDS.Reason, "waiting for parent dataset '/p' to replicate") {
+		t.Fatalf("expected /p/c waiting on its parent's replication, got %s (%s)", childDS.Health, childDS.Reason)
+	}
+	remotes, err := s.RemoteDatasets(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(remotes) != 0 {
+		t.Fatalf("expected no remote datasets, got %+v\n%s", remotes, s)
+	}
+}
+
 // TestRapidSimConvergence is the end-to-end property: for arbitrary
 // pool states and policies, a few real sync cycles land every dataset
 // on the planner's fixed point, after which a further cycle performs no

@@ -138,16 +138,6 @@ func (zfs *ZFS) GetDatasets(logger *logger.Logger) ([]DatasetInfo, error) {
 	return out, nil
 }
 
-func (zfs *ZFS) CreateDataset(logger *logger.Logger, dataset model.DatasetName) error {
-	if zfs.readOnly {
-		panic("read only")
-	}
-	if _, err := zfs.x.Execf(logger, "zfs create -p %s", zfs.WithPrefix(dataset)); err != nil {
-		return err
-	}
-	return nil
-}
-
 func (zfs *ZFS) CreateSnapshot(logger *logger.Logger, pool string, periodicity string) error {
 	if zfs.readOnly {
 		panic("read only")
