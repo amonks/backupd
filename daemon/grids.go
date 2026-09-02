@@ -122,20 +122,24 @@ func fleetGrid(base string, datasets []view.Dataset) templ.Component {
 			{
 				Key: "local", Label: "local",
 				Text: func(dv view.Dataset) string {
-					return fmt.Sprintf("%d · %s", dv.LocalCount, fmtBytes(dv.LocalUsed))
+					return fmt.Sprintf("%d · %s", dv.LocalCount, fmtBytes(dv.LocalOwn))
 				},
+				Cell:      func(dv view.Dataset) templ.Component { return sizeCell(dv.LocalCount, dv.LocalOwn, dv.LocalBeneath()) },
 				SortKind:  datagrid.SortNumber,
-				SortValue: func(dv view.Dataset) string { return fmt.Sprint(dv.LocalUsed) },
+				SortValue: func(dv view.Dataset) string { return fmt.Sprint(dv.LocalOwn) },
 				FilterUI:  datagrid.FilterNone,
 				Disabled:  datagrid.FeatureSearch,
 			},
 			{
 				Key: "remote", Label: "remote",
 				Text: func(dv view.Dataset) string {
-					return fmt.Sprintf("%d · %s", dv.RemoteCount, fmtBytes(dv.RemoteUsed))
+					return fmt.Sprintf("%d · %s", dv.RemoteCount, fmtBytes(dv.RemoteOwn))
+				},
+				Cell: func(dv view.Dataset) templ.Component {
+					return sizeCell(dv.RemoteCount, dv.RemoteOwn, dv.RemoteBeneath())
 				},
 				SortKind:  datagrid.SortNumber,
-				SortValue: func(dv view.Dataset) string { return fmt.Sprint(dv.RemoteUsed) },
+				SortValue: func(dv view.Dataset) string { return fmt.Sprint(dv.RemoteOwn) },
 				FilterUI:  datagrid.FilterNone,
 				Disabled:  datagrid.FeatureSearch,
 			},

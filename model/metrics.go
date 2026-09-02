@@ -8,6 +8,15 @@ import (
 type DatasetSize struct {
 	Used              int64 // Total on-disk space with children, including all snapshots
 	LogicalReferenced int64 // Logical size of most recent snapshot (w/o children)
+	UsedByChildren    int64 // The share of Used held by descendant datasets
+}
+
+// Own is what the dataset holds by itself, its snapshots included
+// and its descendants excluded. Used already counts every descendant,
+// so a total over a tracked tree sums Own, never Used — summing Used
+// counts a dataset once per ancestor.
+func (ds DatasetSize) Own() int64 {
+	return ds.Used - ds.UsedByChildren
 }
 
 func (ds DatasetSize) String() string {

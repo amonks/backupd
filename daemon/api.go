@@ -334,6 +334,8 @@ type apiDatasetState struct {
 	RemoteSnapshots    int              `json:"remoteSnapshots"`
 	LocalUsedBytes     int64            `json:"localUsedBytes,omitempty"`
 	RemoteUsedBytes    int64            `json:"remoteUsedBytes,omitempty"`
+	LocalOwnBytes      int64            `json:"localOwnBytes,omitempty"`
+	RemoteOwnBytes     int64            `json:"remoteOwnBytes,omitempty"`
 	PendingDeletions   int              `json:"pendingDeletions"`
 	PendingTransfers   int              `json:"pendingTransfers"`
 	PlanSteps          int              `json:"planSteps"`
@@ -525,6 +527,8 @@ func (b *Daemon) handleState(w http.ResponseWriter, req *http.Request) {
 			RemoteSnapshots:    dv.RemoteCount,
 			LocalUsedBytes:     dv.LocalUsed,
 			RemoteUsedBytes:    dv.RemoteUsed,
+			LocalOwnBytes:      dv.LocalOwn,
+			RemoteOwnBytes:     dv.RemoteOwn,
 			PendingDeletions:   dv.PendingDeletions,
 			PendingTransfers:   dv.PendingTransfers,
 			PlanSteps:          dv.StepsTotal,

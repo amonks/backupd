@@ -119,7 +119,7 @@ func row(prefix string, snap *model.Snapshot) string {
 // server and /snapshot endpoint alive, and exits only on cancellation.
 func TestSyncRetriesWithBackoffWhenRemoteIsDown(t *testing.T) {
 	local := &fakeExecutor{name: "local", handlers: []fakeHandler{
-		{match: "-t filesystem", rows: []string{"data/tank/foo\t0\t0"}},
+		{match: "-t filesystem", rows: []string{"data/tank/foo\t0\t0\t0"}},
 		{match: "-t snapshot", rows: []string{row("data/tank", snapA)}},
 	}}
 	remote := &fakeExecutor{name: "remote", handlers: []fakeHandler{
@@ -170,12 +170,12 @@ func TestSyncBackoffResetsAfterSuccessfulCycle(t *testing.T) {
 	}
 	working := []fakeHandler{
 		{match: "receive_resume_token", rows: []string{"-"}},
-		{match: "-t filesystem", rows: []string{"backup/tank/foo\t0\t0"}},
+		{match: "-t filesystem", rows: []string{"backup/tank/foo\t0\t0\t0"}},
 		{match: "-t snapshot", rows: []string{row("backup/tank", snapA)}},
 	}
 
 	local := &fakeExecutor{name: "local", handlers: []fakeHandler{
-		{match: "-t filesystem", rows: []string{"data/tank/foo\t0\t0"}},
+		{match: "-t filesystem", rows: []string{"data/tank/foo\t0\t0\t0"}},
 		{match: "-t snapshot", rows: []string{row("data/tank", snapA)}},
 	}}
 	remote := &fakeExecutor{name: "remote", handlers: failing}

@@ -110,12 +110,12 @@ func TestPauseTakesEffectAtStepBoundary(t *testing.T) {
 
 func steadyStateExecutors() (*fakeExecutor, *fakeExecutor) {
 	local := &fakeExecutor{name: "local", handlers: []fakeHandler{
-		{match: "-t filesystem", rows: []string{"data/tank/foo\t0\t0"}},
+		{match: "-t filesystem", rows: []string{"data/tank/foo\t0\t0\t0"}},
 		{match: "-t snapshot", rows: []string{row("data/tank", snapA)}},
 	}}
 	remote := &fakeExecutor{name: "remote", handlers: []fakeHandler{
 		{match: "receive_resume_token", rows: []string{"-"}},
-		{match: "-t filesystem", rows: []string{"backup/tank/foo\t0\t0"}},
+		{match: "-t filesystem", rows: []string{"backup/tank/foo\t0\t0\t0"}},
 		{match: "-t snapshot", rows: []string{row("backup/tank", snapA)}},
 	}}
 	return local, remote

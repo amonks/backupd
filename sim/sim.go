@@ -190,19 +190,30 @@ func (s *Sim) listDatasets(pool map[model.DatasetName]*dataset) []env.DatasetInf
 		names = append(names, name)
 	}
 	slices.Sort(names)
+	// A dataset's own bytes are its snapshots' sizes; as on zfs, its
+	// used then carries every descendant's too, and usedbychildren
+	// says how much of it is theirs.
+	own := make(map[model.DatasetName]int64, len(names))
+	for _, name := range names {
+		for snap := range pool[name].snaps.All() {
+			own[name] += snap.LogicalReferenced
+		}
+	}
 	out := make([]env.DatasetInfo, len(names))
 	for i, name := range names {
 		ds := pool[name]
-		var used, logical int64
-		for snap := range ds.snaps.All() {
-			used += snap.LogicalReferenced
+		var children, logical int64
+		for _, other := range names {
+			if other != name && strings.HasPrefix(string(other), string(name)+"/") {
+				children += own[other]
+			}
 		}
 		if newest := ds.snaps.Newest(); newest != nil {
 			logical = newest.LogicalReferenced
 		}
 		out[i] = env.DatasetInfo{
 			Name: name,
-			Size: &model.DatasetSize{Used: used, LogicalReferenced: logical},
+			Size: &model.DatasetSize{Used: own[name] + children, LogicalReferenced: logical, UsedByChildren: children},
 		}
 	}
 	return out

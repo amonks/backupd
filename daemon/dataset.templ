@@ -161,7 +161,10 @@ templ factsTable(d pageData, name model.DatasetName, dv view.Dataset) {
 			<th>Local</th>
 			<td>
 				{ fmt.Sprint(dv.LocalCount) } snapshots
-				· { fmtBytes(dv.LocalUsed) } on disk
+				· { fmtBytes(dv.LocalOwn) } on disk
+				if dv.LocalBeneath() > 0 {
+					<span class="muted">· { fmtBytes(dv.LocalBeneath()) } beneath</span>
+				}
 				if ds != nil && ds.Metrics.HasLocal {
 					· { fmtBytes(ds.Metrics.LocalSize.LogicalReferenced) } logical
 				}
@@ -171,7 +174,10 @@ templ factsTable(d pageData, name model.DatasetName, dv view.Dataset) {
 			<th>Remote</th>
 			<td>
 				{ fmt.Sprint(dv.RemoteCount) } snapshots
-				· { fmtBytes(dv.RemoteUsed) } on disk
+				· { fmtBytes(dv.RemoteOwn) } on disk
+				if dv.RemoteBeneath() > 0 {
+					<span class="muted">· { fmtBytes(dv.RemoteBeneath()) } beneath</span>
+				}
 				if ds != nil && ds.Metrics.HasRemote {
 					· { fmtBytes(ds.Metrics.RemoteSize.LogicalReferenced) } logical
 				}

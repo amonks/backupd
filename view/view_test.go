@@ -511,3 +511,38 @@ func TestTotals(t *testing.T) {
 		t.Errorf("unexpected dataset cost facts %+v", ds)
 	}
 }
+
+// TestTotalsNested: zfs's used already counts a dataset's descendants,
+// so the system total sums what each dataset holds on its own — a
+// tracked tree totals to its root, however deep it goes.
+func TestTotalsNested(t *testing.T) {
+	conf := testConf()
+	a := snap("daily-a", now.Add(-2*time.Hour))
+	state := model.New()
+	// The tracked tree's root is the dataset named "", as it ships.
+	state = model.AddLocalDataset("", []*model.Snapshot{a}, &model.DatasetSize{Used: 100, UsedByChildren: 90})(state)
+	state = model.AddLocalDataset("/tm", []*model.Snapshot{a}, &model.DatasetSize{Used: 90, UsedByChildren: 60})(state)
+	state = model.AddLocalDataset("/tm/brigid", []*model.Snapshot{a}, &model.DatasetSize{Used: 60})(state)
+	state = model.AddRemoteDataset("", []*model.Snapshot{a}, &model.DatasetSize{Used: 50, UsedByChildren: 45})(state)
+	state = model.AddRemoteDataset("/tm", []*model.Snapshot{a}, &model.DatasetSize{Used: 45, UsedByChildren: 30})(state)
+	state = model.AddRemoteDataset("/tm/brigid", []*model.Snapshot{a}, &model.DatasetSize{Used: 30})(state)
+
+	sys := Compute(testInput(state, conf))
+	if sys.LocalUsed != 100 || sys.RemoteUsed != 50 {
+		t.Errorf("expected local=100 remote=50, got %d/%d", sys.LocalUsed, sys.RemoteUsed)
+	}
+	ds := getDS(t, sys, "/tm")
+	if ds.LocalUsed != 90 || ds.RemoteUsed != 45 {
+		t.Errorf("zfs's inclusive used is kept: %+v", ds)
+	}
+	if ds.LocalOwn != 30 || ds.RemoteOwn != 15 || ds.LocalBeneath() != 60 || ds.RemoteBeneath() != 30 {
+		t.Errorf("own and beneath split used: %+v", ds)
+	}
+	var local int64
+	for _, ds := range sys.Datasets {
+		local += ds.LocalOwn
+	}
+	if local != sys.LocalUsed {
+		t.Errorf("the column of own figures sums to the header: %d vs %d", local, sys.LocalUsed)
+	}
+}

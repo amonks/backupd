@@ -225,12 +225,24 @@ type Dataset struct {
 	Retention     string
 	Overridden    bool
 
-	// Cost.
+	// Cost. LocalUsed and RemoteUsed are zfs's used: the dataset with
+	// every descendant beneath it. LocalOwn and RemoteOwn are what the
+	// dataset holds on its own, descendants excluded — the figure every
+	// page shows, since it is the one that adds up: the system total
+	// sums it, so a tracked tree totals to its root and a column of
+	// datasets totals to the header above it.
 	LocalCount  int
 	RemoteCount int
 	LocalUsed   int64
 	RemoteUsed  int64
+	LocalOwn    int64
+	RemoteOwn   int64
 }
+
+// LocalBeneath and RemoteBeneath are the descendants' share of the
+// dataset's used: what sits beneath it, held by datasets of their own.
+func (d Dataset) LocalBeneath() int64  { return d.LocalUsed - d.LocalOwn }
+func (d Dataset) RemoteBeneath() int64 { return d.RemoteUsed - d.RemoteOwn }
 
 // PendingSummary describes queued work, e.g. "2 deletions · 1 transfer".
 func (d Dataset) PendingSummary() string {
@@ -319,8 +331,11 @@ type System struct {
 	Cycle    CycleProgress
 
 	DatasetCount int
-	LocalUsed    int64
-	RemoteUsed   int64
+	// LocalUsed and RemoteUsed are what the tracked datasets hold
+	// altogether, each counted once — nested datasets add only their
+	// own share, since zfs's used already carries the descendants.
+	LocalUsed  int64
+	RemoteUsed int64
 
 	LastCycle *history.Cycle
 	// Runs is the cycle history collapsed into consecutive
@@ -395,8 +410,8 @@ func Compute(in Input) System {
 			ds := computeDataset(in, name, in.State.GetDataset(name))
 			sys.Datasets = append(sys.Datasets, ds)
 			issues = append(issues, datasetIssues(ds)...)
-			sys.LocalUsed += ds.LocalUsed
-			sys.RemoteUsed += ds.RemoteUsed
+			sys.LocalUsed += ds.LocalOwn
+			sys.RemoteUsed += ds.RemoteOwn
 		}
 	}
 	sys.DatasetCount = len(sys.Datasets)
@@ -462,9 +477,11 @@ func computeDataset(in Input, name model.DatasetName, m *model.Dataset) Dataset 
 	}
 	if m.Metrics.HasLocal {
 		ds.LocalUsed = m.Metrics.LocalSize.Used
+		ds.LocalOwn = m.Metrics.LocalSize.Own()
 	}
 	if m.Metrics.HasRemote {
 		ds.RemoteUsed = m.Metrics.RemoteSize.Used
+		ds.RemoteOwn = m.Metrics.RemoteSize.Own()
 	}
 
 	ds.Fulfillment = fulfillment(localPolicy, remotePolicy, local, remote)

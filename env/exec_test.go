@@ -3,6 +3,7 @@
 package env
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,7 +29,7 @@ func (r *recorder) Exec(l *logger.Logger, args ...string) ([]string, error) {
 }
 
 func (r *recorder) Execf(l *logger.Logger, s string, args ...any) ([]string, error) {
-	return r.Exec(l, strings.Fields(s)...)
+	return r.Exec(l, strings.Fields(fmt.Sprintf(s, args...))...)
 }
 
 func (r *recorder) Command(args ...string) *exec.Cmd {

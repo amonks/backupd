@@ -7,6 +7,7 @@ package daemon
 // is also the dataset page's facts row).
 
 import (
+	"fmt"
 	"time"
 
 	"monks.co/backupd/config"
@@ -52,6 +53,17 @@ templ pendingCell(dv view.Dataset) {
 		{ s }
 	} else {
 		@mutedDash()
+	}
+}
+
+// sizeCell is a side's snapshot count and what the dataset holds on
+// its own — the figure the column sums to the header — with the
+// descendants' share named separately where there is one, so the same
+// bytes never appear twice in a column.
+templ sizeCell(count int, own, beneath int64) {
+	{ fmt.Sprint(count) } · { fmtBytes(own) }
+	if beneath > 0 {
+		<span class="muted">· { fmtBytes(beneath) } beneath</span>
 	}
 }
 
