@@ -11,8 +11,8 @@ require (
 	golang.org/x/sync v0.23.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	monks.co/pkg/browsertest v0.0.4
-	monks.co/pkg/datagrid v0.0.1
-	monks.co/pkg/localtime v0.0.1
+	monks.co/pkg/datagrid v0.0.14
+	monks.co/pkg/localtime v0.0.3
 	pgregory.net/rapid v1.2.0
 )
 

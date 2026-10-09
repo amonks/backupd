@@ -33,9 +33,9 @@ gopkg.in/natefinch/lumberjack.v2 v2.2.1 h1:bBRl1b0OH9s/DuPhuXpNl+VtCaJXFZ5/uEFST
 gopkg.in/natefinch/lumberjack.v2 v2.2.1/go.mod h1:YD8tP3GAjkrDg1eZH7EGmyESg/lsYskCTPBJVb9jqSc=
 monks.co/pkg/browsertest v0.0.4 h1:1yv70R/+2YYrE0pw9qZUTZjdReNr493dZq2yMZSoNyE=
 monks.co/pkg/browsertest v0.0.4/go.mod h1:56sjo9BXjcXwu96yttXpYpPHHZPVUNlZqNucwuqloe0=
-monks.co/pkg/datagrid v0.0.1 h1:bFYwCrh/U4jU90uBekzjjXMxqpIDTin7vLg9XlF7NDQ=
-monks.co/pkg/datagrid v0.0.1/go.mod h1:6ItDQmirKf6SmdN5INayV6NtISHo++vOyD89gHPxOKk=
-monks.co/pkg/localtime v0.0.1 h1:GnMPYuqhYpjlpNjGAwW18elFfCmVrpIArUMzRAdMb/g=
-monks.co/pkg/localtime v0.0.1/go.mod h1:F5Tp499sKft3RF2DQQG4SJF6k9cxQs0mdvvr+79b9VE=
+monks.co/pkg/datagrid v0.0.14 h1:A0H12+T7dm5onat6I5DBhPTqxOuU58zmAKvIdquSAD4=
+monks.co/pkg/datagrid v0.0.14/go.mod h1:KWKcHzkRooPW0JIJhf32WdgErEFUdM0dknW3Ig76ZZE=
+monks.co/pkg/localtime v0.0.3 h1:RgV6BwxRkCPpwVoMSq/EQGrYiCVs6TpXdbiSbOzz6r8=
+monks.co/pkg/localtime v0.0.3/go.mod h1:7tfGt+OMXxA6AjqvzXmUGX+Dsd9bQWXzWMlQRgd4ksY=
 pgregory.net/rapid v1.2.0 h1:keKAYRcjm+e1F0oAuU5F5+YPAWcyxNNRK2wud503Gnk=
 pgregory.net/rapid v1.2.0/go.mod h1:PY5XlDGj0+V1FCq0o192FdRhpKHGTRIWBgqjDBTrq04=
