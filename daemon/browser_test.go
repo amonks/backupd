@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
@@ -171,15 +172,23 @@ func TestBrowserPhoneLayout(t *testing.T) {
 
 // A countdown is a ticker: the page's formatUntil says what the server's
 // fmtCountdown says (countdownCases), so the first tick never changes the
-// words, and it counts down one second at a time, about a second apart
-// (with slack for a busy builder's late timer).
+// words, and it counts down one second at a time. Chrome's virtual clock
+// drives its real timers: a busy builder can delay a wall-clock callback
+// past several seconds, correctly skipping numbers. Go's synctest clock
+// cannot control the separate browser process.
 func TestBrowserCountdownTicksInTheServersWords(t *testing.T) {
 	b := demoDaemon(t)
 	server := httptest.NewServer(b.Handler())
 	t.Cleanup(server.Close)
 	ctx := browsertest.NewBrowser(t)
 	browsertest.CaptureConsole(t, ctx)
-	if err := chromedp.Run(ctx, browsertest.Step("open the overview", chromedp.Navigate(server.URL+"/global"))); err != nil {
+	if err := chromedp.Run(ctx,
+		browsertest.Step("open the overview", chromedp.Navigate(server.URL+"/global")),
+		browsertest.Step("pause the browser clock", chromedp.ActionFunc(func(ctx context.Context) error {
+			_, err := emulation.SetVirtualTimePolicy(emulation.VirtualTimePolicyPause).Do(ctx)
+			return err
+		})),
+	); err != nil {
 		t.Fatal(err)
 	}
 	for _, c := range countdownCases {
@@ -195,21 +204,44 @@ func TestBrowserCountdownTicksInTheServersWords(t *testing.T) {
 		Text string  `json:"text"`
 		At   float64 `json:"at"`
 	}
+	advanced := make(chan struct{}, 1)
+	chromedp.ListenTarget(ctx, func(event any) {
+		if _, ok := event.(*emulation.EventVirtualTimeBudgetExpired); ok {
+			advanced <- struct{}{}
+		}
+	})
 	if err := chromedp.Run(ctx,
 		browsertest.Step("add a countdown", chromedp.Evaluate(`(() => {
 			const el = document.createElement('span');
 			el.dataset.until = String(Date.now() + 9500);
-			document.querySelector('.backupd').append(el);
+			// The first long-poll can refresh the dashboard's children.
+			// Keep the probe outside that region so it stays connected.
+			document.body.append(el);
 			window.ticks = [];
 			new MutationObserver(() => {
 				const last = window.ticks[window.ticks.length - 1];
 				if (!last || last.text !== el.textContent) window.ticks.push({text: el.textContent, at: performance.now()});
 			}).observe(el, {subtree: true, childList: true, characterData: true});
 		})()`, nil)),
-		browsertest.Poll(`window.ticks.length >= 5`),
+		browsertest.Step("advance the browser clock", chromedp.ActionFunc(func(ctx context.Context) error {
+			// The dashboard keeps a long-poll pending. Advance even while
+			// fetching; pauseIfNetworkFetchesPending would never tick.
+			if _, err := emulation.SetVirtualTimePolicy(emulation.VirtualTimePolicyAdvance).WithBudget(6500).Do(ctx); err != nil {
+				return err
+			}
+			select {
+			case <-advanced:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		})),
 		chromedp.Evaluate(`window.ticks`, &seen),
 	); err != nil {
 		t.Fatal(err)
+	}
+	if len(seen) < 5 {
+		t.Fatalf("countdown did not tick each second: %+v", seen)
 	}
 	prev := 0
 	for i, s := range seen {
@@ -221,7 +253,9 @@ func TestBrowserCountdownTicksInTheServersWords(t *testing.T) {
 			if n != prev-1 {
 				t.Fatalf("countdown went from %ds to %ds: %+v", prev, n, seen)
 			}
-			if gap := s.At - seen[i-1].At; i > 1 && (gap < 400 || gap > 1600) {
+			// The first observation discovers the added element; later
+			// changes are aligned to its deadline's whole seconds.
+			if gap := s.At - seen[i-1].At; i > 1 && (gap < 999 || gap > 1001) {
 				t.Fatalf("countdown %d came %.0fms after the last: %+v", i, gap, seen)
 			}
 		}
