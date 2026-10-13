@@ -43,14 +43,37 @@ func plural(n int, noun string) string {
 	return fmt.Sprintf("%d %ss", n, noun)
 }
 
-// fmtUntil renders a future time as a countdown ("in 42m"); past
-// deadlines render as "any moment".
+// fmtUntil renders a future time as the countdown the page's script
+// keeps ticking (script.templ's formatUntil).
 func fmtUntil(t time.Time) string {
-	d := time.Until(t)
-	if d <= 0 {
+	return fmtCountdown(time.Until(t))
+}
+
+// fmtCountdown is the countdown's wording — "in 4m23s", "in 1h5m", "in
+// 2d3h", and "any moment" once under a second is left — in the script's
+// own words, so its first tick doesn't change them.
+func fmtCountdown(d time.Duration) string {
+	s := int(d / time.Second)
+	if s <= 0 {
 		return "any moment"
 	}
-	return "in " + fmtCompactDuration(d)
+	days, h, m, sec := s/86400, s%86400/3600, s%3600/60, s%60
+	pair := func(a int, au string, b int, bu string) string {
+		if b > 0 {
+			return fmt.Sprintf("in %d%s%d%s", a, au, b, bu)
+		}
+		return fmt.Sprintf("in %d%s", a, au)
+	}
+	switch {
+	case days > 0:
+		return pair(days, "d", h, "h")
+	case h > 0:
+		return pair(h, "h", m, "m")
+	case m > 0:
+		return pair(m, "m", sec, "s")
+	default:
+		return fmt.Sprintf("in %ds", sec)
+	}
 }
 
 // fmtRate renders bytes/sec as bits/sec, matching how transfer speeds

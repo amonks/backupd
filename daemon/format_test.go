@@ -9,6 +9,34 @@ import (
 	"monks.co/backupd/view"
 )
 
+// countdownCases is the countdown's wording, which fmtCountdown renders
+// and the page's formatUntil keeps ticking: browser_test.go pins the
+// script to the same table, so the first tick never changes the words.
+var countdownCases = []struct {
+	d    time.Duration
+	want string
+}{
+	{0, "any moment"},
+	{999 * time.Millisecond, "any moment"},
+	{-5 * time.Second, "any moment"},
+	{5 * time.Second, "in 5s"},
+	{5900 * time.Millisecond, "in 5s"},
+	{4 * time.Minute, "in 4m"},
+	{4*time.Minute + 23*time.Second, "in 4m23s"},
+	{time.Hour, "in 1h"},
+	{time.Hour + 5*time.Minute + 9*time.Second, "in 1h5m"},
+	{48 * time.Hour, "in 2d"},
+	{51*time.Hour + 30*time.Minute, "in 2d3h"},
+}
+
+func TestFmtCountdown(t *testing.T) {
+	for _, c := range countdownCases {
+		if got := fmtCountdown(c.d); got != c.want {
+			t.Errorf("fmtCountdown(%s) = %q, want %q", c.d, got, c.want)
+		}
+	}
+}
+
 func TestFmtCompactDuration(t *testing.T) {
 	cases := []struct {
 		d    time.Duration

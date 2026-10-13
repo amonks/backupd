@@ -2,7 +2,9 @@ package daemon
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -164,6 +166,66 @@ func TestBrowserPhoneLayout(t *testing.T) {
 					"nothing zooms it back out", s.What, s.Past)
 			}
 		})
+	}
+}
+
+// A countdown is a ticker: the page's formatUntil says what the server's
+// fmtCountdown says (countdownCases), so the first tick never changes the
+// words, and it counts down one second at a time, about a second apart
+// (with slack for a busy builder's late timer).
+func TestBrowserCountdownTicksInTheServersWords(t *testing.T) {
+	b := demoDaemon(t)
+	server := httptest.NewServer(b.Handler())
+	t.Cleanup(server.Close)
+	ctx := browsertest.NewBrowser(t)
+	browsertest.CaptureConsole(t, ctx)
+	if err := chromedp.Run(ctx, browsertest.Step("open the overview", chromedp.Navigate(server.URL+"/global"))); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range countdownCases {
+		var got string
+		if err := chromedp.Run(ctx, chromedp.Evaluate(fmt.Sprintf(`formatUntil(%d)`, c.d.Milliseconds()), &got)); err != nil {
+			t.Fatal(err)
+		}
+		if got != c.want {
+			t.Errorf("formatUntil(%s) = %q, the server says %q", c.d, got, c.want)
+		}
+	}
+	var seen []struct {
+		Text string  `json:"text"`
+		At   float64 `json:"at"`
+	}
+	if err := chromedp.Run(ctx,
+		browsertest.Step("add a countdown", chromedp.Evaluate(`(() => {
+			const el = document.createElement('span');
+			el.dataset.until = String(Date.now() + 9500);
+			document.querySelector('.backupd').append(el);
+			window.ticks = [];
+			new MutationObserver(() => {
+				const last = window.ticks[window.ticks.length - 1];
+				if (!last || last.text !== el.textContent) window.ticks.push({text: el.textContent, at: performance.now()});
+			}).observe(el, {subtree: true, childList: true, characterData: true});
+		})()`, nil)),
+		browsertest.Poll(`window.ticks.length >= 5`),
+		chromedp.Evaluate(`window.ticks`, &seen),
+	); err != nil {
+		t.Fatal(err)
+	}
+	prev := 0
+	for i, s := range seen {
+		n, err := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(s.Text, "in "), "s"))
+		if err != nil {
+			t.Fatalf("countdown %d = %q: %+v", i, s.Text, seen)
+		}
+		if i > 0 {
+			if n != prev-1 {
+				t.Fatalf("countdown went from %ds to %ds: %+v", prev, n, seen)
+			}
+			if gap := s.At - seen[i-1].At; i > 1 && (gap < 400 || gap > 1600) {
+				t.Fatalf("countdown %d came %.0fms after the last: %+v", i, gap, seen)
+			}
+		}
+		prev = n
 	}
 }
 

@@ -16,7 +16,11 @@ templ script() {
 	const ROOT = document.currentScript.closest('.backupd');
 	const BASE = ROOT.dataset.base || '';
 	// ---- Countdowns ----------------------------------------------------
-	// Elements with data-until (ms since epoch) tick down client-side.
+	// Elements with data-until (ms since epoch) count down client-side, as
+	// tickers (specs/pkg-opsui.md § Timestamps): the server renders the
+	// same words (fmtCountdown), and each tick reads the clock once and
+	// sleeps until the nearest countdown's next whole second. Countdowns
+	// are re-queried on each tick, so a body swap's tick too.
 	function formatUntil(ms) {
 		let s = Math.floor(ms / 1000);
 		if (s <= 0) return 'any moment';
@@ -28,11 +32,20 @@ templ script() {
 		if (m > 0) return `in ${m}m${s > 0 ? s + 's' : ''}`;
 		return `in ${s}s`;
 	}
-	setInterval(function() {
+	let countdownTimer = 0;
+	function tickCountdowns() {
+		clearTimeout(countdownTimer);
+		const now = Date.now();
+		let next = 1000;
 		document.querySelectorAll('[data-until]').forEach(el => {
-			el.textContent = formatUntil(parseInt(el.dataset.until, 10) - Date.now());
+			const left = parseInt(el.dataset.until, 10) - now;
+			const text = formatUntil(left);
+			if (el.textContent !== text) el.textContent = text;
+			if (left > 0) next = Math.min(next, left % 1000 || 1000);
 		});
-	}, 1000);
+		countdownTimer = setTimeout(tickCountdowns, next);
+	}
+	tickCountdowns();
 
 	// ---- Composed titles -----------------------------------------------
 	// A title that says more than the instant — the cycle strip's dots
