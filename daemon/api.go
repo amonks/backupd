@@ -302,10 +302,10 @@ type apiIssue struct {
 	Severity string `json:"severity"`
 	// Dataset is the affected dataset's path (empty string is the root
 	// dataset); absent for system-level issues.
-	Dataset *string    `json:"dataset,omitempty"`
+	Dataset *string    `json:"dataset,omitzero"`
 	Summary string     `json:"summary"`
 	Detail  string     `json:"detail,omitempty"`
-	Since   *time.Time `json:"since,omitempty"`
+	Since   *time.Time `json:"since,omitzero"`
 }
 
 type apiFulfillment struct {
@@ -323,27 +323,27 @@ type apiDatasetState struct {
 	Reason             string           `json:"reason,omitempty"`
 	Syncing            bool             `json:"syncing"`
 	Paused             bool             `json:"paused"`
-	SnapshottedSeconds *int64           `json:"snapshottedSeconds,omitempty"`
-	BackedUpSeconds    *int64           `json:"backedUpSeconds,omitempty"`
-	DepthSeconds       *int64           `json:"depthSeconds,omitempty"`
+	SnapshottedSeconds *int64           `json:"snapshottedSeconds,omitzero"`
+	BackedUpSeconds    *int64           `json:"backedUpSeconds,omitzero"`
+	DepthSeconds       *int64           `json:"depthSeconds,omitzero"`
 	LagSeconds         int64            `json:"lagSeconds"`
-	SnapshotsStale     bool             `json:"snapshotsStale,omitempty"`
-	BackupStale        bool             `json:"backupStale,omitempty"`
-	Unreplicated       bool             `json:"unreplicated,omitempty"`
+	SnapshotsStale     bool             `json:"snapshotsStale,omitzero"`
+	BackupStale        bool             `json:"backupStale,omitzero"`
+	Unreplicated       bool             `json:"unreplicated,omitzero"`
 	LocalSnapshots     int              `json:"localSnapshots"`
 	RemoteSnapshots    int              `json:"remoteSnapshots"`
-	LocalUsedBytes     int64            `json:"localUsedBytes,omitempty"`
-	RemoteUsedBytes    int64            `json:"remoteUsedBytes,omitempty"`
-	LocalOwnBytes      int64            `json:"localOwnBytes,omitempty"`
-	RemoteOwnBytes     int64            `json:"remoteOwnBytes,omitempty"`
+	LocalUsedBytes     int64            `json:"localUsedBytes,omitzero"`
+	RemoteUsedBytes    int64            `json:"remoteUsedBytes,omitzero"`
+	LocalOwnBytes      int64            `json:"localOwnBytes,omitzero"`
+	RemoteOwnBytes     int64            `json:"remoteOwnBytes,omitzero"`
 	PendingDeletions   int              `json:"pendingDeletions"`
 	PendingTransfers   int              `json:"pendingTransfers"`
 	PlanSteps          int              `json:"planSteps"`
 	PlanCompleted      int              `json:"planCompleted"`
 	Retention          string           `json:"retention"`
 	Fulfillment        []apiFulfillment `json:"fulfillment,omitempty"`
-	LastSuccess        *time.Time       `json:"lastSuccess,omitempty"`
-	LastFailure        *time.Time       `json:"lastFailure,omitempty"`
+	LastSuccess        *time.Time       `json:"lastSuccess,omitzero"`
+	LastFailure        *time.Time       `json:"lastFailure,omitzero"`
 	LastError          string           `json:"lastError,omitempty"`
 }
 
@@ -359,13 +359,13 @@ type apiCycleProgress struct {
 type apiActivity struct {
 	Phase               string           `json:"phase"`
 	Dataset             string           `json:"dataset,omitempty"`
-	Step                int              `json:"step,omitempty"`
-	Steps               int              `json:"steps,omitempty"`
+	Step                int              `json:"step,omitzero"`
+	Steps               int              `json:"steps,omitzero"`
 	Operation           string           `json:"operation,omitempty"`
-	Until               *time.Time       `json:"until,omitempty"`
-	ConsecutiveFailures int              `json:"consecutiveFailures,omitempty"`
-	TransferPercent     *float64         `json:"transferPercent,omitempty"`
-	TransferRate        *float64         `json:"transferRateBytesPerSec,omitempty"`
+	Until               *time.Time       `json:"until,omitzero"`
+	ConsecutiveFailures int              `json:"consecutiveFailures,omitzero"`
+	TransferPercent     *float64         `json:"transferPercent,omitzero"`
+	TransferRate        *float64         `json:"transferRateBytesPerSec,omitzero"`
 	Cycle               apiCycleProgress `json:"cycle"`
 }
 
@@ -386,7 +386,7 @@ type apiEvent struct {
 	Level string    `json:"level"`
 	// Dataset is the affected dataset's path (empty string is the root
 	// dataset); absent for daemon-level events.
-	Dataset *string `json:"dataset,omitempty"`
+	Dataset *string `json:"dataset,omitzero"`
 	Message string  `json:"message"`
 }
 
