@@ -3,7 +3,7 @@ package daemon
 import (
 	"bytes"
 	"compress/gzip"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"html/template"
 	"io"
@@ -71,7 +71,7 @@ func (g gzipResponseWriter) Write(bs []byte) (int, error) { return g.gz.Write(bs
 
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(v); err != nil {
+	if err := json.MarshalWrite(w, v); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }

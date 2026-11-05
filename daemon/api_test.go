@@ -2,7 +2,7 @@ package daemon
 
 import (
 	"compress/gzip"
-	"encoding/json"
+	"encoding/json/v2"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -493,10 +493,10 @@ func TestPageShowsStaleAndUnreplicated(t *testing.T) {
 
 	body := do(t, h, "GET", "/global", "").Body.String()
 	for _, want := range []string{
-		"FAILING",            // both conditions are critical
-		"never replicated",   // the unreplicated issue
-		"backup 5d old",      // the stale-backup issue
-		"chip-atrisk",        // fleet health chip
+		"FAILING",          // both conditions are critical
+		"never replicated", // the unreplicated issue
+		"backup 5d old",    // the stale-backup issue
+		"chip-atrisk",      // fleet health chip
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected global page to contain %q", want)
