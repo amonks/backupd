@@ -85,7 +85,7 @@ func Exec(logger *logger.Logger, args ...string) ([]string, error) {
 	cmd := exec.Command(name, args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		output := strings.Join(strings.Split(strings.TrimSpace(string(out)), "\n"), "; ")
+		output := strings.Join(strings.Split(strings.TrimSpace(strings.ToValidUTF8(string(out), "\uFFFD")), "\n"), "; ")
 		return nil, fmt.Errorf("running '%s': %w: %s", name, err, output)
 	}
 	if string(out) == "" {
@@ -211,7 +211,7 @@ func Pipe(ctx context.Context, logger *logger.Logger, size int64, onProgress fun
 		select {
 		case err := <-c:
 			if err != nil {
-				return fmt.Errorf("'to' command error: %w (%s)", err, out.buf.Bytes())
+				return fmt.Errorf("'to' command error: %w (%s)", err, strings.ToValidUTF8(out.buf.String(), "\uFFFD"))
 			}
 
 			cancel()

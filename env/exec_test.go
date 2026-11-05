@@ -3,6 +3,7 @@
 package env
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -152,4 +153,29 @@ func waitForPidfile(t *testing.T, path string) int {
 // process without delivering anything.
 func alive(pid int) bool {
 	return syscall.Kill(pid, 0) == nil
+}
+
+// A failed command's output lands in an error that becomes history and
+// so an API answer, and a command prints whatever bytes it likes.
+func TestExecErrorIsValidUTF8(t *testing.T) {
+	_, err := Exec(logger.New("test"), "/bin/sh", "-c", `printf 'bad\377byte\nnext\n'; exit 3`)
+	if err == nil {
+		t.Fatal("no error")
+	}
+	if want := "exit status 3: bad\uFFFDbyte; next"; !strings.Contains(err.Error(), want) {
+		t.Errorf("err = %q, want it to contain %q", err, want)
+	}
+}
+
+// The same for the receiving half of a transfer.
+func TestPipeErrorIsValidUTF8(t *testing.T) {
+	from := exec.Command("/bin/sh", "-c", "exit 0")
+	to := exec.Command("/bin/sh", "-c", `printf 'bad\377byte'; exit 3`)
+	err := Pipe(context.Background(), logger.New("test"), 0, nil, from, to)
+	if err == nil {
+		t.Fatal("no error")
+	}
+	if want := "exit status 3 (bad\uFFFDbyte)"; !strings.Contains(err.Error(), want) {
+		t.Errorf("err = %q, want it to contain %q", err, want)
+	}
 }
