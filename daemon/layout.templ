@@ -218,10 +218,9 @@ templ sidebar(d pageData) {
 			<button class="btn" data-api="/api/sync">Sync now</button>
 			<div class="snapshot-row">
 				<select id="snapshot-periodicity">
-					<option value="daily">daily</option>
-					<option value="weekly">weekly</option>
-					<option value="monthly">monthly</option>
-					<option value="yearly">yearly</option>
+					for _, periodicity := range view.InPeriodOrder(d.Conf.Periodicities()) {
+						<option value={ periodicity }>{ periodicity }</option>
+					}
 				</select>
 				<button class="btn" id="snapshot-btn">Snapshot</button>
 			</div>

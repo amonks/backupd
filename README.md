@@ -424,7 +424,7 @@ setting to bind to a private (e.g. VPN/tailnet) address.
 | POST   | `/api/pause?dataset=`       | Pause execution; omit `dataset` for a global pause. Persisted to the config file. |
 | POST   | `/api/resume?dataset=`      | Resume execution; omit `dataset` to clear the global pause. |
 | POST   | `/api/sync?dataset=`        | Sync now; omit `dataset` to start a full cycle immediately. |
-| POST   | `/api/snapshot?periodicity=`| Create a recursive snapshot of the local root. |
+| POST   | `/api/snapshot?periodicity=`| Create a recursive snapshot of the local root. The periodicity must be one a retention policy in the config names; any other is refused (400). |
 | GET    | `/api/config`               | The raw config file (TOML). |
 | POST   | `/api/config/preview`       | Validate a config (request body) and report its per-dataset impact without writing. |
 | PUT    | `/api/config`               | Validate, atomically save, and hot-apply a config (request body). |
@@ -494,22 +494,23 @@ You can automate snapshot creation using either the API or cron jobs:
 
 ### Method 1: Using the API (Recommended)
 
-Add these entries to your crontab:
+Add these entries to your crontab. Each periodicity must be one a
+retention policy in your config names; the daemon refuses any other.
 ```cron
 # Hourly snapshots
-0 * * * * curl -X POST "http://localhost:8888/snapshot?periodicity=hourly"
+0 * * * * curl -X POST "http://localhost:8888/api/snapshot?periodicity=hourly"
 
 # Daily snapshot at midnight
-0 0 * * * curl -X POST "http://localhost:8888/snapshot?periodicity=daily"
+0 0 * * * curl -X POST "http://localhost:8888/api/snapshot?periodicity=daily"
 
 # Weekly snapshot on Sundays
-0 0 * * 0 curl -X POST "http://localhost:8888/snapshot?periodicity=weekly"
+0 0 * * 0 curl -X POST "http://localhost:8888/api/snapshot?periodicity=weekly"
 
 # Monthly snapshot on the 1st
-0 0 1 * * curl -X POST "http://localhost:8888/snapshot?periodicity=monthly"
+0 0 1 * * curl -X POST "http://localhost:8888/api/snapshot?periodicity=monthly"
 
 # Yearly snapshot on January 1st
-0 0 1 1 * curl -X POST "http://localhost:8888/snapshot?periodicity=yearly"
+0 0 1 1 * curl -X POST "http://localhost:8888/api/snapshot?periodicity=yearly"
 ```
 
 ### Method 2: Direct ZFS Commands

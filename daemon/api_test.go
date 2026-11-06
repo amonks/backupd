@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -264,6 +265,48 @@ func TestAPISnapshot(t *testing.T) {
 
 	if w := do(t, h, "POST", "/api/snapshot", ""); w.Code != http.StatusBadRequest {
 		t.Errorf("expected 400 without periodicity, got %d", w.Code)
+	}
+}
+
+// A snapshot is taken only of a periodicity some retention policy
+// names. This endpoint is the one the loopback listener serves without
+// an account; a snapshot no policy names is one nothing asked for, and
+// a value carrying whitespace once reached zfs as extra operands.
+// Anything else is refused before zfs is asked.
+func TestAPISnapshotRefusesWhatNoPolicyNames(t *testing.T) {
+	local, remote := steadyStateExecutors()
+	local.handlers = append(local.handlers, fakeHandler{match: "zfs snapshot"})
+	b, _ := newAPITestDaemon(t, local, remote)
+	h := b.Handler()
+
+	for _, periodicity := range []string{"weekly", "daily data/tank/other@x", "daily\tx", ""} {
+		target := "/api/snapshot?" + url.Values{"periodicity": {periodicity}}.Encode()
+		if w := do(t, h, "POST", target, ""); w.Code != http.StatusBadRequest {
+			t.Errorf("periodicity %q: got %d, want 400: %s", periodicity, w.Code, w.Body)
+		}
+	}
+	if local.calledMatching("zfs snapshot") {
+		t.Errorf("zfs asked for a refused snapshot:\n%s", strings.Join(local.calls, "\n"))
+	}
+
+	if w := do(t, h, "POST", "/api/snapshot?periodicity=daily", ""); w.Code != http.StatusOK {
+		t.Fatalf("daily: got %d, want 200: %s", w.Code, w.Body)
+	}
+}
+
+// The dashboard's snapshot control offers what the config's policies
+// name, so it never offers a snapshot the endpoint refuses, and offers
+// one it would take that a fixed list left out (thor's "manual").
+func TestSnapshotControlOffersThePoliciesPeriodicities(t *testing.T) {
+	local, remote := steadyStateExecutors()
+	b, _ := newAPITestDaemon(t, local, remote)
+	primeState(t, b)
+	body := renderPage(t, b, "/global", "")
+	if !strings.Contains(body, `<option value="daily">daily</option>`) {
+		t.Errorf("the snapshot control does not offer daily:\n%s", body)
+	}
+	if strings.Contains(body, `<option value="weekly">`) {
+		t.Error("the snapshot control offers weekly, which no policy names")
 	}
 }
 

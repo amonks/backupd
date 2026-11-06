@@ -380,6 +380,28 @@ var periodicities = []struct {
 	{"yearly", 365 * 24 * time.Hour},
 }
 
+// InPeriodOrder returns names, each once, in the order the dashboard
+// lists periodicities: the known ones by period, shortest first, then
+// any others alphabetically.
+func InPeriodOrder(names []string) []string {
+	present := map[string]bool{}
+	for _, name := range names {
+		present[name] = true
+	}
+	var out, unknown []string
+	for _, p := range periodicities {
+		if present[p.name] {
+			out = append(out, p.name)
+			delete(present, p.name)
+		}
+	}
+	for name := range present {
+		unknown = append(unknown, name)
+	}
+	sort.Strings(unknown)
+	return append(out, unknown...)
+}
+
 // Cadence returns the smallest periodicity a policy retains — the
 // expected interval between new snapshots — or zero if the policy
 // keeps nothing it can name.
@@ -573,26 +595,15 @@ func fulfillment(localPolicy, remotePolicy map[string]int, local, remote *model.
 	}
 	localHave, remoteHave := counts(local), counts(remote)
 
-	known := map[string]bool{}
 	var names []string
-	for _, p := range periodicities {
-		known[p.name] = true
-		names = append(names, p.name)
-	}
-	var unknown []string
 	for _, m := range []map[string]int{localPolicy, remotePolicy, localHave, remoteHave} {
 		for name := range m {
-			if !known[name] {
-				known[name] = true
-				unknown = append(unknown, name)
-			}
+			names = append(names, name)
 		}
 	}
-	sort.Strings(unknown)
-	names = append(names, unknown...)
 
 	var out []Fulfillment
-	for _, name := range names {
+	for _, name := range InPeriodOrder(names) {
 		row := Fulfillment{
 			Periodicity: name,
 			LocalWant:   localPolicy[name],

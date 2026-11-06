@@ -87,7 +87,7 @@ templ script() {
 		if (!confirm(`Create a recursive ${periodicity} snapshot?`)) return;
 		btn.disabled = true;
 		try {
-			const res = await fetch(`${BASE}/api/snapshot?periodicity=${periodicity}`, { method: 'POST' });
+			const res = await fetch(`${BASE}/api/snapshot?periodicity=${encodeURIComponent(periodicity)}`, { method: 'POST' });
 			if (!res.ok) alert(await res.text());
 		} catch (err) {
 			alert(err);

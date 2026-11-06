@@ -9,6 +9,7 @@ import (
 	"log"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"path"
 	"strings"
 	"time"
@@ -1097,7 +1098,7 @@ func CallAPI(ctx context.Context, addr, method, path string) error {
 
 // CreateSnapshot asks a running daemon at addr to create a snapshot.
 func CreateSnapshot(ctx context.Context, addr, periodicity string) error {
-	return CallAPI(ctx, addr, "POST", "/api/snapshot?periodicity="+periodicity)
+	return CallAPI(ctx, addr, "POST", "/api/snapshot?"+url.Values{"periodicity": {periodicity}}.Encode())
 }
 
 // logCycle emits one structured record per completed cycle: the

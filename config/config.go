@@ -2,7 +2,9 @@ package config
 
 import (
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -149,6 +151,35 @@ func (c *Config) Interval() time.Duration {
 		return time.Hour
 	}
 	return d
+}
+
+// Periodicities returns every periodicity a retention policy in the
+// config names — the global policies and every override's, local and
+// remote — sorted, each once. A key with a count of zero is included:
+// naming one is how a config says it knows of it, and a snapshot of it
+// is pruned at the next cycle.
+//
+// It is the vocabulary of snapshots the daemon will take on request.
+// A snapshot's name begins with its periodicity, and retention keeps
+// one only by matching that prefix against a policy, so any other name
+// is one nothing would ever have asked for.
+func (c *Config) Periodicities() []string {
+	seen := map[string]bool{}
+	add := func(policy map[string]int) {
+		for name := range policy {
+			seen[name] = true
+		}
+	}
+	add(c.Local.Policy)
+	add(c.Remote.Policy)
+	for _, o := range c.Overrides {
+		if o == nil {
+			continue
+		}
+		add(o.Local.Policy)
+		add(o.Remote.Policy)
+	}
+	return slices.Sorted(maps.Keys(seen))
 }
 
 // RetentionDescription returns a human-readable summary of the retention

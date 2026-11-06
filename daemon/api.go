@@ -8,6 +8,7 @@ import (
 	"html/template"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -165,8 +166,19 @@ func (b *Daemon) handleSnapshot(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, "Missing periodicity parameter", http.StatusBadRequest)
 		return
 	}
+	// Only a periodicity some retention policy names. Anything else is a
+	// snapshot no policy asked for, and the parameter is a caller's word
+	// on its way into a zfs command run with the daemon's escalation —
+	// served, in some deployments, to callers with no account at all
+	// (apps/backupd/local.go).
+	conf := b.conf.Deref()
+	if known := conf.Periodicities(); !slices.Contains(known, periodicity) {
+		http.Error(w, fmt.Sprintf("no retention policy names periodicity %q; the config's policies name %s",
+			periodicity, strings.Join(known, ", ")), http.StatusBadRequest)
+		return
+	}
 
-	root := b.conf.Deref().Local.Root
+	root := conf.Local.Root
 
 	if err := b.env.Snapshot(req.Context(), b.globalLogs, root, periodicity); err != nil {
 		http.Error(w, fmt.Sprintf("Error creating snapshot: %v", err), http.StatusInternalServerError)

@@ -194,3 +194,35 @@ func TestPathHierarchyPrefersADirectoryOfItsOwn(t *testing.T) {
 		}
 	}
 }
+
+// The periodicities a config retains are every key any of its policies
+// names — global or override, local or remote, a count of zero
+// included, since naming it is how a config says it knows of one —
+// sorted, each once.
+func TestPeriodicitiesNameEveryPolicy(t *testing.T) {
+	conf, err := Parse([]byte(`
+[local]
+root = "data/tank"
+[local.policy]
+daily = 90
+hourly = 0
+
+[remote]
+root = "backup/tank"
+[remote.policy]
+daily = 1
+yearly = 1000
+
+[overrides."/tm".local.policy]
+manual = 5
+[overrides."/tm".remote.policy]
+monthly = 6
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"daily", "hourly", "manual", "monthly", "yearly"}
+	if got := conf.Periodicities(); !slices.Equal(got, want) {
+		t.Errorf("Periodicities() = %v, want %v", got, want)
+	}
+}

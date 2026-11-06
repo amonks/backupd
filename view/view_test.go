@@ -1,6 +1,7 @@
 package view
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -544,5 +545,15 @@ func TestTotalsNested(t *testing.T) {
 	}
 	if local != sys.LocalUsed {
 		t.Errorf("the column of own figures sums to the header: %d vs %d", local, sys.LocalUsed)
+	}
+}
+
+// The dashboard lists periodicities by period, shortest first, with any
+// it has no period for after them, alphabetically, and each once.
+func TestInPeriodOrder(t *testing.T) {
+	got := InPeriodOrder([]string{"yearly", "manual", "daily", "daily", "adhoc", "hourly"})
+	want := []string{"hourly", "daily", "yearly", "adhoc", "manual"}
+	if !slices.Equal(got, want) {
+		t.Errorf("InPeriodOrder = %v, want %v", got, want)
 	}
 }

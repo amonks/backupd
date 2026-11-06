@@ -155,7 +155,9 @@ func (zfs *ZFS) CreateSnapshot(logger *logger.Logger, pool string, periodicity s
 	now := time.Now().Format("2006-01-02-15:04:05")
 	snapshotName := fmt.Sprintf("%s@%s-%s", pool, periodicity, now)
 
-	if _, err := zfs.x.Execf(logger, "zfs snapshot -r %s", snapshotName); err != nil {
+	// One argument, however it is spelled: periodicity is a caller's
+	// word, and the command runs with the daemon's escalation.
+	if _, err := zfs.x.Exec(logger, "zfs", "snapshot", "-r", snapshotName); err != nil {
 		return fmt.Errorf("creating snapshot %s: %w", snapshotName, err)
 	}
 
