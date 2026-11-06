@@ -19,8 +19,9 @@ type Config struct {
 	Paused bool `toml:"paused"`
 	// IntervalRaw is the duration between sync cycles (default "1h").
 	IntervalRaw string `toml:"interval"`
-	// Listen is the HTTP listen address (default "0.0.0.0:8888"); the
-	// -addr flag overrides it.
+	// Listen is the HTTP listen address (default "0.0.0.0:8888"): a
+	// host and port, or the absolute path of a Unix socket. The -addr
+	// flag overrides it.
 	Listen string `toml:"listen"`
 	Remote struct {
 		SSHKey  string         `toml:"ssh_key"`

@@ -38,7 +38,7 @@ func run() error {
 
 	flag.StringVar(&debugDS, "debug", "", "debug a dataset")
 	flag.StringVar(&logfile, "logfile", "", "log to a file")
-	flag.StringVar(&addr, "addr", "", "server addr (overrides the config 'listen' setting; default 0.0.0.0:8888)")
+	flag.StringVar(&addr, "addr", "", "server addr: host:port, or a Unix socket's absolute path (overrides the config 'listen' setting; default 0.0.0.0:8888)")
 	flag.BoolVar(&dryrun, "dryrun", false, "refresh state but don't transfer or delete snapshots")
 	flag.BoolVar(&simMode, "sim", false, "run the full daemon against a simulated ZFS pair (no root or ZFS required)")
 

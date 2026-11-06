@@ -269,7 +269,7 @@ func TestAPISnapshot(t *testing.T) {
 }
 
 // A snapshot is taken only of a periodicity some retention policy
-// names. This endpoint is the one the loopback listener serves without
+// names. This endpoint is the one a deployment may serve without
 // an account; a snapshot no policy names is one nothing asked for, and
 // a value carrying whitespace once reached zfs as extra operands.
 // Anything else is refused before zfs is asked.

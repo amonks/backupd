@@ -159,8 +159,11 @@ snitch_id = "your-snitch-id"
 
 # Optional: HTTP listen address (default "0.0.0.0:8888"). Bind to a
 # tailnet/VPN address to restrict access to the dashboard and its
-# control API.
+# control API, or give the absolute path of a Unix socket to confine
+# it to whoever can reach that path (the daemon makes the socket its
+# own user's alone; root still connects).
 #listen = "0.0.0.0:8888"
+#listen = "/var/run/backupd/control.sock"
 
 [local]
 # Root dataset to backup (all child datasets included)
@@ -274,7 +277,7 @@ yearly = 5
 
 - `-debug <dataset>`: Debug a specific dataset (performs refresh and plan but no transfers)
 - `-logfile <path>`: Log to a file instead of stdout (recommended for production)
-- `-addr <address>`: Server address for the web interface (overrides the config `listen` setting; default: "0.0.0.0:8888")
+- `-addr <address>`: Server address for the web interface — host and port, or a Unix socket's absolute path (overrides the config `listen` setting; default: "0.0.0.0:8888")
 - `-dryrun`: Refresh state but don't execute transfers or deletions (preview mode)
 - `-sim`: Run the complete daemon against a simulated in-memory ZFS
   pair (no root, ZFS, or network required). Boots a demo scenario with
@@ -415,7 +418,11 @@ The web interface provides real-time monitoring and control:
 
 The dashboard is unauthenticated: anyone who can reach the listen
 address can pause backups and edit the config. Use the `listen` config
-setting to bind to a private (e.g. VPN/tailnet) address.
+setting to bind to a private (e.g. VPN/tailnet) address, or to a Unix
+socket in a directory only the operator can reach. The subcommands
+read the same setting, so they follow it to a socket too. On a
+machine whose containers share the host's network stack, loopback is
+not private: anything in a container reaches it.
 
 ### REST API Endpoints
 
@@ -592,11 +599,12 @@ closes the response so its connection can be reused, and treats only a
 | `(*Daemon).Run(ctx)` | The sync loop, until ctx is cancelled. |
 | `(*Daemon).Handler()` | The dashboard and control API as an `http.Handler`. |
 | `(*Daemon).Mount(prefix)` | The same, under a sub-path of your own mux. |
-| `(*Daemon).Serve(ctx, addr)` | A listener of the daemon's own, for hosts that don't have one. |
+| `(*Daemon).Serve(ctx, addr)` | A listener of the daemon's own, for hosts that don't have one: TCP, or a Unix socket for an absolute path. |
 | `(*Daemon).Go(ctx, addr)` | Run and Serve together — the standalone daemon. |
 | `(*Daemon).View()` | The current derived state: verdict, issues, per-dataset health, cycle history. What the dashboard renders, for exporting to metrics or health checks. |
 | `(*Daemon).Debug(ctx, dataset, w)` | Refresh one dataset and write what would happen to it. |
-| `daemon.CallAPI(ctx, addr, method, path)` | Drive a running daemon's control API, as the subcommands do. |
+| `daemon.Listen(addr)` | The listener `Serve` opens, for a host serving some of the handler on an address of its own: a stale socket is replaced, a live one or a non-socket refused. |
+| `daemon.CallAPI(ctx, addr, method, path)` | Drive a running daemon's control API, as the subcommands do, over TCP or a socket. |
 
 ### Logging
 

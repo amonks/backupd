@@ -327,7 +327,8 @@ func (b *Daemon) updateStep(dataset model.DatasetName, stepIndex int, update fun
 	b.notifyStateChange()
 }
 
-// Go runs the sync loop and serves the dashboard on addr until ctx is
+// Go runs the sync loop and serves the dashboard on addr — a TCP
+// address or a Unix socket's path (see Listen) — until ctx is
 // cancelled. It is the standalone daemon; a host that owns its own
 // listener runs Run and mounts Handler instead.
 func (b *Daemon) Go(ctx context.Context, addr string) error {
@@ -963,10 +964,14 @@ resume:
 }
 
 func listenAndServe(ctx context.Context, addr string, handler http.Handler) error {
-	srv := http.Server{Addr: addr, Handler: handler}
+	ln, err := Listen(addr)
+	if err != nil {
+		return fmt.Errorf("server: %w", err)
+	}
+	srv := http.Server{Handler: handler}
 	errs := make(chan error)
 	go func() {
-		errs <- srv.ListenAndServe()
+		errs <- srv.Serve(ln)
 	}()
 	log.Printf("listening at %s", addr)
 	select {
@@ -1064,15 +1069,15 @@ func (b *Daemon) RefreshLocalSnapshots(ctx context.Context, logger *logger.Logge
 	return nil
 }
 
-// CallAPI sends a control request to a running daemon at addr and logs
-// the response body. The CLI subcommands (snapshot, pause, resume,
-// sync) are thin wrappers over this; it needs no daemon of its own,
-// only the address of one.
+// CallAPI sends a control request to a running daemon at addr — a TCP
+// address or a Unix socket's path, as the listen setting takes — and
+// logs the response body. The CLI subcommands (snapshot, pause,
+// resume, sync) are thin wrappers over this; it needs no daemon of its
+// own, only the address of one.
 func CallAPI(ctx context.Context, addr, method, path string) error {
-	client := &http.Client{Timeout: 30 * time.Second}
+	client, base := apiClient(addr, &http.Client{Timeout: 30 * time.Second})
 
-	url := fmt.Sprintf("http://%s%s", addr, path)
-	req, err := http.NewRequestWithContext(ctx, method, url, nil)
+	req, err := http.NewRequestWithContext(ctx, method, base+path, nil)
 	if err != nil {
 		return fmt.Errorf("creating request: %w", err)
 	}
