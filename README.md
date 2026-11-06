@@ -157,13 +157,15 @@ snitch_id = "your-snitch-id"
 # Optional: duration between sync cycles (default "1h")
 #interval = "1h"
 
-# Optional: HTTP listen address (default "0.0.0.0:8888"). Bind to a
-# tailnet/VPN address to restrict access to the dashboard and its
-# control API, or give the absolute path of a Unix socket to confine
-# it to whoever can reach that path (the daemon makes the socket its
-# own user's alone; root still connects).
-#listen = "0.0.0.0:8888"
-#listen = "/var/run/backupd/control.sock"
+# Optional: HTTP listen address. The default is a Unix socket,
+# /var/run/backupd.sock, which only root reaches: the dashboard and its
+# control API authorize nothing, so the daemon opens no network
+# listener unless you name one here. A tailnet/VPN address makes the
+# dashboard reachable from a browser; another socket path confines it
+# to whoever can reach that path (the daemon makes the socket its own
+# user's alone; root still connects).
+#listen = "100.x.y.z:8888"
+#listen = "/var/lib/backupd/control.sock"  # the directory must exist
 
 [local]
 # Root dataset to backup (all child datasets included)
@@ -277,7 +279,7 @@ yearly = 5
 
 - `-debug <dataset>`: Debug a specific dataset (performs refresh and plan but no transfers)
 - `-logfile <path>`: Log to a file instead of stdout (recommended for production)
-- `-addr <address>`: Server address for the web interface — host and port, or a Unix socket's absolute path (overrides the config `listen` setting; default: "0.0.0.0:8888")
+- `-addr <address>`: Server address for the web interface — host and port, or a Unix socket's absolute path (overrides the config `listen` setting; default: the Unix socket `/var/run/backupd.sock`)
 - `-dryrun`: Refresh state but don't execute transfers or deletions (preview mode)
 - `-sim`: Run the complete daemon against a simulated in-memory ZFS
   pair (no root, ZFS, or network required). Boots a demo scenario with
@@ -311,11 +313,11 @@ sudo backupd -dryrun
 # Debug a specific dataset (shows plan without executing)
 sudo backupd -debug tank/dataset
 
-# Run on custom port
-sudo backupd -addr 127.0.0.1:9999
+# Serve the dashboard on a private address instead of the default socket
+sudo backupd -addr 100.64.0.1:8888
 
-# Create a snapshot via API
-curl -X POST "http://localhost:8888/api/snapshot?periodicity=daily"
+# Create a snapshot via the API, over the default socket
+sudo curl --unix-socket /var/run/backupd.sock -X POST "http://backupd/api/snapshot?periodicity=daily"
 
 # Pause the /tm subtree, then resume it
 sudo backupd pause /tm
@@ -409,7 +411,11 @@ systemctl status backupd
 
 ### Web UI Endpoints
 
-The web interface provides real-time monitoring and control:
+The web interface provides real-time monitoring and control at the
+listen address. The examples reach the default socket through a
+forward (`ssh -L 8888:/var/run/backupd.sock root@host` — the socket is
+root's, so the login must be too); with `listen` set to a private
+address, use that address instead:
 - **Global view**: http://localhost:8888/global - Overview of all datasets, cycle history, and global controls (pause/resume, sync now, snapshot)
 - **Config editor**: http://localhost:8888/config - Edit the config file with validation and a per-dataset impact preview before saving
 - **Root dataset**: http://localhost:8888/root - Root dataset status
@@ -417,12 +423,23 @@ The web interface provides real-time monitoring and control:
 - **Automatic redirect**: http://localhost:8888/ → /global
 
 The dashboard is unauthenticated: anyone who can reach the listen
-address can pause backups and edit the config. Use the `listen` config
-setting to bind to a private (e.g. VPN/tailnet) address, or to a Unix
-socket in a directory only the operator can reach. The subcommands
-read the same setting, so they follow it to a socket too. On a
-machine whose containers share the host's network stack, loopback is
-not private: anything in a container reaches it.
+address can pause backups and edit retention. That is why the default
+is a Unix socket only root reaches, and why a network listener is
+something you choose: set `listen` to a private (e.g. VPN/tailnet)
+address, or to a socket in a directory only the operator can reach.
+The subcommands read the same setting, so they follow it wherever it
+points. On a machine whose containers share the host's network stack,
+loopback is not private: anything in a container reaches it.
+
+What the API cannot change, whoever reaches it, is what the daemon
+runs: `local.escalate`, `local.root`, `remote.root`,
+`remote.ssh_host`, `remote.ssh_key` — each part of a command line,
+some through the remote shell — and `listen`. Those are edited in the
+config file by the operator; a config sent to `PUT /api/config` or
+`/api/config/preview` that changes any of them is refused (403),
+naming them. Retention policy names, which the API may edit, become
+part of snapshot names and so of the same command lines, and may hold
+only letters, digits, and `_`.
 
 ### REST API Endpoints
 
@@ -433,8 +450,8 @@ not private: anything in a container reaches it.
 | POST   | `/api/sync?dataset=`        | Sync now; omit `dataset` to start a full cycle immediately. |
 | POST   | `/api/snapshot?periodicity=`| Create a recursive snapshot of the local root. The periodicity must be one a retention policy in the config names; any other is refused (400). |
 | GET    | `/api/config`               | The raw config file (TOML). |
-| POST   | `/api/config/preview`       | Validate a config (request body) and report its per-dataset impact without writing. |
-| PUT    | `/api/config`               | Validate, atomically save, and hot-apply a config (request body). |
+| POST   | `/api/config/preview`       | Validate a config (request body) and report its per-dataset impact without writing. A change to a setting only the operator may edit is refused (403). |
+| PUT    | `/api/config`               | Validate, atomically save, and hot-apply a config (request body). A change to a setting only the operator may edit is refused (403). |
 | GET    | `/api/state`                | JSON state summary, serialized from the same derivation layer the HTML renders: system verdict and issues, activity with cycle progress, per-dataset health/ages/fulfillment, cycle history. |
 
 Pause semantics: a paused dataset (or a globally paused daemon) is still
@@ -449,9 +466,11 @@ Config editing: `PUT /api/config` validates strictly (unknown keys are
 rejected, so typos like `dialy` surface immediately), writes atomically
 (temp file + rename), and applies the result in memory — retention,
 pause, interval, and snitch changes take effect without a restart.
-Changes to the local/remote roots or SSH endpoint still require a
-restart, and are logged as such. Hand-edits to the config file are
-picked up at the start of each cycle.
+The local/remote roots, the SSH endpoint, `local.escalate`, and
+`listen` cannot be changed this way at all (see above); edited in the
+file, they take effect at the next restart, and are logged as needing
+one. Hand-edits to the config file are picked up at the start of each
+cycle.
 
 ## Snapshot Naming Format and Policy Resolution
 
@@ -501,23 +520,26 @@ You can automate snapshot creation using either the API or cron jobs:
 
 ### Method 1: Using the API (Recommended)
 
-Add these entries to your crontab. Each periodicity must be one a
-retention policy in your config names; the daemon refuses any other.
+Add these entries to root's crontab, with the absolute path you
+installed backupd at (cron's PATH is short). Each periodicity must be
+one a retention policy in your config names; the daemon refuses any
+other. `backupd snapshot` reads the same config to find the daemon,
+socket or address.
 ```cron
 # Hourly snapshots
-0 * * * * curl -X POST "http://localhost:8888/api/snapshot?periodicity=hourly"
+0 * * * * /usr/local/bin/backupd snapshot hourly
 
 # Daily snapshot at midnight
-0 0 * * * curl -X POST "http://localhost:8888/api/snapshot?periodicity=daily"
+0 0 * * * /usr/local/bin/backupd snapshot daily
 
 # Weekly snapshot on Sundays
-0 0 * * 0 curl -X POST "http://localhost:8888/api/snapshot?periodicity=weekly"
+0 0 * * 0 /usr/local/bin/backupd snapshot weekly
 
 # Monthly snapshot on the 1st
-0 0 1 * * curl -X POST "http://localhost:8888/api/snapshot?periodicity=monthly"
+0 0 1 * * /usr/local/bin/backupd snapshot monthly
 
 # Yearly snapshot on January 1st
-0 0 1 1 * curl -X POST "http://localhost:8888/api/snapshot?periodicity=yearly"
+0 0 1 1 * /usr/local/bin/backupd snapshot yearly
 ```
 
 ### Method 2: Direct ZFS Commands
@@ -668,7 +690,10 @@ escalate = ["sudo", "-n"]   # or ["doas"], or omitted to run as root
 
 With it set, the daemon runs as an ordinary user and escalates per
 command; the root check at startup relaxes accordingly, since a daemon
-that escalates is not supposed to be root. The remote side takes no
+that escalates is not supposed to be root. Only the config file sets
+it: the API refuses a config that changes it. Running as an ordinary
+user, the daemon cannot create the default socket in `/var/run`, so
+set `listen` to a path that user can write. The remote side takes no
 prefix — it already arrives over ssh as whichever user the key
 authenticates as.
 
@@ -729,7 +754,7 @@ The application uses a clear domain-driven design with the following core entiti
    - Updates progress tracking for web UI visibility
 
 5. **Monitoring and Reporting:**
-   - Real-time status via web interface at http://localhost:8888
+   - Real-time status via the web interface at the listen address
    - Progress tracking per dataset with operation logs
    - Dead Man's Snitch integration for external monitoring
    - Atomic state updates using thread-safe `Atom` wrapper

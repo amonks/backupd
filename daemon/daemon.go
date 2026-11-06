@@ -249,15 +249,14 @@ func slogLevel(l history.Level) slog.Level {
 }
 
 // applyConfig swaps in a new config. Policy, pause, interval, and snitch
-// changes take effect immediately; the ZFS roots and SSH endpoint were
-// captured by env at startup, so changes there get a restart warning.
+// changes take effect immediately; the settings config.OperatorChanges
+// names — the ZFS roots, the SSH endpoint, the escalation prefix, the
+// listen address — were captured at startup, so changes there get a
+// restart warning.
 func (b *Daemon) applyConfig(fresh *config.Config) {
 	cur := b.conf.Deref()
-	if fresh.Local.Root != cur.Local.Root ||
-		fresh.Remote.Root != cur.Remote.Root ||
-		fresh.Remote.SSHKey != cur.Remote.SSHKey ||
-		fresh.Remote.SSHHost != cur.Remote.SSHHost {
-		b.event(history.Warning, nil, "local/remote endpoints changed; restart backupd to apply them")
+	if changed := config.OperatorChanges(cur, fresh); len(changed) > 0 {
+		b.event(history.Warning, nil, "%s changed; restart backupd to apply", strings.Join(changed, ", "))
 	}
 	b.conf.Reset(fresh)
 	b.notifyStateChange()

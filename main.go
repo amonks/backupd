@@ -27,6 +27,20 @@ func main() {
 	}
 }
 
+// listenAddr is where the daemon listens, and where the subcommands
+// find it: the -addr flag, else the config's listen setting, else
+// daemon.DefaultListen — a Unix socket, never a network address the
+// operator did not choose.
+func listenAddr(flagAddr string, conf *config.Config) string {
+	if flagAddr != "" {
+		return flagAddr
+	}
+	if conf.Listen != "" {
+		return conf.Listen
+	}
+	return daemon.DefaultListen
+}
+
 func run() error {
 	var (
 		debugDS string
@@ -38,7 +52,7 @@ func run() error {
 
 	flag.StringVar(&debugDS, "debug", "", "debug a dataset")
 	flag.StringVar(&logfile, "logfile", "", "log to a file")
-	flag.StringVar(&addr, "addr", "", "server addr: host:port, or a Unix socket's absolute path (overrides the config 'listen' setting; default 0.0.0.0:8888)")
+	flag.StringVar(&addr, "addr", "", "server addr: host:port, or a Unix socket's absolute path (overrides the config 'listen' setting; default "+daemon.DefaultListen+")")
 	flag.BoolVar(&dryrun, "dryrun", false, "refresh state but don't transfer or delete snapshots")
 	flag.BoolVar(&simMode, "sim", false, "run the full daemon against a simulated ZFS pair (no root or ZFS required)")
 
@@ -103,13 +117,7 @@ func run() error {
 		}
 	}
 
-	// The -addr flag wins over the config's listen setting.
-	if addr == "" {
-		addr = conf.Listen
-	}
-	if addr == "" {
-		addr = "0.0.0.0:8888"
-	}
+	addr = listenAddr(addr, conf)
 
 	ctx := NewSigctx()
 

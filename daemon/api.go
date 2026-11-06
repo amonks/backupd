@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -99,6 +100,9 @@ func (b *Daemon) saveAndApply(raw []byte) error {
 	if err != nil {
 		return err
 	}
+	if err := b.checkOperatorSettings(fresh); err != nil {
+		return err
+	}
 	fresh.Path = cur.Path
 	if cur.Path != "" {
 		if err := config.Save(cur.Path, raw); err != nil {
@@ -115,14 +119,13 @@ func (b *Daemon) saveAndApply(raw []byte) error {
 func (b *Daemon) handleSetPaused(paused bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
 		dataset, _ := datasetParam(req)
-		cur := b.conf.Deref()
-		out, err := config.SetPaused(cur.Raw, dataset, paused)
+		out, err := config.SetPaused(b.fileBytes(), dataset, paused)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		if err := b.saveAndApply(out); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			http.Error(w, err.Error(), configWriteStatus(err))
 			return
 		}
 		verb := "paused"
@@ -257,6 +260,54 @@ func (b *Daemon) previewConfig(fresh *config.Config) []configImpact {
 	return impacts
 }
 
+// fileBytes is the config as the file on disk holds it, which is what
+// a pause toggle edits: pause state lives in the file, and toggling
+// the daemon's copy instead would write back an older one over any
+// hand edit not yet reloaded. With no file, or one that does not
+// parse, it is the running config's bytes.
+func (b *Daemon) fileBytes() []byte {
+	cur := b.conf.Deref()
+	if cur.Path != "" {
+		if onDisk, err := config.LoadFrom(cur.Path); err == nil {
+			return onDisk.Raw
+		}
+	}
+	return cur.Raw
+}
+
+// errOperatorOnly is a config write through the API that would change
+// a setting only the operator, editing the file, may change.
+var errOperatorOnly = errors.New("only an operator editing the config file may change")
+
+// checkOperatorSettings refuses a config arriving through the API that
+// changes what config.OperatorChanges names. The API's only gate is
+// that a caller can reach it, and those settings decide what the
+// daemon runs and who can reach it. The comparison is against the file
+// as it is on disk, not the daemon's copy, so a save carrying an old
+// value cannot revert a hand edit the daemon has not reloaded yet; with
+// no file, or one that does not parse, it is against the running
+// config.
+func (b *Daemon) checkOperatorSettings(fresh *config.Config) error {
+	base := b.conf.Deref()
+	if base.Path != "" {
+		if onDisk, err := config.LoadFrom(base.Path); err == nil {
+			base = onDisk
+		}
+	}
+	if changed := config.OperatorChanges(base, fresh); len(changed) > 0 {
+		return fmt.Errorf("%w %s; the API cannot", errOperatorOnly, strings.Join(changed, ", "))
+	}
+	return nil
+}
+
+// configWriteStatus is the status a refused config write answers with.
+func configWriteStatus(err error) int {
+	if errors.Is(err, errOperatorOnly) {
+		return http.StatusForbidden
+	}
+	return http.StatusInternalServerError
+}
+
 func readBody(w http.ResponseWriter, req *http.Request) ([]byte, bool) {
 	raw, err := io.ReadAll(http.MaxBytesReader(w, req.Body, 1<<20))
 	if err != nil {
@@ -276,6 +327,11 @@ func (b *Daemon) handleConfigPreview(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	// Refused here too, so the editor says so before Save is pressed.
+	if err := b.checkOperatorSettings(fresh); err != nil {
+		http.Error(w, err.Error(), http.StatusForbidden)
+		return
+	}
 	impacts := b.previewConfig(fresh)
 	if impacts == nil {
 		impacts = []configImpact{}
@@ -293,7 +349,7 @@ func (b *Daemon) handleConfigPut(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if err := b.saveAndApply(raw); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, err.Error(), configWriteStatus(err))
 		return
 	}
 	// Regenerate targets and plans so the dashboard shows the new

@@ -226,3 +226,28 @@ monthly = 6
 		t.Errorf("Periodicities() = %v, want %v", got, want)
 	}
 }
+
+// A policy's name becomes the prefix of every snapshot it takes, and
+// those names reach zfs command lines, some split on whitespace and
+// some through the remote shell. The API may edit retention, so the
+// names are held to letters, digits, and underscores at parse time —
+// the hyphen too is out, since it separates the name from the
+// snapshot's timestamp.
+func TestPolicyNamesAreWords(t *testing.T) {
+	for _, name := range []string{"daily", "hourly", "manual", "every_6h", "q4"} {
+		raw := "[local.policy]\n" + name + " = 1\n"
+		if _, err := Parse([]byte(raw)); err != nil {
+			t.Errorf("policy %q refused: %v", name, err)
+		}
+	}
+	for _, raw := range []string{
+		"[local.policy]\n\"x y\" = 1\n",
+		"[remote.policy]\n\"daily;id\" = 1\n",
+		"[overrides.\"/a\".local.policy]\n\"a-b\" = 1\n",
+		"[overrides.\"/a\".remote.policy]\n\"\" = 1\n",
+	} {
+		if _, err := Parse([]byte(raw)); err == nil {
+			t.Errorf("accepted %q", raw)
+		}
+	}
+}

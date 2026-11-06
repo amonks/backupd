@@ -19,9 +19,10 @@ type Config struct {
 	Paused bool `toml:"paused"`
 	// IntervalRaw is the duration between sync cycles (default "1h").
 	IntervalRaw string `toml:"interval"`
-	// Listen is the HTTP listen address (default "0.0.0.0:8888"): a
-	// host and port, or the absolute path of a Unix socket. The -addr
-	// flag overrides it.
+	// Listen is the HTTP listen address: a host and port, or the
+	// absolute path of a Unix socket (the default is a socket,
+	// daemon.DefaultListen). The -addr flag overrides it. Only an
+	// operator editing the file may change it (OperatorChanges).
 	Listen string `toml:"listen"`
 	Remote struct {
 		SSHKey  string         `toml:"ssh_key"`
@@ -42,6 +43,9 @@ type Config struct {
 		//
 		// The remote side takes no prefix: it already arrives over
 		// ssh as whichever user the key authenticates as.
+		//
+		// Only an operator editing the file sets it; the API refuses a
+		// config that changes it (OperatorChanges).
 		Escalate []string `toml:"escalate"`
 	} `toml:"local"`
 	Overrides map[string]*Override `toml:"overrides"`
@@ -71,6 +75,37 @@ type Override struct {
 	Remote struct {
 		Policy map[string]int `toml:"policy"`
 	} `toml:"remote"`
+}
+
+// OperatorChanges names the settings that differ between cur and fresh
+// which only an operator editing the file may change: those that
+// become part of a command the daemon runs — the escalation prefix in
+// front of every local zfs command, the ssh destination and key, the
+// local and remote roots the commands name, some of them through a
+// remote shell — and the address the control API listens on. Whoever
+// can set those chooses what the daemon executes, or who can reach it,
+// at its next start. Nil means none of them differ.
+func OperatorChanges(cur, fresh *Config) []string {
+	var changed []string
+	if fresh.Listen != cur.Listen {
+		changed = append(changed, "listen")
+	}
+	if fresh.Local.Root != cur.Local.Root {
+		changed = append(changed, "local.root")
+	}
+	if !slices.Equal(fresh.Local.Escalate, cur.Local.Escalate) {
+		changed = append(changed, "local.escalate")
+	}
+	if fresh.Remote.Root != cur.Remote.Root {
+		changed = append(changed, "remote.root")
+	}
+	if fresh.Remote.SSHHost != cur.Remote.SSHHost {
+		changed = append(changed, "remote.ssh_host")
+	}
+	if fresh.Remote.SSHKey != cur.Remote.SSHKey {
+		changed = append(changed, "remote.ssh_key")
+	}
+	return changed
 }
 
 // OverrideFor returns the override that applies to a dataset (named
@@ -298,8 +333,58 @@ func Parse(raw []byte) (*Config, error) {
 			return nil, fmt.Errorf("invalid interval %q: %w", conf.IntervalRaw, err)
 		}
 	}
+	if err := checkPolicyNames(&conf); err != nil {
+		return nil, err
+	}
 	conf.Raw = raw
 	return &conf, nil
+}
+
+// checkPolicyNames holds every retention policy's name to letters,
+// digits, and underscores. A name is the prefix of every snapshot its
+// policy takes, and snapshot names reach zfs command lines — split on
+// whitespace locally, through a shell on the remote — while the API
+// may edit retention. The hyphen is out too: it separates the name
+// from a snapshot's timestamp.
+func checkPolicyNames(c *Config) error {
+	check := func(where string, policy map[string]int) error {
+		for name := range policy {
+			if !isPolicyName(name) {
+				return fmt.Errorf("%s: policy name %q may hold only letters, digits, and _", where, name)
+			}
+		}
+		return nil
+	}
+	if err := check("local.policy", c.Local.Policy); err != nil {
+		return err
+	}
+	if err := check("remote.policy", c.Remote.Policy); err != nil {
+		return err
+	}
+	for key, o := range c.Overrides {
+		if o == nil {
+			continue
+		}
+		if err := check(fmt.Sprintf("overrides.%q.local.policy", key), o.Local.Policy); err != nil {
+			return err
+		}
+		if err := check(fmt.Sprintf("overrides.%q.remote.policy", key), o.Remote.Policy); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func isPolicyName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, r := range name {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_') {
+			return false
+		}
+	}
+	return true
 }
 
 // Save atomically replaces the config file at path with raw, preserving

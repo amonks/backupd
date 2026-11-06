@@ -27,6 +27,13 @@ func socketPath(addr string) (string, bool) {
 	return "", false
 }
 
+// DefaultListen is where the daemon listens when nothing says
+// otherwise: a Unix socket, which root alone reaches. The control API
+// authorizes nothing, so the daemon never opens a network listener the
+// operator did not ask for; a dashboard reachable from elsewhere is a
+// `listen` (or -addr) naming a private address, or a forwarded socket.
+const DefaultListen = "/var/run/backupd.sock"
+
 // Listen opens the listener for a listen address: TCP for a host and
 // port, a Unix socket for an absolute path. A socket file left behind
 // by a daemon that died without removing it is replaced; one something
