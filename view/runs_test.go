@@ -7,6 +7,7 @@ import (
 	"pgregory.net/rapid"
 
 	"monks.co/backupd/history"
+	"monks.co/backupd/model"
 )
 
 var runsBase = time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
@@ -60,7 +61,7 @@ func TestCycleRunsSplitsOnOutcomeAndDetail(t *testing.T) {
 		{OK: false, Error: "remote unreachable"},
 		{OK: false, Error: "remote unreachable"},
 		{OK: false, Error: "auth failed"},
-		{OK: false, Failures: []string{"/foo"}},
+		{OK: false, Failures: []history.DatasetFailure{{Dataset: "/foo", Error: "transfer failed"}}},
 		{OK: true, Paused: true},
 		{OK: true},
 	})
@@ -81,6 +82,22 @@ func TestCycleRunsSplitsOnOutcomeAndDetail(t *testing.T) {
 	}
 	if runs[3].Detail != "auth failed" {
 		t.Errorf("run[3].Detail = %q", runs[3].Detail)
+	}
+}
+
+// A dataset's error text drifts from cycle to cycle while its failing
+// does not, so cycles failing the same datasets collapse into one run
+// whatever their errors say.
+func TestCycleRunsIgnoreDatasetErrorDrift(t *testing.T) {
+	fail := func(msg string) history.Cycle {
+		return history.Cycle{OK: false, Failures: []history.DatasetFailure{{Dataset: "/foo", Error: msg}}}
+	}
+	runs := CycleRuns(mkCycles([]history.Cycle{
+		fail("applying op 'daily-01' (attempt 1): out of space"),
+		fail("applying op 'daily-02' (attempt 1): out of space"),
+	}))
+	if len(runs) != 1 || runs[0].Count != 2 || runs[0].Detail != "failed datasets: /foo" {
+		t.Fatalf("runs = %+v, want one run of 2 failing /foo", runs)
 	}
 }
 
@@ -109,7 +126,10 @@ func TestCycleRunsProperties(t *testing.T) {
 			case 2:
 				specs[i] = history.Cycle{OK: false, Error: rapid.SampledFrom([]string{"a", "b"}).Draw(t, "err")}
 			case 3:
-				specs[i] = history.Cycle{OK: false, Failures: []string{rapid.SampledFrom([]string{"/x", "/y"}).Draw(t, "ds")}}
+				specs[i] = history.Cycle{OK: false, Failures: []history.DatasetFailure{{
+					Dataset: model.DatasetName(rapid.SampledFrom([]string{"/x", "/y"}).Draw(t, "ds")),
+					Error:   rapid.SampledFrom([]string{"a", "b"}).Draw(t, "dserr"),
+				}}}
 			}
 		}
 		cycles := mkCycles(specs)

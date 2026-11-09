@@ -7,13 +7,16 @@
 // Fidelity notes: the error strings for "dataset does not exist",
 // "contains partially-complete state", "no longer exists", and "out of
 // space" match the substrings the daemon's recovery paths dispatch on,
-// because that dispatch is exactly what the simulator is for testing.
+// and a down remote fails in ssh's own words for a refused connection,
+// which the daemon's cycle log reads to tell weather from a fault: that
+// dispatch is exactly what the simulator is for testing.
 // Transfers can be paced (bytes/sec) to exercise progress reporting,
 // or instant for property tests.
 package sim
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"slices"
@@ -110,6 +113,11 @@ func (s *Sim) SeedInterruptedTransfer(name model.DatasetName, end *model.Snapsho
 	ds.resumeEnd = end
 	ds.resumeSent = sent
 }
+
+// errRemoteDown is every remote operation's failure while the remote
+// is down: what env reports when ssh cannot connect, in ssh's words —
+// the daemon reads them to tell an unreachable remote from a fault.
+var errRemoteDown = errors.New("running 'ssh': exit status 255: ssh: connect to host remote.sim port 22: Connection refused")
 
 // SetRemoteDown makes every remote operation fail, simulating an
 // unreachable backup host.
@@ -229,7 +237,7 @@ func (s *Sim) RemoteDatasets(l *logger.Logger) ([]env.DatasetInfo, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.remoteDown {
-		return nil, fmt.Errorf("running 'ssh': exit status 255: connection refused")
+		return nil, errRemoteDown
 	}
 	return s.listDatasets(s.remote), nil
 }
@@ -256,7 +264,7 @@ func (s *Sim) RemoteSnapshots(l *logger.Logger, name model.DatasetName) ([]*mode
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.remoteDown {
-		return nil, fmt.Errorf("running 'ssh': exit status 255: connection refused")
+		return nil, errRemoteDown
 	}
 	return s.snapshots(s.remote, name)
 }
@@ -265,7 +273,7 @@ func (s *Sim) RemoteResumeToken(l *logger.Logger, name model.DatasetName) (strin
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.remoteDown {
-		return "", fmt.Errorf("running 'ssh': exit status 255: connection refused")
+		return "", errRemoteDown
 	}
 	ds, ok := s.remote[name]
 	if !ok {
@@ -278,7 +286,7 @@ func (s *Sim) AbortRemoteResumable(l *logger.Logger, name model.DatasetName) err
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.remoteDown {
-		return fmt.Errorf("running 'ssh': exit status 255: connection refused")
+		return errRemoteDown
 	}
 	ds, ok := s.remote[name]
 	if !ok {
@@ -301,7 +309,7 @@ func (s *Sim) Resume(ctx context.Context, l *logger.Logger, name model.DatasetNa
 	s.mu.Lock()
 	if s.remoteDown {
 		s.mu.Unlock()
-		return fmt.Errorf("running 'ssh': exit status 255: connection refused")
+		return errRemoteDown
 	}
 	ds, ok := s.remote[name]
 	if !ok || ds.resumeToken == "" || ds.resumeToken != token {
@@ -370,7 +378,7 @@ func (s *Sim) deleteRange(loc model.Location, name model.DatasetName, start, end
 		pool = s.local
 	case model.Remote:
 		if s.remoteDown {
-			return fmt.Errorf("running 'ssh': exit status 255: connection refused")
+			return errRemoteDown
 		}
 		pool = s.remote
 	default:
@@ -421,7 +429,7 @@ func (s *Sim) transfer(ctx context.Context, l *logger.Logger, name model.Dataset
 	s.mu.Lock()
 	if s.remoteDown {
 		s.mu.Unlock()
-		return fmt.Errorf("running 'ssh': exit status 255: connection refused")
+		return errRemoteDown
 	}
 
 	localDS, ok := s.local[name]

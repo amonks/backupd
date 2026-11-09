@@ -29,10 +29,19 @@ type Cycle struct {
 	StartedAt time.Time
 	StoppedAt time.Time
 	OK        bool
-	Paused    bool     // globally paused during this cycle
-	Error     string   // refresh error that aborted the cycle, if any
-	Datasets  int      // datasets processed
-	Failures  []string // datasets that failed to sync
+	Paused    bool             // globally paused during this cycle
+	Error     string           // refresh error that aborted the cycle, if any
+	Datasets  int              // datasets processed
+	Failures  []DatasetFailure // datasets that failed to sync, and why
+}
+
+// DatasetFailure is one dataset's failed sync within a cycle. The error
+// travels with the name because the cycle's record is what a host
+// alerts on, and a failure that names only its dataset says nothing
+// about whether anyone needs to act.
+type DatasetFailure struct {
+	Dataset model.DatasetName
+	Error   string
 }
 
 // Duration returns how long the cycle took.

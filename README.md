@@ -452,7 +452,7 @@ only letters, digits, and `_`.
 | GET    | `/api/config`               | The raw config file (TOML). |
 | POST   | `/api/config/preview`       | Validate a config (request body) and report its per-dataset impact without writing. A change to a setting only the operator may edit is refused (403). |
 | PUT    | `/api/config`               | Validate, atomically save, and hot-apply a config (request body). A change to a setting only the operator may edit is refused (403). |
-| GET    | `/api/state`                | JSON state summary, serialized from the same derivation layer the HTML renders: system verdict and issues, activity with cycle progress, per-dataset health/ages/fulfillment, cycle history. |
+| GET    | `/api/state`                | JSON state summary, serialized from the same derivation layer the HTML renders: system verdict and issues, activity with cycle progress, per-dataset health/ages/fulfillment, cycle history. A raw cycle's `Failures` is a list of `{"Dataset", "Error"}` objects, each error as ssh or zfs wrote it on stderr — the same text the journal carries. |
 
 Pause semantics: a paused dataset (or a globally paused daemon) is still
 refreshed and replanned every cycle — the dashboard keeps showing what
@@ -641,12 +641,28 @@ message text, so "are backups running" is a query:
 
 | Attribute | Meaning |
 |-----------|---------|
-| `backupd.cycle.ok` | false on a cycle that failed, wholly or for some datasets. The record is at ERROR level too, so level-based routing catches it without knowing this vocabulary. |
+| `backupd.cycle.ok` | false on a cycle that failed, wholly or for some datasets. |
 | `backupd.cycle.paused`, `backupd.cycle.datasets`, `backupd.cycle.duration_ms`, `backupd.cycle.failures` | The rest of the cycle outcome. |
+| `error.message`, `error.type` | On a failed cycle, OpenTelemetry's pair: the refresh error that aborted it, or each failed dataset's error a line apiece, and the class where ssh's words say it (`timeout`, `connection-refused`, `connection-reset`, `network`, `host-key-mismatch`, `permission`). On a failed snitch ping, the check-in's error, and the class where its error chain says it (`timeout`, `dns`, `connection-refused`, `connection-reset`, `network`, `tls`). |
 | `backupd.event` | A journal entry's level: info, warning, error. |
 | `backupd.dataset` | The dataset a record concerns. |
 | `backupd.snitch.ok` | false when a Dead Man's Snitch ping failed. |
 | `backupd.log` | Which ring buffer a buffered line came from. |
+
+A failed cycle's level says whether anyone needs to act, so level-based
+routing works without this vocabulary. A cycle is WARN when every
+failure in it is ssh failing to reach the remote: ssh exiting 255 and
+saying the connection timed out, was refused, was reset or closed by
+the remote, or had no route. A remote across the internet does that
+now and then, the next retry is minutes away, and one that stays down
+still trips the snitch. Every other failed cycle is ERROR, a changed
+host key and a refused login included.
+
+A failed snitch ping is WARN, whatever went wrong: the next one is an
+interval away, and a check-in that keeps not arriving is what Dead
+Man's Snitch pages on, while the dashboard raises `snitch-overdue`. A
+ping cut short by your own cancellation of `Run` is not a failure, and
+is not logged as one.
 
 ### Page chrome
 

@@ -601,3 +601,37 @@ func TestAPIState(t *testing.T) {
 		t.Errorf("expected the journaled failure in events, got %+v", resp.Events)
 	}
 }
+
+// TestAPIStateCyclesCarryEachFailure: a script reading /api/state's raw
+// cycles gets each failed dataset with its error, the wire shape the
+// spec documents, not only the names.
+func TestAPIStateCyclesCarryEachFailure(t *testing.T) {
+	local, remote := steadyStateExecutors()
+	b, _ := newAPITestDaemon(t, local, remote)
+	b.history.RecordCycle(history.Cycle{
+		StartedAt: time.Now().Add(-2 * time.Minute), StoppedAt: time.Now().Add(-time.Minute),
+		Datasets: 2,
+		Failures: []history.DatasetFailure{{Dataset: "/foo", Error: "remote out of space"}},
+	})
+
+	w := do(t, b.Handler(), "GET", "/api/state", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var resp struct {
+		Cycles []struct {
+			OK       bool
+			Failures []struct {
+				Dataset string
+				Error   string
+			}
+		} `json:"cycles"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decoding response: %v\n%s", err, w.Body)
+	}
+	if len(resp.Cycles) != 1 || resp.Cycles[0].OK || len(resp.Cycles[0].Failures) != 1 ||
+		resp.Cycles[0].Failures[0].Dataset != "/foo" || resp.Cycles[0].Failures[0].Error != "remote out of space" {
+		t.Errorf("cycles = %+v, want one failed cycle naming /foo and its error\n%s", resp.Cycles, w.Body)
+	}
+}

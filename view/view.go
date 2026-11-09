@@ -755,13 +755,20 @@ func systemIssues(in Input, sys *System) []Issue {
 }
 
 // CycleDetail is the one-line explanation of a failed cycle: the
-// refresh error, or the failed-dataset list.
+// refresh error, or the failed-dataset list. The list names datasets
+// without their errors: CycleRuns collapses cycles whose detail
+// matches, and a dataset's error text drifts from cycle to cycle
+// (snapshot names, byte counts) while its failing does not.
 func CycleDetail(c history.Cycle) string {
 	if c.Error != "" {
 		return c.Error
 	}
 	if len(c.Failures) > 0 {
-		return "failed datasets: " + strings.Join(c.Failures, ", ")
+		names := make([]string, len(c.Failures))
+		for i, f := range c.Failures {
+			names[i] = f.Dataset.String()
+		}
+		return "failed datasets: " + strings.Join(names, ", ")
 	}
 	return ""
 }

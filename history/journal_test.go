@@ -152,14 +152,17 @@ func TestFirstSuccessDoesNotJournal(t *testing.T) {
 // failed are already journaled by the dataset incidents.
 func TestCycleIncident(t *testing.T) {
 	h := New()
-	cycle := func(i int, err string, failures ...string) Cycle {
-		return Cycle{
+	cycle := func(i int, err string, failures ...model.DatasetName) Cycle {
+		c := Cycle{
 			StartedAt: t0.Add(time.Duration(i) * time.Hour),
 			StoppedAt: t0.Add(time.Duration(i)*time.Hour + time.Minute),
 			OK:        err == "" && len(failures) == 0,
 			Error:     err,
-			Failures:  failures,
 		}
+		for _, ds := range failures {
+			c.Failures = append(c.Failures, DatasetFailure{Dataset: ds, Error: "transfer failed"})
+		}
+		return c
 	}
 
 	h.RecordCycle(cycle(0, ""))

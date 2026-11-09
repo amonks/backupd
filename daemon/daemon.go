@@ -234,6 +234,14 @@ const (
 	SnitchOKKey = "backupd.snitch.ok"
 )
 
+// OpenTelemetry's names for a failure's text and its class, which a
+// failed cycle carries: the errors themselves, and the transport kind
+// when ssh's words say what went wrong (see classifyFailure).
+const (
+	errorMessageKey = "error.message"
+	errorTypeKey    = "error.type"
+)
+
 // slogLevel maps a journal level onto a slog level, so a host's
 // existing level-based routing (alert on warnings and up) works on
 // backupd's records without knowing backupd's vocabulary.
@@ -374,7 +382,7 @@ func (b *Daemon) Run(ctx context.Context) error {
 		cycleStart := time.Now()
 		allOK := true
 		var cycleErr string
-		var failures []string
+		var failures []history.DatasetFailure
 		var datasets int
 
 		// At launch: refresh all datasets and generate plans
@@ -405,7 +413,7 @@ func (b *Daemon) Run(ctx context.Context) error {
 						return ctx.Err()
 					}
 					allOK = false
-					failures = append(failures, ds.String())
+					failures = append(failures, history.DatasetFailure{Dataset: ds, Error: err.Error()})
 					err := fmt.Errorf("syncing '%s': %w", ds, err)
 					// Log to both global and dataset-specific logs
 					b.globalLogs.Printf("sync error; skipping dataset: %s", err)
@@ -443,14 +451,8 @@ func (b *Daemon) Run(ctx context.Context) error {
 				// trips the dead man's switch.
 				if conf.Paused {
 					b.globalLogs.Printf("paused; skipping deadmanssnitch")
-				} else if err := b.snitch(ctx, conf.SnitchID); err != nil {
-					b.log.LogAttrs(context.Background(), slog.LevelError, "snitch ping failed",
-						slog.Bool(SnitchOKKey, false), slog.String("error", err.Error()))
-					b.history.RecordSnitchError(time.Now(), err.Error())
-				} else {
-					b.log.LogAttrs(context.Background(), slog.LevelInfo, "snitch pinged",
-						slog.Bool(SnitchOKKey, true))
-					b.history.RecordSnitch(time.Now())
+				} else if err := b.checkIn(ctx, conf.SnitchID); err != nil {
+					return err
 				}
 			}
 			b.globalLogs.Printf("waiting to restart")
@@ -1106,15 +1108,12 @@ func CreateSnapshot(ctx context.Context, addr, periodicity string) error {
 }
 
 // logCycle emits one structured record per completed cycle: the
-// heartbeat a host alerts on. A failing cycle is logged at error level
-// so level-based routing catches it without reading the attributes.
+// heartbeat a host alerts on. A failed cycle carries its errors under
+// OpenTelemetry's error.message and error.type, and its level says
+// whether it is a fault (ERROR) or an expected failure (WARN) — see
+// cycleFailure — so level-based routing catches what someone has to
+// fix without reading the attributes.
 func (b *Daemon) logCycle(c history.Cycle) {
-	level := slog.LevelInfo
-	msg := "sync cycle ok"
-	if !c.OK {
-		level = slog.LevelError
-		msg = "sync cycle failed"
-	}
 	attrs := []slog.Attr{
 		slog.Bool(CycleOKKey, c.OK),
 		slog.Bool(CyclePausedKey, c.Paused),
@@ -1122,10 +1121,20 @@ func (b *Daemon) logCycle(c history.Cycle) {
 		slog.Int64(CycleDurationKey, c.StoppedAt.Sub(c.StartedAt).Milliseconds()),
 	}
 	if len(c.Failures) > 0 {
-		attrs = append(attrs, slog.Any(CycleFailuresKey, c.Failures))
+		names := make([]string, len(c.Failures))
+		for i, f := range c.Failures {
+			names[i] = f.Dataset.String()
+		}
+		attrs = append(attrs, slog.Any(CycleFailuresKey, names))
 	}
-	if c.Error != "" {
-		attrs = append(attrs, slog.String("error", c.Error))
+	if c.OK {
+		b.log.LogAttrs(context.Background(), slog.LevelInfo, "sync cycle ok", attrs...)
+		return
 	}
-	b.log.LogAttrs(context.Background(), level, msg, attrs...)
+	level, message, kind := cycleFailure(c)
+	attrs = append(attrs, slog.String(errorMessageKey, message))
+	if kind != "" {
+		attrs = append(attrs, slog.String(errorTypeKey, kind))
+	}
+	b.log.LogAttrs(context.Background(), level, "sync cycle failed", attrs...)
 }
