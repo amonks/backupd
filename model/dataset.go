@@ -41,6 +41,14 @@ type Dataset struct {
 	Metrics StorageMetrics     // Physical storage metrics
 	Plan    *Plan              // Plan to get from Current to Target
 	Logs    *logger.Logger
+
+	// LocalKnown and RemoteKnown say whether each side's snapshots have
+	// been read. A side that has not been read holds no snapshots in
+	// Current because nobody has looked, not because there are none:
+	// nothing may be planned against it, and the dashboard says
+	// "unknown" of it rather than "never replicated".
+	LocalKnown  bool
+	RemoteKnown bool
 }
 
 func (dataset *Dataset) Staleness() time.Duration {
@@ -144,11 +152,13 @@ func (dataset *Dataset) Clone() *Dataset {
 		}
 	}
 	return &Dataset{
-		Name:    dataset.Name,
-		Current: dataset.Current.Clone(),
-		Target:  dataset.Target.Clone(),
-		Metrics: dataset.Metrics, // Value type, no need to clone
-		Plan:    plan,
-		Logs:    dataset.Logs,
+		Name:        dataset.Name,
+		Current:     dataset.Current.Clone(),
+		Target:      dataset.Target.Clone(),
+		Metrics:     dataset.Metrics, // Value type, no need to clone
+		Plan:        plan,
+		Logs:        dataset.Logs,
+		LocalKnown:  dataset.LocalKnown,
+		RemoteKnown: dataset.RemoteKnown,
 	}
 }

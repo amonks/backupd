@@ -115,7 +115,9 @@ func pageTitle(d pageData) string {
 }
 
 // statusStrip is the always-visible header answering "is everything
-// ok" and "what is happening right now".
+// ok" and "what is happening right now". The snitch's ping record is in
+// memory, so an empty one after a start says nothing of the pings
+// before it — "not since start", never "never".
 templ statusStrip(d pageData) {
 	<header class="strip">
 		<div class="strip-cell strip-verdict">
@@ -160,6 +162,8 @@ templ statusStrip(d pageData) {
 						@whenCell(d.Sys.LastSnitch)
 						{ ")" }
 					</span>
+				} else if d.Sys.LastSnitch.IsZero() {
+					<span class="strip-fact" title="No ping since backupd started; the next one follows the first successful cycle">snitch: not since start</span>
 				} else {
 					<span class="strip-fact">
 						{ "snitch: " }
@@ -167,10 +171,22 @@ templ statusStrip(d pageData) {
 					</span>
 				}
 			}
-			<span class="strip-fact">{ fmt.Sprint(d.Sys.DatasetCount) } datasets</span>
-			<span class="strip-fact">{ fmtBytes(d.Sys.LocalUsed) } local · { fmtBytes(d.Sys.RemoteUsed) } remote</span>
+			if d.Sys.DatasetCount > 0 {
+				<span class="strip-fact">{ fmt.Sprint(d.Sys.DatasetCount) } datasets</span>
+				<span class="strip-fact">{ usedFact("local", d.Sys.LocalUsed, d.Sys.LocalUnknown) } · { usedFact("remote", d.Sys.RemoteUsed, d.Sys.RemoteUnknown) }</span>
+			}
 		</div>
 	</header>
+}
+
+// usedFact is a side's total, or that it has not been read while any
+// dataset's side is unread: a sum missing some of its terms would
+// understate it.
+func usedFact(side string, used int64, unknown int) string {
+	if unknown > 0 {
+		return side + " not read"
+	}
+	return fmtBytes(used) + " " + side
 }
 
 // phaseClass maps an activity phase to a verdict-ish color class for
@@ -241,7 +257,9 @@ templ sidebarLink(d pageData, dv view.Dataset) {
 	<a href={ templ.SafeURL(datasetHref(d.Base, dv.Name)) } class={ "dataset-link", templ.KV("active", dv.Name.Path() == d.Page && d.Page != "global" && d.Page != "config") }>
 		<span class={ "dot", "dot-" + dv.Health.Class(), templ.KV("pulsing", dv.Syncing) } title={ dv.Health.String() + reasonSuffix(dv.Reason) }></span>
 		<span class="dataset-name">{ dv.Name.String() }</span>
-		if dv.HasRemote {
+		if !dv.RemoteKnown {
+			<span class="dataset-age" title="Remote not read yet">—</span>
+		} else if dv.HasRemote {
 			<span class={ "dataset-age", templ.KV("error-text", dv.BackupStale) }>
 				@localtime.Titled(dv.NewestRemote, localtime.Second) {
 					{ fmtCompactDuration(dv.BackedUp) }
@@ -541,13 +559,14 @@ templ styles() {
 		.backupd .cycle-paused { color: var(--paused); font-weight: 600; }
 
 		/* Attention (issues) */
-		.backupd .all-clear {
+		.backupd .all-clear, .backupd .unknown-note {
 			color: var(--ok);
 			background: var(--ok-bg);
 			padding: 0.6rem 0.9rem;
 			border-radius: 4px;
 			margin: 0 0 1rem;
 		}
+		.backupd .unknown-note { color: var(--unknown); background: var(--unknown-bg); }
 		.backupd .issues { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1rem; }
 		.backupd .issue {
 			display: flex;

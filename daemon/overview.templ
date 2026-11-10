@@ -19,21 +19,48 @@ templ overview(d pageData) {
 	<h1>Overview</h1>
 	@attentionSection(d)
 	@nowSection(d)
-	@fleetGrid(d.Base, d.Sys.Datasets)
+	if d.Sys.DatasetCount > 0 {
+		@fleetGrid(d.Base, d.Sys.Datasets)
+	}
 	@recordSection(d)
 }
 
 // attentionSection leads with the typed issue list — everything wrong,
-// worst first, each with its remedy inline — or an explicit all-clear.
+// worst first, each with its remedy inline — then what has not been
+// read, if anything. All clear is said only when everything has been
+// read and nothing is wrong: an inventory nobody has looked at yet is
+// neither.
 templ attentionSection(d pageData) {
-	if len(d.Sys.Issues) == 0 {
-		<p class="all-clear">All clear — every dataset is snapshotted, replicated, and within policy.</p>
-	} else {
+	if len(d.Sys.Issues) > 0 {
 		<div class="issues">
 			for _, issue := range d.Sys.Issues {
 				@issueCard(d.Base, issue)
 			}
 		</div>
+	}
+	if note := unknownNote(d.Sys); note != "" {
+		<p class="unknown-note">{ note }</p>
+	} else if len(d.Sys.Issues) == 0 {
+		<p class="all-clear">All clear — every dataset is snapshotted, replicated, and within policy.</p>
+	}
+}
+
+// unknownNote says what the dashboard cannot vouch for yet, and why, or
+// "" when every dataset's sides have been read. Whole sides go unread
+// only before their first listing since the daemon started; after
+// that, each cycle's listing replaces the last, and a dataset alone is
+// unread only when it is new since the last one.
+func unknownNote(sys view.System) string {
+	switch {
+	case sys.DatasetCount == 0:
+		return "Not known yet: nothing has been read from ZFS since backupd started. Each dataset's verdict appears once its snapshots have been listed."
+	case sys.Unknown == 0:
+		return ""
+	case sys.RemoteUnknown == sys.DatasetCount && sys.LocalUnknown == 0:
+		return "Not known yet: the remote's snapshots haven't been read since backupd started, so whether each dataset is backed up isn't known. The verdicts appear once the remote has been listed."
+	default:
+		return fmt.Sprintf("Not known yet: %d of %d datasets haven't been read in full. Their verdicts appear once they have.",
+			sys.Unknown, sys.DatasetCount)
 	}
 }
 
@@ -123,10 +150,13 @@ templ lastCycleNote(d pageData) {
 	}
 }
 
-// ageCell renders an age with staleness highlighting, or the absent
-// label ("never", "no snapshots").
-templ ageCell(has bool, age time.Duration, stale bool, absent string) {
-	if !has {
+// ageCell renders an age with staleness highlighting, the absent label
+// ("never", "no snapshots") for a side read and found empty, or "not
+// read" for a side nobody has read yet.
+templ ageCell(known, has bool, age time.Duration, stale bool, absent string) {
+	if !known {
+		@notRead()
+	} else if !has {
 		<span class="error-text">{ absent }</span>
 	} else if stale {
 		<span class="stale-text">{ fmtCompactDuration(age) }</span>

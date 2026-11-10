@@ -30,14 +30,20 @@ func testConf() *config.Config {
 	return conf
 }
 
-// build assembles a model containing one dataset, /foo.
+// build assembles a model containing one dataset, /foo, with both sides
+// read: a nil remote is a remote that holds nothing for it.
 func build(local, remote []*model.Snapshot) *model.Model {
 	state := model.New()
 	state = model.AddLocalDataset("/foo", local, nil)(state)
-	if remote != nil {
-		state = model.AddRemoteDataset("/foo", remote, nil)(state)
-	}
+	state = model.AddRemoteDataset("/foo", remote, nil)(state)
 	return state
+}
+
+// buildUnread assembles /foo with its local side read and its remote
+// side not: what the dashboard has in the minute after a start while
+// the remote is listed, or after a start with the remote unreachable.
+func buildUnread(local []*model.Snapshot) *model.Model {
+	return model.AddLocalDataset("/foo", local, nil)(model.New())
 }
 
 func testInput(state *model.Model, conf *config.Config) Input {
@@ -224,6 +230,140 @@ func TestUnreplicated(t *testing.T) {
 	}
 	if sys.Verdict != SystemFailing {
 		t.Errorf("expected system failing, got %s", sys.Verdict)
+	}
+}
+
+// TestUnreadRemoteIsUnknown: a remote nobody has read yet is not an
+// empty remote. A dataset whose local side has been read and whose
+// remote side has not is unknown — not "never replicated", not stale —
+// and the system says it does not know rather than that it is failing.
+func TestUnreadRemoteIsUnknown(t *testing.T) {
+	a := snap("daily-a", now.Add(-time.Hour))
+	sys := Compute(testInput(buildUnread([]*model.Snapshot{a}), testConf()))
+	ds := getDS(t, sys, "/foo")
+
+	if !ds.LocalKnown || ds.RemoteKnown {
+		t.Fatalf("expected local known and remote unknown, got %v/%v", ds.LocalKnown, ds.RemoteKnown)
+	}
+	if ds.Unreplicated || ds.BackupStale || ds.HasRemote {
+		t.Fatalf("an unread remote asserted something: %+v", ds)
+	}
+	if ds.Health != HealthUnknown || ds.Reason != "remote not read yet" {
+		t.Errorf("expected unknown (remote not read yet), got %s (%s)", ds.Health, ds.Reason)
+	}
+	if len(sys.Issues) != 0 {
+		t.Errorf("not knowing is not an issue, got %+v", sys.Issues)
+	}
+	if sys.Verdict != SystemUnknown || sys.Reason != "remote not read yet" {
+		t.Errorf("expected unknown (remote not read yet), got %s (%s)", sys.Verdict, sys.Reason)
+	}
+	if sys.Unknown != 1 || sys.RemoteUnknown != 1 || sys.LocalUnknown != 0 {
+		t.Errorf("expected one dataset with its remote unread, got unknown=%d local=%d remote=%d", sys.Unknown, sys.LocalUnknown, sys.RemoteUnknown)
+	}
+
+	// The local side, which has been read, still says what it knows.
+	if !ds.HasLocal || ds.Snapshotted != time.Hour {
+		t.Errorf("expected the local facts to stand, got %+v", ds)
+	}
+}
+
+// TestUnreadLocalIsUnknown: the same holds the other way round — a
+// local side nobody has read is not a pool that stopped snapshotting.
+func TestUnreadLocalIsUnknown(t *testing.T) {
+	a := snap("daily-a", now.Add(-time.Hour))
+	state := model.AddRemoteDataset("/foo", []*model.Snapshot{a}, nil)(model.New())
+	sys := Compute(testInput(state, testConf()))
+	ds := getDS(t, sys, "/foo")
+	if ds.SnapshotsStale || hasIssue(sys, IssueStaleSnapshots) != nil {
+		t.Fatalf("an unread local side read as stale: %+v", sys.Issues)
+	}
+	if ds.Health != HealthUnknown || ds.Reason != "local not read yet" {
+		t.Errorf("expected unknown (local not read yet), got %s (%s)", ds.Health, ds.Reason)
+	}
+	if sys.Verdict != SystemUnknown || sys.Reason != "local not read yet" {
+		t.Errorf("expected unknown (local not read yet), got %s (%s)", sys.Verdict, sys.Reason)
+	}
+}
+
+// TestNothingReadIsUnknown: the seconds after a start, before the first
+// listing returns, the model holds no datasets. That is not a fleet
+// with nothing wrong in it: a listing always names the root, so an
+// inventory with no datasets is one nobody has read.
+func TestNothingReadIsUnknown(t *testing.T) {
+	sys := Compute(testInput(model.New(), testConf()))
+	if sys.Verdict != SystemUnknown || sys.Reason != "nothing read yet" {
+		t.Errorf("expected unknown (nothing read yet), got %s (%s)", sys.Verdict, sys.Reason)
+	}
+	if len(sys.Issues) != 0 {
+		t.Errorf("not knowing is not an issue, got %+v", sys.Issues)
+	}
+}
+
+// TestPartlyRead: when some datasets are read and some are not, the
+// reason counts the ones that are not.
+func TestPartlyRead(t *testing.T) {
+	a := snap("daily-a", now.Add(-time.Hour))
+	state := build([]*model.Snapshot{a}, []*model.Snapshot{a})
+	state = model.AddLocalDataset("/bar", []*model.Snapshot{a}, nil)(state)
+	sys := Compute(testInput(state, testConf()))
+	if sys.Verdict != SystemUnknown || sys.Reason != "1 of 2 datasets not read yet" {
+		t.Errorf("expected unknown (1 of 2 datasets not read yet), got %s (%s)", sys.Verdict, sys.Reason)
+	}
+	if getDS(t, sys, "/foo").Health != HealthOK {
+		t.Error("the dataset that has been read keeps its verdict")
+	}
+}
+
+// TestKnownBadOutranksUnknown: what has been read still alarms while
+// the rest is unread. A bad thing that is true is news; not knowing is
+// only the absence of news.
+func TestKnownBadOutranksUnknown(t *testing.T) {
+	old := snap("daily-a", now.Add(-5*24*time.Hour))
+	in := testInput(buildUnread([]*model.Snapshot{old}), testConf())
+
+	sys := Compute(in)
+	ds := getDS(t, sys, "/foo")
+	if ds.Health != HealthAtRisk || !ds.SnapshotsStale {
+		t.Fatalf("expected stale local snapshots to read at risk, got %s (%s)", ds.Health, ds.Reason)
+	}
+	if sys.Verdict != SystemAttention {
+		t.Errorf("expected a known warning to outrank not knowing, got %s (%s)", sys.Verdict, sys.Reason)
+	}
+
+	in.History.RecordDatasetFailure("/foo", now.Add(-time.Minute), "boom")
+	sys = Compute(in)
+	if getDS(t, sys, "/foo").Health != HealthFailing || sys.Verdict != SystemFailing {
+		t.Errorf("expected a failure to outrank not knowing, got %s (%s)", sys.Verdict, sys.Reason)
+	}
+}
+
+// TestUnknownOutranksPaused: a paused dataset whose remote has not been
+// read cannot be vouched for, and that is the more important thing to
+// say about it; the global pause, which the operator chose, still
+// outranks everything at the system level.
+func TestUnknownOutranksPaused(t *testing.T) {
+	a := snap("daily-a", now.Add(-time.Hour))
+	conf := testConf()
+	conf.Overrides = map[string]*config.Override{"/foo": {Paused: true}}
+	sys := Compute(testInput(buildUnread([]*model.Snapshot{a}), conf))
+	if ds := getDS(t, sys, "/foo"); ds.Health != HealthUnknown {
+		t.Errorf("expected unknown over a subtree pause, got %s (%s)", ds.Health, ds.Reason)
+	}
+
+	conf.Paused = true
+	if sys := Compute(testInput(buildUnread([]*model.Snapshot{a}), conf)); sys.Verdict != SystemPaused {
+		t.Errorf("expected a global pause to stay the verdict, got %s", sys.Verdict)
+	}
+}
+
+// TestHealthRank: sorting by health follows the precedence the
+// derivation applies, worst first.
+func TestHealthRank(t *testing.T) {
+	order := []Health{HealthFailing, HealthAtRisk, HealthUnknown, HealthPaused, HealthBehind, HealthOK}
+	for i := 1; i < len(order); i++ {
+		if order[i-1].Rank() <= order[i].Rank() {
+			t.Errorf("%s should rank above %s", order[i-1], order[i])
+		}
 	}
 }
 

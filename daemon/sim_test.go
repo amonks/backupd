@@ -4,13 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"pgregory.net/rapid"
 
 	"monks.co/backupd/config"
+	"monks.co/backupd/env"
+	"monks.co/backupd/logger"
 	"monks.co/backupd/model"
 	"monks.co/backupd/sim"
 	"monks.co/backupd/status"
@@ -340,6 +346,17 @@ func TestSimDashboardInvariants(t *testing.T) {
 	if !found {
 		t.Fatalf("expected a critical cycle-failing issue, got %+v", sys.Issues)
 	}
+	// A remote that could not be listed is not a remote that emptied:
+	// /foo keeps the inventory last read of it, so it is neither
+	// "never replicated" nor unknown, and its recovery point is still
+	// the sim's.
+	if hasIssueKind(sys, view.IssueUnreplicated) {
+		t.Fatalf("an unreachable remote read as never replicated: %+v", sys.Issues)
+	}
+	ds, _ = sys.Get("/foo")
+	if !ds.RemoteKnown || ds.BackedUp != now.Sub(newestRemote.Time()) {
+		t.Fatalf("expected /foo to keep its last-read remote through the outage, got %+v", ds)
+	}
 
 	// Recovery: the next successful cycle clears the verdict.
 	s.SetRemoteDown(false)
@@ -347,6 +364,314 @@ func TestSimDashboardInvariants(t *testing.T) {
 	sys = computeView(b, now)
 	if sys.Verdict != view.SystemOK || len(sys.Issues) != 0 {
 		t.Fatalf("expected recovery to clear the issues, got %s %+v", sys.Verdict, sys.Issues)
+	}
+}
+
+func hasIssueKind(sys view.System, kind view.IssueKind) bool {
+	for _, issue := range sys.Issues {
+		if issue.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+// gatedRemote holds each remote listing until the test releases it, so
+// the test can read the dashboard while the remote is being listed —
+// on thor, a minute of ssh round trips after every cycle's start. With
+// holdLocal set, it also holds the next local snapshot read once it
+// has read, so a test can act between a local read and its publication.
+type gatedRemote struct {
+	*sim.Sim
+	listing chan struct{}
+	release chan struct{}
+
+	holdLocal    atomic.Bool
+	localRead    chan struct{}
+	localRelease chan struct{}
+
+	// quit unblocks every gate, so a test that fails mid-hold still
+	// stops the loop.
+	quit chan struct{}
+}
+
+var errGateQuit = errors.New("gate closed")
+
+func newGatedRemote(s *sim.Sim) *gatedRemote {
+	return &gatedRemote{
+		Sim:          s,
+		listing:      make(chan struct{}),
+		release:      make(chan struct{}),
+		localRead:    make(chan struct{}),
+		localRelease: make(chan struct{}),
+		quit:         make(chan struct{}),
+	}
+}
+
+// hold signals that a gate is reached and waits for its release.
+func (g *gatedRemote) hold(reached, release chan struct{}) error {
+	select {
+	case reached <- struct{}{}:
+	case <-g.quit:
+		return errGateQuit
+	}
+	select {
+	case <-release:
+		return nil
+	case <-g.quit:
+		return errGateQuit
+	}
+}
+
+func (g *gatedRemote) RemoteDatasets(l *logger.Logger) ([]env.DatasetInfo, error) {
+	if err := g.hold(g.listing, g.release); err != nil {
+		return nil, err
+	}
+	return g.Sim.RemoteDatasets(l)
+}
+
+func (g *gatedRemote) LocalSnapshots(l *logger.Logger, name model.DatasetName) ([]*model.Snapshot, error) {
+	snaps, err := g.Sim.LocalSnapshots(l, name)
+	if g.holdLocal.CompareAndSwap(true, false) {
+		if err := g.hold(g.localRead, g.localRelease); err != nil {
+			return nil, err
+		}
+	}
+	return snaps, err
+}
+
+// step sends or receives on a gate channel, failing the test rather
+// than hanging when the loop never gets there.
+func step(t *testing.T, what string, op func() <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-op():
+	case <-time.After(10 * time.Second):
+		t.Fatalf("timed out waiting for %s", what)
+	}
+}
+
+// recv waits for a signal on ch; send delivers one.
+func recv(t *testing.T, what string, ch chan struct{}) {
+	t.Helper()
+	step(t, what, func() <-chan struct{} { return ch })
+}
+
+func send(t *testing.T, what string, ch chan struct{}) {
+	t.Helper()
+	sent := make(chan struct{})
+	go func() {
+		select {
+		case ch <- struct{}{}:
+			close(sent)
+		case <-time.After(10 * time.Second):
+		}
+	}()
+	step(t, what, func() <-chan struct{} { return sent })
+}
+
+// runGated runs the sync loop over g until the test stops it,
+// signalling cycled at every between-cycle wait and starting the next
+// cycle when the test sends on next. stop is idempotent and is also
+// registered as a cleanup, so a failing test still ends the loop.
+func runGated(t *testing.T, b *Daemon, g *gatedRemote) (cycled, next chan struct{}, stop func()) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	cycled, next = make(chan struct{}), make(chan struct{})
+	b.wait = func(ctx context.Context, d time.Duration) (*syncRequest, error) {
+		select {
+		case cycled <- struct{}{}:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		select {
+		case <-next:
+			return nil, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	done := make(chan error, 1)
+	go func() { done <- b.Run(ctx) }()
+	var once sync.Once
+	stop = func() {
+		once.Do(func() {
+			cancel()
+			close(g.quit)
+			if err := <-done; !errors.Is(err, context.Canceled) {
+				t.Errorf("expected Run to end by cancellation, got %v", err)
+			}
+		})
+	}
+	t.Cleanup(stop)
+	return cycled, next, stop
+}
+
+// TestSimRemoteBeingReadIsUnknown: while the remote is listed, the
+// dashboard says what it knows. On the first cycle after a start it has
+// read the local side and not the remote, so a dataset is unknown —
+// never "never replicated", which is what an inventory published half
+// read used to say of every dataset for the minute the listing took.
+// On the cycles after, the remote last read stands until the new
+// listing replaces it.
+func TestSimRemoteBeingReadIsUnknown(t *testing.T) {
+	s := sim.New()
+	now := time.Now()
+	a := simSnap("/foo", "daily-a", now.Add(-2*time.Hour).Unix())
+	s.SeedLocal("/foo", a)
+	s.SeedRemote("/foo", a)
+	g := newGatedRemote(s)
+
+	conf := simConf(map[string]int{"daily": 3}, map[string]int{"daily": 3}, true)
+	b := New(Options{Config: conf, Env: g})
+	b.snitch = func(context.Context, string) error { return nil }
+	cycled, next, stop := runGated(t, b, g)
+
+	// Before the remote listing returns — whether or not the local one
+	// has — the system does not know.
+	if sys := computeView(b, now); sys.Verdict != view.SystemUnknown {
+		t.Fatalf("before any listing returned: %s (%s)", sys.Verdict, sys.Reason)
+	}
+
+	// The first cycle: local read, remote listing held.
+	recv(t, "the first remote listing", g.listing)
+	sys := computeView(b, now)
+	ds, ok := sys.Get("/foo")
+	if !ok {
+		t.Fatal("expected /foo published once its local side was read")
+	}
+	if ds.Health != view.HealthUnknown || ds.Unreplicated || len(sys.Issues) != 0 {
+		t.Fatalf("while the remote is first read: %s (%s), issues %+v", ds.Health, ds.Reason, sys.Issues)
+	}
+	if sys.Verdict != view.SystemUnknown {
+		t.Fatalf("expected the system unknown while the remote is first read, got %s (%s)", sys.Verdict, sys.Reason)
+	}
+	if !ds.HasLocal || ds.Snapshotted != now.Sub(a.Time()) {
+		t.Fatalf("expected the local side to say what it knows, got %+v", ds)
+	}
+
+	send(t, "the first remote listing's release", g.release)
+	recv(t, "the first cycle's end", cycled)
+	if sys := computeView(b, now); sys.Verdict != view.SystemOK {
+		t.Fatalf("expected ok once both sides were read, got %s (%s) %+v", sys.Verdict, sys.Reason, sys.Issues)
+	}
+
+	// The next cycle: the remote read last cycle stands while the new
+	// listing runs.
+	send(t, "the next cycle", next)
+	recv(t, "the second remote listing", g.listing)
+	sys = computeView(b, now)
+	ds, _ = sys.Get("/foo")
+	if sys.Verdict != view.SystemOK || ds.Health != view.HealthOK || ds.BackedUp != now.Sub(a.Time()) {
+		t.Fatalf("while the remote is re-read: %s (%s), /foo %s (%s)", sys.Verdict, sys.Reason, ds.Health, ds.Reason)
+	}
+	send(t, "the second remote listing's release", g.release)
+	recv(t, "the second cycle's end", cycled)
+	stop()
+}
+
+// TestSimSnapshotDuringListingSurvives: a snapshot taken while the cycle
+// lists the pools — the dashboard's button, or a cron landing in the
+// minute the remote takes — stays in the published model. Neither
+// listing may publish a local side read before the snapshot over one
+// read after it: the local listing finishes publishing before a
+// snapshot's refresh reads, and the remote listing publishes its side
+// alone. Publishing the whole model read at the cycle's start put the
+// dataset back as it was, reading "no new snapshots" until its next
+// refresh.
+func TestSimSnapshotDuringListingSurvives(t *testing.T) {
+	s := sim.New()
+	now := time.Now()
+	a := simSnap("/foo", "daily-a", now.Add(-26*time.Hour).Unix())
+	s.SeedLocal("/foo", a)
+	s.SeedRemote("/foo", a)
+	g := newGatedRemote(s)
+	g.holdLocal.Store(true)
+
+	conf := simConf(map[string]int{"daily": 3}, map[string]int{"daily": 3}, true)
+	b := New(Options{Config: conf, Env: g})
+	b.snitch = func(context.Context, string) error { return nil }
+	h := b.Handler()
+	cycled, _, _ := runGated(t, b, g)
+
+	// The local listing has read /foo and not yet published it. A
+	// snapshot is taken now.
+	recv(t, "the local listing's read of /foo", g.localRead)
+	snapped := make(chan int, 1)
+	go func() {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest("POST", "/api/snapshot?periodicity=daily", nil))
+		snapped <- w.Code
+	}()
+	newestLocal := func() *model.Snapshot {
+		t.Helper()
+		ds := b.state.Deref().GetDataset("/foo")
+		if ds == nil {
+			t.Fatal("/foo is not in the model")
+		}
+		return ds.Current.Local.Newest()
+	}
+	waitFor := func(what string, cond func() bool) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for !cond() {
+			if time.Now().After(deadline) {
+				t.Fatalf("timed out waiting for %s", what)
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+	waitFor("the snapshot", func() bool { return s.Inventory("/foo").Local.Len() == 2 })
+	taken := s.Inventory("/foo").Local.Newest()
+
+	send(t, "the local listing's release", g.localRelease)
+	recv(t, "the remote listing", g.listing)
+	select {
+	case code := <-snapped:
+		if code != http.StatusOK {
+			t.Fatalf("snapshot: %d", code)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for the snapshot request")
+	}
+	if got := newestLocal(); got.Name != taken.Name {
+		t.Fatalf("while the remote is listed: newest local %s, want the snapshot %s", got.Name, taken.Name)
+	}
+
+	send(t, "the remote listing's release", g.release)
+	recv(t, "the cycle's end", cycled)
+	if got := newestLocal(); got.Name != taken.Name {
+		t.Fatalf("after the remote listing: newest local %s, want the snapshot %s", got.Name, taken.Name)
+	}
+}
+
+// TestSimStartWithRemoteDown: a start with the remote unreachable —
+// thor booting before its network, or rsync.net's bad minute — reads
+// the local side and fails the cycle. The failure is a bad thing that
+// is true, and the dashboard says so; that the remote holds nothing is
+// not, and the dashboard does not say it.
+func TestSimStartWithRemoteDown(t *testing.T) {
+	s := sim.New()
+	now := time.Now()
+	a := simSnap("/foo", "daily-a", now.Add(-2*time.Hour).Unix())
+	s.SeedLocal("/foo", a)
+	s.SeedRemote("/foo", a)
+	s.SetRemoteDown(true)
+
+	conf := simConf(map[string]int{"daily": 3}, map[string]int{"daily": 3}, true)
+	b := newSimDaemon(conf, s)
+	runCycles(t, b, 1)
+
+	sys := computeView(b, now)
+	if !hasIssueKind(sys, view.IssueCycleFailing) || sys.Verdict != view.SystemFailing {
+		t.Fatalf("expected the failed cycle to read failing, got %s (%s) %+v", sys.Verdict, sys.Reason, sys.Issues)
+	}
+	if hasIssueKind(sys, view.IssueUnreplicated) || hasIssueKind(sys, view.IssueStaleBackup) {
+		t.Fatalf("an unread remote read as a bad one: %+v", sys.Issues)
+	}
+	ds, ok := sys.Get("/foo")
+	if !ok || ds.Health != view.HealthUnknown || ds.RemoteKnown || !ds.LocalKnown {
+		t.Fatalf("expected /foo published from its local side with its remote unknown, got %+v", ds)
 	}
 }
 

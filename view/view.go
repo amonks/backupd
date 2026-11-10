@@ -18,10 +18,20 @@
 // records).
 //
 // Health and activity are orthogonal. A dataset's health (failing,
-// at risk, paused, behind, ok) describes whether its promise is being
-// kept; whether it is being synced right now is a separate activity
-// flag. Folding "syncing" into health would hide a failing dataset's
-// red flag at exactly the moment the operator watches it retry.
+// at risk, unknown, paused, behind, ok) describes whether its promise
+// is being kept; whether it is being synced right now is a separate
+// activity flag. Folding "syncing" into health would hide a failing
+// dataset's red flag at exactly the moment the operator watches it
+// retry.
+//
+// Not knowing is not a bad thing being true. A side whose snapshots
+// have not been read — the minute after a start while the remote is
+// listed over ssh, or a start with the remote unreachable — holds no
+// snapshots in the model because nobody has looked. Nothing absent is
+// asserted of it: no "never replicated", no staleness. The dataset is
+// unknown, and the system says so instead of all clear, unless
+// something that has been read is alarming, since a bad thing that is
+// true is news and not knowing is only the absence of news.
 package view
 
 import (
@@ -50,6 +60,9 @@ const SnitchOverdueFactor = 2
 type Health int
 
 const (
+	// HealthUnknown: a side's snapshots have not been read, and nothing
+	// read so far is alarming. Not a verdict on the data — the lack of
+	// one.
 	HealthUnknown Health = iota
 	HealthOK
 	// HealthBehind: work is queued. Routine between snapshot arrivals,
@@ -80,6 +93,27 @@ func (h Health) String() string {
 		return "failing"
 	default:
 		return "unknown"
+	}
+}
+
+// Rank orders healths by precedence, worst highest: failing, at risk,
+// unknown, paused, behind, ok. The enum's own order keeps unknown at
+// zero, so a Health nobody set never reads as ok, which is why sorting
+// takes this instead.
+func (h Health) Rank() int {
+	switch h {
+	case HealthFailing:
+		return 5
+	case HealthAtRisk:
+		return 4
+	case HealthUnknown:
+		return 3
+	case HealthPaused:
+		return 2
+	case HealthBehind:
+		return 1
+	default:
+		return 0
 	}
 }
 
@@ -174,10 +208,17 @@ type Dataset struct {
 	Step    int
 	Steps   int
 
+	// LocalKnown and RemoteKnown report whether each side's snapshots
+	// have been read. Every fact about a side that has not — what it
+	// holds, how old it is, what is missing from it — is unknown, and
+	// the fields below say nothing of it.
+	LocalKnown  bool
+	RemoteKnown bool
+
 	// Assurance, derived from the inventory and the clock (valid after
 	// a restart, unlike run history). HasLocal/HasRemote report whether
-	// each side holds any snapshots at all; the ages are meaningful
-	// only when the corresponding side does.
+	// each side is known to hold any snapshots at all; the ages are
+	// meaningful only when the corresponding side does.
 	HasLocal     bool
 	HasRemote    bool
 	NewestLocal  time.Time
@@ -260,6 +301,8 @@ func (d Dataset) PendingSummary() string {
 type Verdict int
 
 const (
+	// SystemUnknown: something has not been read yet, and nothing read
+	// so far is alarming.
 	SystemUnknown Verdict = iota
 	SystemOK
 	// SystemAttention: something is degraded (warnings) but data is
@@ -331,6 +374,13 @@ type System struct {
 	Cycle    CycleProgress
 
 	DatasetCount int
+	// Unknown counts the datasets with a side not yet read;
+	// LocalUnknown and RemoteUnknown count them per side. A model with
+	// no datasets is one nobody has read: a listing always names the
+	// root.
+	Unknown       int
+	LocalUnknown  int
+	RemoteUnknown int
 	// LocalUsed and RemoteUsed are what the tracked datasets hold
 	// altogether, each counted once — nested datasets add only their
 	// own share, since zfs's used already carries the descendants.
@@ -437,11 +487,22 @@ func Compute(in Input) System {
 		}
 	}
 	sys.DatasetCount = len(sys.Datasets)
+	for _, ds := range sys.Datasets {
+		if !ds.LocalKnown {
+			sys.LocalUnknown++
+		}
+		if !ds.RemoteKnown {
+			sys.RemoteUnknown++
+		}
+		if !ds.LocalKnown || !ds.RemoteKnown {
+			sys.Unknown++
+		}
+	}
 	issues = append(issues, systemIssues(in, &sys)...)
 	sortIssues(issues)
 	sys.Issues = issues
 	sys.Cycle = cycleProgress(in.Activity)
-	sys.Verdict, sys.Reason = verdict(in.Conf, issues)
+	sys.Verdict, sys.Reason = verdict(in.Conf, issues, sys)
 	return sys
 }
 
@@ -475,10 +536,18 @@ func computeDataset(in Input, name model.DatasetName, m *model.Dataset) Dataset 
 	if m == nil {
 		return ds
 	}
+	ds.LocalKnown, ds.RemoteKnown = m.LocalKnown, m.RemoteKnown
 
+	// An unread side contributes nothing: its empty inventory in the
+	// model is the absence of a read, not of snapshots.
 	var local, remote *model.Snapshots
 	if m.Current != nil {
-		local, remote = m.Current.Local, m.Current.Remote
+		if ds.LocalKnown {
+			local = m.Current.Local
+		}
+		if ds.RemoteKnown {
+			remote = m.Current.Remote
+		}
 	}
 	if local != nil && local.Len() > 0 {
 		ds.HasLocal = true
@@ -529,13 +598,14 @@ func computeDataset(in Input, name model.DatasetName, m *model.Dataset) Dataset 
 	// against the remote policy's. Pause exempts the backup (transfers
 	// were stopped on purpose) but not snapshotting (pause doesn't
 	// stop snapshot creation).
-	if ds.Cadence > 0 {
+	// Only a side that has been read can be stale or missing anything.
+	if ds.Cadence > 0 && ds.LocalKnown {
 		ds.SnapshotsStale = !ds.HasLocal || ds.Snapshotted > StaleFactor*ds.Cadence
 	}
 	if ds.BackupCadence > 0 {
 		ds.BackupStale = !ds.Paused && ds.HasRemote && ds.BackedUp > StaleFactor*ds.BackupCadence
 	}
-	ds.Unreplicated = ds.HasLocal && !ds.HasRemote
+	ds.Unreplicated = ds.HasLocal && ds.RemoteKnown && !ds.HasRemote
 
 	if a := in.Activity; a.Phase == status.Syncing && a.Dataset == name {
 		ds.Syncing = true
@@ -562,6 +632,11 @@ func computeDataset(in Input, name model.DatasetName, m *model.Dataset) Dataset 
 		} else {
 			ds.Reason = "no snapshots"
 		}
+	case !ds.LocalKnown || !ds.RemoteKnown:
+		// Above paused: that this dataset cannot be vouched for either
+		// way matters more than that the operator paused it.
+		ds.Health = HealthUnknown
+		ds.Reason = unreadReason(!ds.LocalKnown, !ds.RemoteKnown)
 	case ds.Paused:
 		ds.Health = HealthPaused
 		if ds.GlobalPaused {
@@ -795,8 +870,22 @@ func datasetKey(name *model.DatasetName) string {
 	return name.Path()
 }
 
-// verdict folds the issue list into the one-word system answer.
-func verdict(conf *config.Config, issues []Issue) (Verdict, string) {
+// unreadReason names the sides that have not been read.
+func unreadReason(local, remote bool) string {
+	switch {
+	case local && remote:
+		return "not read yet"
+	case local:
+		return "local not read yet"
+	default:
+		return "remote not read yet"
+	}
+}
+
+// verdict folds the issue list, and what has not been read, into the
+// one-word system answer. Not knowing ranks below every alarming
+// issue and above all clear.
+func verdict(conf *config.Config, issues []Issue, sys System) (Verdict, string) {
 	if conf.Paused {
 		return SystemPaused, "execution is paused; the snitch ping is withheld"
 	}
@@ -814,6 +903,16 @@ func verdict(conf *config.Config, issues []Issue) (Verdict, string) {
 		}
 	}
 	if top == nil {
+		switch {
+		case sys.DatasetCount == 0:
+			return SystemUnknown, "nothing read yet"
+		case sys.Unknown == sys.DatasetCount && sys.LocalUnknown == 0:
+			return SystemUnknown, "remote not read yet"
+		case sys.Unknown == sys.DatasetCount && sys.RemoteUnknown == 0:
+			return SystemUnknown, "local not read yet"
+		case sys.Unknown > 0:
+			return SystemUnknown, fmt.Sprintf("%d of %s not read yet", sys.Unknown, plural(sys.DatasetCount, "dataset"))
+		}
 		return SystemOK, ""
 	}
 	worst := top.Severity

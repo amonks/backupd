@@ -22,7 +22,13 @@ templ datasetPage(d pageData) {
 	{{ dv, _ := d.Sys.Get(name) }}
 	if ds == nil {
 		<h1>{ name.String() }</h1>
-		<p>Dataset not found.</p>
+		if d.Sys.DatasetCount == 0 {
+			<p class="recovery muted">Not known yet: nothing has been read from ZFS since backupd started.</p>
+		} else if d.Sys.Unknown > 0 {
+			<p class="recovery muted">Not known yet: not every side has been read, so whether this dataset exists isn't known.</p>
+		} else {
+			<p>Dataset not found.</p>
+		}
 	} else {
 		<h1>
 			{ name.String() }
@@ -56,7 +62,12 @@ templ datasetPage(d pageData) {
 // recoverySentence answers the operator's core question in words: if
 // the local pool were lost right now, what could be recovered?
 templ recoverySentence(dv view.Dataset) {
-	if dv.HasRemote {
+	if !dv.RemoteKnown {
+		<p class="recovery muted">
+			Not known yet: this dataset's remote snapshots haven't been read,
+			so what could be restored were the local pool lost isn't known.
+		</p>
+	} else if dv.HasRemote {
 		<p class={ "recovery", templ.KV("atrisk", dv.BackupStale) }>
 			If the local pool were lost now, this dataset could be restored as of
 			<b>
@@ -94,7 +105,9 @@ templ factsTable(d pageData, name model.DatasetName, dv view.Dataset) {
 		<tr>
 			<th>Snapshotted</th>
 			<td>
-				if dv.HasLocal {
+				if !dv.LocalKnown {
+					@notRead()
+				} else if dv.HasLocal {
 					<span class={ templ.KV("stale-text", dv.SnapshotsStale) }>
 						@localtime.Titled(dv.NewestLocal, localtime.Second) {
 							{ fmtCompactDuration(dv.Snapshotted) + " ago" }
@@ -111,7 +124,9 @@ templ factsTable(d pageData, name model.DatasetName, dv view.Dataset) {
 		<tr>
 			<th>Backed up</th>
 			<td>
-				if dv.HasRemote {
+				if !dv.RemoteKnown {
+					@notRead()
+				} else if dv.HasRemote {
 					<span class={ templ.KV("stale-text", dv.BackupStale) }>
 						@localtime.Titled(dv.NewestRemote, localtime.Second) {
 							{ fmtCompactDuration(dv.BackedUp) + " ago" }
@@ -160,26 +175,34 @@ templ factsTable(d pageData, name model.DatasetName, dv view.Dataset) {
 		<tr>
 			<th>Local</th>
 			<td>
-				{ fmt.Sprint(dv.LocalCount) } snapshots
-				· { fmtBytes(dv.LocalOwn) } on disk
-				if dv.LocalBeneath() > 0 {
-					<span class="muted">· { fmtBytes(dv.LocalBeneath()) } beneath</span>
-				}
-				if ds != nil && ds.Metrics.HasLocal {
-					· { fmtBytes(ds.Metrics.LocalSize.LogicalReferenced) } logical
+				if !dv.LocalKnown {
+					@notRead()
+				} else {
+					{ fmt.Sprint(dv.LocalCount) } snapshots
+					· { fmtBytes(dv.LocalOwn) } on disk
+					if dv.LocalBeneath() > 0 {
+						<span class="muted">· { fmtBytes(dv.LocalBeneath()) } beneath</span>
+					}
+					if ds != nil && ds.Metrics.HasLocal {
+						· { fmtBytes(ds.Metrics.LocalSize.LogicalReferenced) } logical
+					}
 				}
 			</td>
 		</tr>
 		<tr>
 			<th>Remote</th>
 			<td>
-				{ fmt.Sprint(dv.RemoteCount) } snapshots
-				· { fmtBytes(dv.RemoteOwn) } on disk
-				if dv.RemoteBeneath() > 0 {
-					<span class="muted">· { fmtBytes(dv.RemoteBeneath()) } beneath</span>
-				}
-				if ds != nil && ds.Metrics.HasRemote {
-					· { fmtBytes(ds.Metrics.RemoteSize.LogicalReferenced) } logical
+				if !dv.RemoteKnown {
+					@notRead()
+				} else {
+					{ fmt.Sprint(dv.RemoteCount) } snapshots
+					· { fmtBytes(dv.RemoteOwn) } on disk
+					if dv.RemoteBeneath() > 0 {
+						<span class="muted">· { fmtBytes(dv.RemoteBeneath()) } beneath</span>
+					}
+					if ds != nil && ds.Metrics.HasRemote {
+						· { fmtBytes(ds.Metrics.RemoteSize.LogicalReferenced) } logical
+					}
 				}
 			</td>
 		</tr>
@@ -224,10 +247,10 @@ templ fulfillmentTable(dv view.Dataset) {
 						<tr>
 							<td>{ row.Periodicity }</td>
 							<td class="num">
-								@fulfillmentCell(row.LocalHave, row.LocalWant)
+								@fulfillmentCell(dv.LocalKnown, row.LocalHave, row.LocalWant)
 							</td>
 							<td class="num">
-								@fulfillmentCell(row.RemoteHave, row.RemoteWant)
+								@fulfillmentCell(dv.RemoteKnown, row.RemoteHave, row.RemoteWant)
 							</td>
 						</tr>
 					}
@@ -237,14 +260,26 @@ templ fulfillmentTable(dv view.Dataset) {
 	}
 }
 
-templ fulfillmentCell(have, want int) {
-	if want == 0 {
+// fulfillmentCell is one side's have / want. A side not yet read has
+// nothing to count, and is no shortfall.
+templ fulfillmentCell(known bool, have, want int) {
+	if !known {
+		<span class="muted" title="Not read yet">? / { wantLabel(want) }</span>
+	} else if want == 0 {
 		<span class="muted">{ fmt.Sprint(have) } / —</span>
 	} else if have < want {
 		<span class="shortfall">{ fmt.Sprint(have) } / { fmt.Sprint(want) }</span>
 	} else {
 		{ fmt.Sprint(have) } / { fmt.Sprint(want) }
 	}
+}
+
+// wantLabel is a policy's count, or — where the policy keeps none.
+func wantLabel(want int) string {
+	if want == 0 {
+		return "—"
+	}
+	return fmt.Sprint(want)
 }
 
 // planSection shows the transition plan with per-step status and, for

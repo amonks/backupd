@@ -355,7 +355,7 @@ func (b *Daemon) handleConfigPut(w http.ResponseWriter, req *http.Request) {
 	// Regenerate targets and plans so the dashboard shows the new
 	// config's effect immediately; execution happens on the next cycle
 	// (or a sync-now).
-	b.generatePlansForAllDatasets(req.Context())
+	b.generatePlansForAllDatasets()
 	b.notifyStateChange()
 	b.event(history.Info, nil, "config updated via api")
 	writeJSON(w, map[string]any{"ok": true})
@@ -376,14 +376,19 @@ type apiIssue struct {
 	Since   *time.Time `json:"since,omitzero"`
 }
 
+// apiFulfillment's have counts are null for a side not yet read: a
+// count of nothing read is not a count of zero.
 type apiFulfillment struct {
 	Periodicity string `json:"periodicity"`
-	LocalHave   int    `json:"localHave"`
+	LocalHave   *int   `json:"localHave"`
 	LocalWant   int    `json:"localWant"`
-	RemoteHave  int    `json:"remoteHave"`
+	RemoteHave  *int   `json:"remoteHave"`
 	RemoteWant  int    `json:"remoteWant"`
 }
 
+// apiDatasetState is one dataset's view. LocalKnown and RemoteKnown say
+// whether each side's snapshots have been read; the facts about a side
+// that has not are absent or null, never zero.
 type apiDatasetState struct {
 	Name               string           `json:"name"`
 	Path               string           `json:"path"`
@@ -391,6 +396,8 @@ type apiDatasetState struct {
 	Reason             string           `json:"reason,omitempty"`
 	Syncing            bool             `json:"syncing"`
 	Paused             bool             `json:"paused"`
+	LocalKnown         bool             `json:"localKnown"`
+	RemoteKnown        bool             `json:"remoteKnown"`
 	SnapshottedSeconds *int64           `json:"snapshottedSeconds,omitzero"`
 	BackedUpSeconds    *int64           `json:"backedUpSeconds,omitzero"`
 	DepthSeconds       *int64           `json:"depthSeconds,omitzero"`
@@ -398,8 +405,8 @@ type apiDatasetState struct {
 	SnapshotsStale     bool             `json:"snapshotsStale,omitzero"`
 	BackupStale        bool             `json:"backupStale,omitzero"`
 	Unreplicated       bool             `json:"unreplicated,omitzero"`
-	LocalSnapshots     int              `json:"localSnapshots"`
-	RemoteSnapshots    int              `json:"remoteSnapshots"`
+	LocalSnapshots     *int             `json:"localSnapshots"`
+	RemoteSnapshots    *int             `json:"remoteSnapshots"`
 	LocalUsedBytes     int64            `json:"localUsedBytes,omitzero"`
 	RemoteUsedBytes    int64            `json:"remoteUsedBytes,omitzero"`
 	LocalOwnBytes      int64            `json:"localOwnBytes,omitzero"`
@@ -456,6 +463,14 @@ type apiEvent struct {
 	// dataset); absent for daemon-level events.
 	Dataset *string `json:"dataset,omitzero"`
 	Message string  `json:"message"`
+}
+
+// countPtr is a side's count, or nil for a side not yet read.
+func countPtr(known bool, n int) *int {
+	if !known {
+		return nil
+	}
+	return &n
 }
 
 func secondsPtr(has bool, d time.Duration) *int64 {
@@ -584,6 +599,8 @@ func (b *Daemon) handleState(w http.ResponseWriter, req *http.Request) {
 			Reason:             dv.Reason,
 			Syncing:            dv.Syncing,
 			Paused:             dv.Paused,
+			LocalKnown:         dv.LocalKnown,
+			RemoteKnown:        dv.RemoteKnown,
 			SnapshottedSeconds: secondsPtr(dv.HasLocal, dv.Snapshotted),
 			BackedUpSeconds:    secondsPtr(dv.HasRemote, dv.BackedUp),
 			DepthSeconds:       secondsPtr(dv.HasRemote, dv.Depth),
@@ -591,8 +608,8 @@ func (b *Daemon) handleState(w http.ResponseWriter, req *http.Request) {
 			SnapshotsStale:     dv.SnapshotsStale,
 			BackupStale:        dv.BackupStale,
 			Unreplicated:       dv.Unreplicated,
-			LocalSnapshots:     dv.LocalCount,
-			RemoteSnapshots:    dv.RemoteCount,
+			LocalSnapshots:     countPtr(dv.LocalKnown, dv.LocalCount),
+			RemoteSnapshots:    countPtr(dv.RemoteKnown, dv.RemoteCount),
 			LocalUsedBytes:     dv.LocalUsed,
 			RemoteUsedBytes:    dv.RemoteUsed,
 			LocalOwnBytes:      dv.LocalOwn,
@@ -606,9 +623,9 @@ func (b *Daemon) handleState(w http.ResponseWriter, req *http.Request) {
 		for _, row := range dv.Fulfillment {
 			out.Fulfillment = append(out.Fulfillment, apiFulfillment{
 				Periodicity: row.Periodicity,
-				LocalHave:   row.LocalHave,
+				LocalHave:   countPtr(dv.LocalKnown, row.LocalHave),
 				LocalWant:   row.LocalWant,
-				RemoteHave:  row.RemoteHave,
+				RemoteHave:  countPtr(dv.RemoteKnown, row.RemoteHave),
 				RemoteWant:  row.RemoteWant,
 			})
 		}

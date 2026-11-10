@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -26,8 +27,16 @@ import (
 )
 
 type Daemon struct {
-	conf       *atom.Atom[*config.Config]
-	state      *atom.Atom[*model.Model]
+	conf  *atom.Atom[*config.Config]
+	state *atom.Atom[*model.Model]
+	// localMu makes local reads take turns, each published before the
+	// next begins, so the model's local side is always the read that
+	// started last: a read that began before a snapshot can never
+	// publish over one that began after it. The cycle's listing, a
+	// snapshot request's refresh, and a dataset's pre-sync refresh all
+	// hold it; remote reads do not need it, since nothing else writes
+	// the remote side while the cycle lists it.
+	localMu    sync.Mutex
 	globalLogs *logger.Logger
 	activity   *status.Tracker
 	env        env.Interface
@@ -106,7 +115,7 @@ func New(opts Options) *Daemon {
 
 	b := &Daemon{
 		conf:       atom.New(opts.Config),
-		state:      atom.New[*model.Model](nil),
+		state:      atom.New(model.New()), // nothing read yet, which the dashboard says
 		globalLogs: logger.New("global"),
 		env:        e,
 		dryrun:     opts.Dryrun,
@@ -470,31 +479,34 @@ func (b *Daemon) Run(ctx context.Context) error {
 	}
 }
 
+// refreshAllDatasetsAndPlans reads both sides from ZFS and publishes
+// them, planned. The inventory is rebuilt from ZFS every cycle — state
+// that reloads from reality is the point — but each side is published
+// only once it has been read whole. Publishing the model as it filled
+// showed every dataset with its local side and without its remote for
+// the minute thor's remote takes to list over ssh, which the dashboard
+// could only read as every dataset never having been replicated.
+//
+// So the local side goes up when its listing returns, beside the
+// remote as it was last read (KeepRemote): unknown after a start, and
+// on every cycle after, the previous cycle's inventory, which stands
+// until the new listing replaces it. A remote listing that fails
+// leaves it standing: an unreachable remote is not an empty one. When
+// the remote listing returns, it replaces the remote side of the model
+// as published by then, not of the one the cycle began with, so a
+// local read that landed meanwhile — a snapshot's — stands. A local
+// listing that fails publishes nothing, and the model before it stands.
 func (b *Daemon) refreshAllDatasetsAndPlans(ctx context.Context) error {
-	b.state.Reset(model.New())
-
-	// First, discover and refresh all datasets
-	localDatasets, err := b.env.LocalDatasets(b.globalLogs)
+	local, err := b.readAndPublishLocal(ctx)
 	if err != nil {
-		return fmt.Errorf("getting local datasets: %s", err)
-	}
-	for _, datasetInfo := range localDatasets {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-
-		snapshots, err := b.env.LocalSnapshots(b.globalLogs, datasetInfo.Name)
-		if err != nil {
-			return fmt.Errorf("getting snapshots for '%s': %w", datasetInfo.Name, err)
-		}
-
-		b.state.Swap(model.AddLocalDataset(datasetInfo.Name, snapshots, datasetInfo.Size))
+		return err
 	}
 
 	remoteDatasets, err := b.env.RemoteDatasets(b.globalLogs)
 	if err != nil {
 		return fmt.Errorf("getting remote datasets: %w", err)
 	}
+	remote := model.New()
 	for _, datasetInfo := range remoteDatasets {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -505,62 +517,90 @@ func (b *Daemon) refreshAllDatasetsAndPlans(ctx context.Context) error {
 			return fmt.Errorf("getting remote snapshots for '%s': %w", datasetInfo.Name, err)
 		}
 
-		b.state.Swap(model.AddRemoteDataset(datasetInfo.Name, snapshots, datasetInfo.Size))
+		remote = model.AddRemoteDataset(datasetInfo.Name, snapshots, datasetInfo.Size)(remote)
 	}
 
-	// Then generate plans for all datasets to show in UI
-	b.generatePlansForAllDatasets(ctx)
-
+	// The model holds what the local listing named, what the remote
+	// listing named, and nothing else: a dataset carried only for its
+	// remote side, which the remote no longer has, is gone.
+	named := append(local.ListDatasets(), remote.ListDatasets()...)
+	b.state.Swap(func(cur *model.Model) *model.Model {
+		return b.planned(model.Listed(model.Local)(model.ReplaceRemote(remote)(model.Retain(named...)(cur))))
+	})
 	b.notifyStateChange()
 	return nil
 }
 
-func (b *Daemon) generatePlansForAllDatasets(ctx context.Context) {
-	state := b.state.Deref()
-	for _, dsName := range state.ListDatasets() {
+// readAndPublishLocal lists the local side whole and publishes it
+// beside the remote as last read, returning what it read. It holds
+// localMu throughout, so no other local read lands between this one
+// and its publication.
+func (b *Daemon) readAndPublishLocal(ctx context.Context) (*model.Model, error) {
+	b.localMu.Lock()
+	defer b.localMu.Unlock()
+
+	local := model.New()
+	localDatasets, err := b.env.LocalDatasets(b.globalLogs)
+	if err != nil {
+		return nil, fmt.Errorf("getting local datasets: %s", err)
+	}
+	for _, datasetInfo := range localDatasets {
 		if err := ctx.Err(); err != nil {
-			return
+			return nil, err
 		}
 
-		ds := state.GetDataset(dsName)
-		if ds == nil {
-			continue
+		snapshots, err := b.env.LocalSnapshots(b.globalLogs, datasetInfo.Name)
+		if err != nil {
+			return nil, fmt.Errorf("getting snapshots for '%s': %w", datasetInfo.Name, err)
 		}
 
-		// Generate goal and plan for this dataset
-		if ds.Current == nil {
+		local = model.AddLocalDataset(datasetInfo.Name, snapshots, datasetInfo.Size)(local)
+	}
+
+	b.state.Swap(func(prev *model.Model) *model.Model {
+		return b.planned(model.Listed(model.Local)(model.KeepRemote(prev)(local)))
+	})
+	b.notifyStateChange()
+	return local, nil
+}
+
+// generatePlansForAllDatasets replans the published model against the
+// config in force, so the dashboard shows a config change's effect
+// before the next cycle executes it.
+func (b *Daemon) generatePlansForAllDatasets() {
+	b.state.Swap(b.planned)
+}
+
+// planned returns m with each dataset's target and plan computed under
+// the current config, for the dashboard: the sync loop replans each
+// dataset from a fresh read before executing anything. A dataset with a
+// side not yet read gets no plan — against an inventory nobody has
+// looked at, the planner would queue a transfer of everything.
+func (b *Daemon) planned(m *model.Model) *model.Model {
+	conf := b.conf.Deref()
+	out := m.Clone()
+	for _, name := range out.ListDatasets() {
+		ds := out.GetDataset(name)
+		if ds.Current == nil || !ds.LocalKnown || !ds.RemoteKnown {
+			ds.Target, ds.Plan = nil, nil
 			continue
 		}
-		localPolicy, remotePolicy, keepBaseline := b.conf.Deref().PolicyFor(dsName.Path())
+		localPolicy, remotePolicy, keepBaseline := conf.PolicyFor(name.Path())
 		target := model.CalculateTargetInventory(ds.Current, localPolicy, remotePolicy, keepBaseline)
 		plan, err := model.CalculateTransitionPlan(ds.Current, target)
 		if err != nil {
-			// Log error but continue with other datasets
-			b.globalLogs.Printf("error generating plan for '%s': %s", dsName, err)
+			b.globalLogs.Printf("error generating plan for '%s': %s", name, err)
 			continue
 		}
-
-		// Update the dataset with goal and plan
-		b.state.Swap(func(state *model.Model) *model.Model {
-			currentDS := state.GetDataset(dsName)
-			if currentDS == nil {
-				return state
-			}
-			updatedDS := currentDS.Clone()
-			updatedDS.Target = target
-			updatedDS.Plan = plan
-			return model.ReplaceDataset(dsName, updatedDS)(state)
-		})
+		ds.Target, ds.Plan = target, plan
 	}
+	return out
 }
 
 func (b *Daemon) refreshDataset(ctx context.Context, logger *logger.Logger, dataset model.DatasetName) error {
-	// Refresh *local snapshots
-	localSnapshots, err := b.env.LocalSnapshots(logger, dataset)
-	if err != nil {
-		return fmt.Errorf("getting local snapshots for '%s': %w", dataset, err)
+	if err := b.refreshLocal(logger, dataset); err != nil {
+		return err
 	}
-	b.state.Swap(model.AddLocalDataset(dataset, localSnapshots, nil))
 
 	// Refresh remote snapshots
 	remoteSnapshots, err := b.env.RemoteSnapshots(logger, dataset)
@@ -573,6 +613,19 @@ func (b *Daemon) refreshDataset(ctx context.Context, logger *logger.Logger, data
 	}
 	b.state.Swap(model.AddRemoteDataset(dataset, remoteSnapshots, nil))
 
+	return nil
+}
+
+// refreshLocal reads one dataset's local snapshots and publishes them,
+// under localMu so a read that began earlier cannot land over it.
+func (b *Daemon) refreshLocal(logger *logger.Logger, dataset model.DatasetName) error {
+	b.localMu.Lock()
+	defer b.localMu.Unlock()
+	localSnapshots, err := b.env.LocalSnapshots(logger, dataset)
+	if err != nil {
+		return fmt.Errorf("getting local snapshots for '%s': %w", dataset, err)
+	}
+	b.state.Swap(model.AddLocalDataset(dataset, localSnapshots, nil))
 	return nil
 }
 
@@ -1036,8 +1089,13 @@ func (b *Daemon) Plan(ctx context.Context, dataset model.DatasetName, w io.Write
 	return nil
 }
 
-// RefreshLocalSnapshots refreshes local snapshot information for all datasets in memory
+// RefreshLocalSnapshots refreshes local snapshot information for all
+// datasets in memory. It takes its turn with the other local reads
+// (localMu), waiting out a cycle's local listing — seconds — rather
+// than racing it.
 func (b *Daemon) RefreshLocalSnapshots(ctx context.Context, logger *logger.Logger) error {
+	b.localMu.Lock()
+	defer b.localMu.Unlock()
 	// Directly update state by refreshing snapshots for all datasets
 	// This is concurrency-safe due to the atom's RWMutex
 	b.state.Swap(func(currentState *model.Model) *model.Model {

@@ -3,6 +3,7 @@ package daemon
 import (
 	"compress/gzip"
 	"encoding/json/v2"
+	"html"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -530,8 +531,10 @@ func TestPageShowsStaleAndUnreplicated(t *testing.T) {
 	staleNew := testSnap("daily-new", time.Now().Add(-time.Hour).Unix())
 	b.state.Swap(model.AddLocalDataset("/stale", []*model.Snapshot{staleOld, staleNew}, nil))
 	b.state.Swap(model.AddRemoteDataset("/stale", []*model.Snapshot{staleOld}, nil))
-	// /new: never replicated.
+	// /new: never replicated — the remote has been read, and holds
+	// nothing of it.
 	b.state.Swap(model.AddLocalDataset("/new", []*model.Snapshot{staleNew}, nil))
+	b.state.Swap(model.AddRemoteDataset("/new", nil, nil))
 	h := b.Handler()
 
 	body := do(t, h, "GET", "/global", "").Body.String()
@@ -550,6 +553,92 @@ func TestPageShowsStaleAndUnreplicated(t *testing.T) {
 	body = do(t, h, "GET", "/new", "").Body.String()
 	if !strings.Contains(body, "never been replicated") {
 		t.Error("expected the unreplicated recovery sentence")
+	}
+}
+
+// TestPageSaysWhatItHasNotRead: the pages in the minutes after a start.
+// Before any listing returns, and then while the remote is listed,
+// the overview says it does not know — never all clear, and never
+// "never replicated" — and every fact about an unread side reads "not
+// read" rather than "never", zero, or empty.
+func TestPageSaysWhatItHasNotRead(t *testing.T) {
+	local, remote := steadyStateExecutors()
+	b, _ := newAPITestDaemon(t, local, remote)
+	h := b.Handler()
+
+	// Pages escape apostrophes; the assertions read the text.
+	page := func(target string) string {
+		return html.UnescapeString(do(t, h, "GET", target, "").Body.String())
+	}
+
+	// Nothing read.
+	body := page("/global")
+	for _, want := range []string{"UNKNOWN", "nothing read yet", "Not known yet: nothing has been read"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("before any listing: expected the overview to contain %q", want)
+		}
+	}
+	for _, unwanted := range []string{"All clear", "0 datasets"} {
+		if strings.Contains(body, unwanted) {
+			t.Errorf("before any listing: the overview says %q", unwanted)
+		}
+	}
+	if body := page("/foo"); strings.Contains(body, "Dataset not found") {
+		t.Error("before any listing: a dataset page says the dataset does not exist")
+	}
+
+	// The local side read, the remote not yet.
+	fresh := testSnap("daily-a", time.Now().Add(-time.Hour).Unix())
+	b.state.Reset(model.Listed(model.Local)(model.AddLocalDataset("/foo", []*model.Snapshot{fresh}, nil)(model.New())))
+	body = page("/global")
+	for _, want := range []string{"UNKNOWN", "remote not read yet", "the remote's snapshots haven't been read", "not read", "chip-unknown"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("while the remote is read: expected the overview to contain %q", want)
+		}
+	}
+	for _, unwanted := range []string{"All clear", "never replicated", "FAILING", ">never<", `class="issue `} {
+		if strings.Contains(body, unwanted) {
+			t.Errorf("while the remote is read: the overview says %q", unwanted)
+		}
+	}
+
+	// A dataset the remote may hold alone is not "not found" before the
+	// remote has been listed.
+	if body := page("/archived"); strings.Contains(body, "Dataset not found") || !strings.Contains(body, "Not known yet") {
+		t.Error("while the remote is read: a dataset page says a dataset the remote may hold does not exist")
+	}
+
+	body = page("/foo")
+	if !strings.Contains(body, "Not known yet: this dataset's remote snapshots haven't been read") {
+		t.Error("expected the dataset page's recovery sentence to say the remote is unread")
+	}
+	if strings.Contains(body, "never been replicated") {
+		t.Error("the dataset page says a dataset whose remote is unread was never replicated")
+	}
+
+	// /api/state says the same: the remote unknown, its count null.
+	var resp struct {
+		Verdict  string `json:"verdict"`
+		Datasets []struct {
+			Health          string `json:"health"`
+			LocalKnown      bool   `json:"localKnown"`
+			RemoteKnown     bool   `json:"remoteKnown"`
+			LocalSnapshots  *int   `json:"localSnapshots"`
+			RemoteSnapshots *int   `json:"remoteSnapshots"`
+			Unreplicated    bool   `json:"unreplicated"`
+		} `json:"datasets"`
+	}
+	w := do(t, h, "GET", "/api/state", "")
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decoding response: %v\n%s", err, w.Body)
+	}
+	if resp.Verdict != "unknown" || len(resp.Datasets) != 1 {
+		t.Fatalf("expected an unknown verdict over /foo, got %s", w.Body)
+	}
+	ds := resp.Datasets[0]
+	if ds.Health != "unknown" || !ds.LocalKnown || ds.RemoteKnown || ds.Unreplicated ||
+		ds.LocalSnapshots == nil || *ds.LocalSnapshots != 1 || ds.RemoteSnapshots != nil {
+		t.Errorf("expected /foo unknown with its remote unread and uncounted, got %s", w.Body)
 	}
 }
 

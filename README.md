@@ -16,8 +16,11 @@ Key features:
   leads with a typed issue list — failing syncs, never-replicated or
   stale backups, stalled snapshotting, cycle failures, an overdue
   snitch, forgotten pauses — each with severity, error detail, and its
-  remedy button inline, or an explicit "all clear". A status strip
-  shows the system verdict (ok / attention / failing / paused) and a
+  remedy button inline, or an explicit "all clear". What has not been
+  read yet — the minute after a start while the remote is listed over
+  ssh, or a start with the remote unreachable — reads as unknown, never
+  as all clear and never as "never replicated". A status strip shows
+  the system verdict (ok / attention / failing / unknown / paused) and a
   live activity line (cycle position "dataset 4 of 12", plan step,
   transfer progress with throughput and ETA, next-cycle countdown).
   Dataset pages answer "what could I recover?" in plain language and
@@ -452,7 +455,7 @@ only letters, digits, and `_`.
 | GET    | `/api/config`               | The raw config file (TOML). |
 | POST   | `/api/config/preview`       | Validate a config (request body) and report its per-dataset impact without writing. A change to a setting only the operator may edit is refused (403). |
 | PUT    | `/api/config`               | Validate, atomically save, and hot-apply a config (request body). A change to a setting only the operator may edit is refused (403). |
-| GET    | `/api/state`                | JSON state summary, serialized from the same derivation layer the HTML renders: system verdict and issues, activity with cycle progress, per-dataset health/ages/fulfillment, cycle history. A raw cycle's `Failures` is a list of `{"Dataset", "Error"}` objects, each error as ssh or zfs wrote it on stderr — the same text the journal carries. |
+| GET    | `/api/state`                | JSON state summary, serialized from the same derivation layer the HTML renders: system verdict and issues, activity with cycle progress, per-dataset health/ages/fulfillment (with whether each side has been read; a side that has not has null counts), cycle history. A raw cycle's `Failures` is a list of `{"Dataset", "Error"}` objects, each error as ssh or zfs wrote it on stderr — the same text the journal carries. |
 
 Pause semantics: a paused dataset (or a globally paused daemon) is still
 refreshed and replanned every cycle — the dashboard keeps showing what

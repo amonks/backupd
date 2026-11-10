@@ -47,6 +47,12 @@ templ mutedDash() {
 	<span class="muted">—</span>
 }
 
+// notRead stands in for a fact about a side whose snapshots have not
+// been read: not "never", not zero — not known.
+templ notRead() {
+	<span class="muted" title="Not read yet">not read</span>
+}
+
 templ pendingCell(dv view.Dataset) {
 	{{ s := dv.PendingSummary() }}
 	if s != "" {
@@ -60,10 +66,14 @@ templ pendingCell(dv view.Dataset) {
 // its own — the figure the column sums to the header — with the
 // descendants' share named separately where there is one, so the same
 // bytes never appear twice in a column.
-templ sizeCell(count int, own, beneath int64) {
-	{ fmt.Sprint(count) } · { fmtBytes(own) }
-	if beneath > 0 {
-		<span class="muted">· { fmtBytes(beneath) } beneath</span>
+templ sizeCell(known bool, count int, own, beneath int64) {
+	if !known {
+		@notRead()
+	} else {
+		{ fmt.Sprint(count) } · { fmtBytes(own) }
+		if beneath > 0 {
+			<span class="muted">· { fmtBytes(beneath) } beneath</span>
+		}
 	}
 }
 
@@ -111,9 +121,11 @@ templ headerTitle(label, title string) {
 
 // presenceCell renders one location cell of the snapshot grid: present
 // (✓), present but scheduled for deletion (orange ✓), missing but
-// scheduled for transfer (✗), or not wanted (-).
+// scheduled for transfer (✗), not read yet (?), or not wanted (-).
 templ presenceCell(p snapPresence) {
 	switch p {
+		case presenceUnread:
+			<span class="muted" title="Not read yet">?</span>
 		case presencePresent:
 			<span class="snapshot-present" title="Present">✓</span>
 		case presenceDoomed:

@@ -67,14 +67,25 @@ func genConf(t *rapid.T) *config.Config {
 
 func genInput(t *rapid.T) Input {
 	names := []model.DatasetName{"/a", "/b", "/c"}
-	count := rapid.IntRange(1, 3).Draw(t, "datasets")
+	// Zero datasets is a model nobody has read yet: a listing always
+	// names the root.
+	count := rapid.IntRange(0, 3).Draw(t, "datasets")
 	state := model.New()
 	hist := history.New()
 	for _, name := range names[:count] {
-		local := genSnaps(t, "local"+string(name), name)
-		state = model.AddLocalDataset(name, local, nil)(state)
-		remote := genSnaps(t, "remote"+string(name), name)
-		state = model.AddRemoteDataset(name, remote, nil)(state)
+		// Either side may be unread — the minute after a start while
+		// the remote is listed, or a start with it unreachable — but a
+		// dataset is in the model because some side was read.
+		readLocal := rapid.Bool().Draw(t, "readLocal"+string(name))
+		readRemote := !readLocal || rapid.Bool().Draw(t, "readRemote"+string(name))
+		if readLocal {
+			local := genSnaps(t, "local"+string(name), name)
+			state = model.AddLocalDataset(name, local, nil)(state)
+		}
+		if readRemote {
+			remote := genSnaps(t, "remote"+string(name), name)
+			state = model.AddRemoteDataset(name, remote, nil)(state)
+		}
 
 		// Arbitrary run history: maybe a success, maybe a failure, in
 		// either order.
@@ -92,7 +103,7 @@ func genInput(t *rapid.T) Input {
 		status.Starting, status.Refreshing, status.Syncing, status.Idle, status.BackingOff,
 	}).Draw(t, "phase")
 	activity := status.Activity{Phase: phase}
-	if phase == status.Syncing {
+	if phase == status.Syncing && count > 0 {
 		activity.Dataset = rapid.SampledFrom(names[:count]).Draw(t, "syncing")
 	}
 	if phase == status.BackingOff {
@@ -135,7 +146,10 @@ func TestRapidAssuranceFromInventory(t *testing.T) {
 			m := in.State.GetDataset(ds.Name)
 			local, remote := m.Current.Local, m.Current.Remote
 
-			if ds.HasLocal != (local.Len() > 0) || ds.HasRemote != (remote.Len() > 0) {
+			if ds.LocalKnown != m.LocalKnown || ds.RemoteKnown != m.RemoteKnown {
+				t.Fatalf("%s: known flags disagree with the model", ds.Name)
+			}
+			if ds.HasLocal != (m.LocalKnown && local.Len() > 0) || ds.HasRemote != (m.RemoteKnown && remote.Len() > 0) {
 				t.Fatalf("%s: presence flags disagree with inventory", ds.Name)
 			}
 			if ds.HasLocal && ds.Snapshotted != in.Now.Sub(local.Newest().Time()) {
@@ -154,7 +168,8 @@ func TestRapidAssuranceFromInventory(t *testing.T) {
 					t.Fatalf("%s: lag %s != backedUp-snapshotted", ds.Name, ds.Lag)
 				}
 			}
-			if ds.Unreplicated != (ds.HasLocal && !ds.HasRemote) {
+			// Absence is asserted only of a side that has been read.
+			if ds.Unreplicated != (ds.HasLocal && ds.RemoteKnown && !ds.HasRemote) {
 				t.Fatalf("%s: unreplicated flag wrong", ds.Name)
 			}
 
@@ -167,7 +182,7 @@ func TestRapidAssuranceFromInventory(t *testing.T) {
 				t.Fatalf("%s: cadences %s/%s != policy cadences %s/%s",
 					ds.Name, ds.Cadence, ds.BackupCadence, cadence, backupCadence)
 			}
-			wantSnapStale := cadence > 0 && (!ds.HasLocal || ds.Snapshotted > StaleFactor*cadence)
+			wantSnapStale := cadence > 0 && ds.LocalKnown && (!ds.HasLocal || ds.Snapshotted > StaleFactor*cadence)
 			if ds.SnapshotsStale != wantSnapStale {
 				t.Fatalf("%s: snapshot staleness %v, want %v", ds.Name, ds.SnapshotsStale, wantSnapStale)
 			}
@@ -238,6 +253,8 @@ func TestRapidIssuesIffConditions(t *testing.T) {
 				want = HealthFailing
 			case ds.Unreplicated || ds.BackupStale || ds.SnapshotsStale:
 				want = HealthAtRisk
+			case !ds.LocalKnown || !ds.RemoteKnown:
+				want = HealthUnknown
 			case ds.Paused:
 				want = HealthPaused
 			case ds.PendingDeletions+ds.PendingTransfers > 0:
@@ -257,17 +274,25 @@ func TestRapidIssuesIffConditions(t *testing.T) {
 			}
 		}
 
-		// The system verdict follows from the issues.
 		worst := Info
-		alarming := false
 		for _, issue := range sys.Issues {
 			if issue.Severity > worst {
 				worst = issue.Severity
 			}
-			if issue.Severity != Info {
-				alarming = true
+		}
+		unknown := 0
+		for _, ds := range sys.Datasets {
+			if !ds.LocalKnown || !ds.RemoteKnown {
+				unknown++
 			}
 		}
+		if sys.Unknown != unknown {
+			t.Fatalf("unknown count %d, want %d", sys.Unknown, unknown)
+		}
+
+		// The system verdict follows from the issues, and from what has
+		// not been read when nothing alarms: a bad thing that is true
+		// outranks not knowing, and not knowing outranks all clear.
 		var want Verdict
 		switch {
 		case in.Conf.Paused:
@@ -276,13 +301,15 @@ func TestRapidIssuesIffConditions(t *testing.T) {
 			want = SystemFailing
 		case worst == Warning:
 			want = SystemAttention
+		case unknown > 0 || len(sys.Datasets) == 0:
+			want = SystemUnknown
 		default:
 			want = SystemOK
 		}
 		if sys.Verdict != want {
 			t.Fatalf("verdict %s, want %s (issues %+v)", sys.Verdict, want, sys.Issues)
 		}
-		if (sys.Reason == "") == (alarming || in.Conf.Paused) {
+		if (sys.Reason == "") != (sys.Verdict == SystemOK) {
 			t.Fatalf("reason %q inconsistent with verdict %s", sys.Reason, sys.Verdict)
 		}
 	})

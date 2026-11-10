@@ -30,6 +30,15 @@ func ageSortValue(has bool, age time.Duration) string {
 	return fmt.Sprint(int64(age.Seconds()))
 }
 
+// sizeSortValue sorts a side nobody has read with the absent values,
+// not as zero bytes.
+func sizeSortValue(known bool, own int64) string {
+	if !known {
+		return ""
+	}
+	return fmt.Sprint(own)
+}
+
 // healthFilterValue gives every health its own facet entry. The
 // stable value is the operator-facing label, not the CSS class, so a
 // bookmarked filter URL is not coupled to a stylesheet detail.
@@ -65,7 +74,7 @@ func fleetGrid(base string, datasets []view.Dataset) templ.Component {
 				SearchText:   func(dv view.Dataset) string { return dv.Health.String() + " " + dv.Reason },
 				SortKind:     datagrid.SortNumber,
 				Align:        "start",
-				SortValue:    func(dv view.Dataset) string { return fmt.Sprint(int(dv.Health)) },
+				SortValue:    func(dv view.Dataset) string { return fmt.Sprint(dv.Health.Rank()) },
 				FilterValues: func(dv view.Dataset) []datagrid.FilterValue { return healthFilterValue(dv.Health) },
 				FilterUI:     datagrid.FilterMenu,
 				Cell:         func(dv view.Dataset) templ.Component { return healthChip(dv) },
@@ -74,6 +83,9 @@ func fleetGrid(base string, datasets []view.Dataset) templ.Component {
 				Key: "snapshotted", Label: "snapshotted",
 				Header: headerTitle("snapshotted", "Age of the newest local snapshot"),
 				Text: func(dv view.Dataset) string {
+					if !dv.LocalKnown {
+						return "not read"
+					}
 					if !dv.HasLocal {
 						return "no snapshots"
 					}
@@ -82,7 +94,7 @@ func fleetGrid(base string, datasets []view.Dataset) templ.Component {
 				SortKind:  datagrid.SortNumber,
 				SortValue: func(dv view.Dataset) string { return ageSortValue(dv.HasLocal, dv.Snapshotted) },
 				Cell: func(dv view.Dataset) templ.Component {
-					return ageCell(dv.HasLocal, dv.Snapshotted, dv.SnapshotsStale, "no snapshots")
+					return ageCell(dv.LocalKnown, dv.HasLocal, dv.Snapshotted, dv.SnapshotsStale, "no snapshots")
 				},
 				FilterUI: datagrid.FilterNone,
 				Disabled: datagrid.FeatureSearch,
@@ -91,6 +103,9 @@ func fleetGrid(base string, datasets []view.Dataset) templ.Component {
 				Key: "backedup", Label: "backed up",
 				Header: headerTitle("backed up", "Age of the newest remote snapshot — the recovery point"),
 				Text: func(dv view.Dataset) string {
+					if !dv.RemoteKnown {
+						return "not read"
+					}
 					if !dv.HasRemote {
 						return "never"
 					}
@@ -99,7 +114,7 @@ func fleetGrid(base string, datasets []view.Dataset) templ.Component {
 				SortKind:  datagrid.SortNumber,
 				SortValue: func(dv view.Dataset) string { return ageSortValue(dv.HasRemote, dv.BackedUp) },
 				Cell: func(dv view.Dataset) templ.Component {
-					return ageCell(dv.HasRemote, dv.BackedUp, dv.BackupStale, "never")
+					return ageCell(dv.RemoteKnown, dv.HasRemote, dv.BackedUp, dv.BackupStale, "never")
 				},
 				FilterUI: datagrid.FilterNone,
 				Disabled: datagrid.FeatureSearch,
@@ -122,24 +137,32 @@ func fleetGrid(base string, datasets []view.Dataset) templ.Component {
 			{
 				Key: "local", Label: "local",
 				Text: func(dv view.Dataset) string {
+					if !dv.LocalKnown {
+						return "not read"
+					}
 					return fmt.Sprintf("%d · %s", dv.LocalCount, fmtBytes(dv.LocalOwn))
 				},
-				Cell:      func(dv view.Dataset) templ.Component { return sizeCell(dv.LocalCount, dv.LocalOwn, dv.LocalBeneath()) },
+				Cell: func(dv view.Dataset) templ.Component {
+					return sizeCell(dv.LocalKnown, dv.LocalCount, dv.LocalOwn, dv.LocalBeneath())
+				},
 				SortKind:  datagrid.SortNumber,
-				SortValue: func(dv view.Dataset) string { return fmt.Sprint(dv.LocalOwn) },
+				SortValue: func(dv view.Dataset) string { return sizeSortValue(dv.LocalKnown, dv.LocalOwn) },
 				FilterUI:  datagrid.FilterNone,
 				Disabled:  datagrid.FeatureSearch,
 			},
 			{
 				Key: "remote", Label: "remote",
 				Text: func(dv view.Dataset) string {
+					if !dv.RemoteKnown {
+						return "not read"
+					}
 					return fmt.Sprintf("%d · %s", dv.RemoteCount, fmtBytes(dv.RemoteOwn))
 				},
 				Cell: func(dv view.Dataset) templ.Component {
-					return sizeCell(dv.RemoteCount, dv.RemoteOwn, dv.RemoteBeneath())
+					return sizeCell(dv.RemoteKnown, dv.RemoteCount, dv.RemoteOwn, dv.RemoteBeneath())
 				},
 				SortKind:  datagrid.SortNumber,
-				SortValue: func(dv view.Dataset) string { return fmt.Sprint(dv.RemoteOwn) },
+				SortValue: func(dv view.Dataset) string { return sizeSortValue(dv.RemoteKnown, dv.RemoteOwn) },
 				FilterUI:  datagrid.FilterNone,
 				Disabled:  datagrid.FeatureSearch,
 			},
@@ -343,10 +366,15 @@ var (
 	presenceDoomed  = snapPresence{"doomed", "scheduled for deletion"}
 	presenceQueued  = snapPresence{"queued", "scheduled for transfer"}
 	presenceAbsent  = snapPresence{"absent", "absent"}
+	// presenceUnread: the side has not been read, so whether it holds
+	// the snapshot is not known.
+	presenceUnread = snapPresence{"unread", "not read yet"}
 )
 
-func presenceOf(current, inTarget, hasTarget bool) snapPresence {
+func presenceOf(known, current, inTarget, hasTarget bool) snapPresence {
 	switch {
+	case !known:
+		return presenceUnread
 	case current && hasTarget && !inTarget:
 		return presenceDoomed
 	case current:
@@ -375,8 +403,8 @@ func snapshotRowsFor(ds *model.Dataset) []snapRow {
 	for snap := range ds.Current.Local.Union(ds.Current.Remote).AllDesc() {
 		out = append(out, snapRow{
 			Snap:   snap,
-			Local:  presenceOf(ds.Current.Local.Has(snap), targetHas(ds.Target, model.Local, snap), hasTarget),
-			Remote: presenceOf(ds.Current.Remote.Has(snap), targetHas(ds.Target, model.Remote, snap), hasTarget),
+			Local:  presenceOf(ds.LocalKnown, ds.Current.Local.Has(snap), targetHas(ds.Target, model.Local, snap), hasTarget),
+			Remote: presenceOf(ds.RemoteKnown, ds.Current.Remote.Has(snap), targetHas(ds.Target, model.Remote, snap), hasTarget),
 		})
 	}
 	return out
