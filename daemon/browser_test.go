@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json/v2"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
@@ -15,9 +16,11 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/a-h/templ"
 	"github.com/chromedp/cdproto/emulation"
 	"monks.co/backupd/history"
 	"monks.co/pkg/browsertest"
+	"monks.co/pkg/csp"
 )
 
 // The narrow and touch layouts are expressed entirely in CSS, and the
@@ -34,6 +37,17 @@ import (
 // browser suite in the fleet. It is published, so the mirror resolves
 // it with no workspace to fall back on, as it already does for
 // chromedp — which it carries anyway, under monks.co/pkg/datagrid.
+
+// nonced stands where the dashboard's host does — apps/backupd's
+// serve.Mux, in this fleet — putting the request's CSP nonce (which the
+// browser's policy names; pkg/browsertest sends it as the proxy does)
+// in templ's nonce slot, where every script the dashboard renders reads
+// it. Handler leaves that to its host, as it leaves authorization.
+func nonced(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h.ServeHTTP(w, r.WithContext(templ.WithNonce(r.Context(), r.Header.Get(csp.NonceHeader))))
+	})
+}
 
 // phone is the viewport every assertion here is made at: a small
 // current handset. Mobile and Touch are what put `hover: none` in
@@ -133,7 +147,7 @@ const fitProbe = `(() => {
 // fixture never reaches.
 func TestBrowserPhoneLayout(t *testing.T) {
 	b := demoDaemon(t)
-	server := httptest.NewServer(b.Handler())
+	server := httptest.NewServer(nonced(b.Handler()))
 	t.Cleanup(server.Close)
 
 	ctx := browsertest.NewBrowser(t)
@@ -178,7 +192,7 @@ func TestBrowserPhoneLayout(t *testing.T) {
 // cannot control the separate browser process.
 func TestBrowserCountdownTicksInTheServersWords(t *testing.T) {
 	b := demoDaemon(t)
-	server := httptest.NewServer(b.Handler())
+	server := httptest.NewServer(nonced(b.Handler()))
 	t.Cleanup(server.Close)
 	ctx := browsertest.NewBrowser(t)
 	browsertest.CaptureConsole(t, ctx)
@@ -272,7 +286,7 @@ func TestBrowserHoversReadInTheViewersZone(t *testing.T) {
 	b := demoDaemon(t)
 	start := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
 	b.history.RecordCycle(history.Cycle{StartedAt: start, StoppedAt: start.Add(3 * time.Second), OK: true, Datasets: 1})
-	server := httptest.NewServer(b.Handler())
+	server := httptest.NewServer(nonced(b.Handler()))
 	t.Cleanup(server.Close)
 
 	ctx := browsertest.NewBrowser(t)
