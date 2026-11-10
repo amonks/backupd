@@ -460,9 +460,8 @@ func TestEveryCustomPropertyIsDefined(t *testing.T) {
 }
 
 // The dashboard's script carries the request's CSP nonce when the
-// context has one (serve.Mux stamps the proxy's), so the deployed app
-// isn't on the proxy's inline work-list and keeps its behavior under
-// enforcement.
+// context has one (serve.Mux stamps the proxy's), so the deployed
+// app's script runs under the proxy's script policy.
 func TestScriptCarriesTheNonce(t *testing.T) {
 	var b strings.Builder
 	if err := script().Render(templ.WithNonce(context.Background(), "n0nce"), &b); err != nil {
