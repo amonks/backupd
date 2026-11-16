@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -17,6 +18,7 @@ import (
 
 	"monks.co/backupd/config"
 	"monks.co/backupd/env"
+	"monks.co/backupd/history"
 	"monks.co/backupd/logger"
 	"monks.co/backupd/model"
 	"monks.co/backupd/sim"
@@ -861,8 +863,8 @@ func TestSimNestedChildWaitsWhenParentPolicyRetainsNothing(t *testing.T) {
 
 // TestSimConvergence is the end-to-end property: for arbitrary
 // pool states and policies, a few real sync cycles land every dataset
-// on the planner's fixed point, after which a further cycle performs no
-// mutations at all.
+// on the planner's fixed point, every divergent snapshot discarded and
+// journaled, after which a further cycle performs no mutations at all.
 func TestSimConvergence(t *testing.T) {
 	hegel.Test(t, func(t *hegel.T) {
 		s := sim.New()
@@ -900,6 +902,14 @@ func TestSimConvergence(t *testing.T) {
 					remote = model.NewSnapshots()
 				}
 			}
+			// Half the time local has a snapshot taken since the last
+			// cycle, newer than anything the remote holds: the steady
+			// state, and the one in which a divergent tip wedges the
+			// dataset, since there is always something to send past it.
+			if hegel.Draw(t, hegel.Booleans()) {
+				typ := hegel.Draw(t, hegel.SampledFrom([]string{"hourly", "daily", "weekly"}))
+				local.Add(simSnap(name, typ+"-t20", 20*3600))
+			}
 			s.SeedLocal(name, slices.Collect(local.All())...)
 			if remote.Len() > 0 {
 				s.SeedRemote(name, slices.Collect(remote.All())...)
@@ -935,15 +945,41 @@ func TestSimConvergesPruningSameSecondSnapshots(t *testing.T) {
 }
 
 // checkSimConverges runs the real daemon over s for three cycles and
-// asserts every dataset sits on the planner's fixed point, that one
-// more cycle mutates nothing, and that the dashboard agrees.
+// asserts every dataset sits on the planner's fixed point, that the
+// divergent snapshots it started with were discarded and journaled,
+// that one more cycle mutates nothing, and that the dashboard agrees.
 func checkSimConverges(t testing.TB, s *sim.Sim, conf *config.Config, datasets ...model.DatasetName) {
 	t.Helper()
+	divergent := map[model.DatasetName][]*model.Snapshot{}
+	for _, name := range datasets {
+		divergent[name] = divergentIn(s.Inventory(name))
+	}
+
 	b := newSimDaemon(conf, s)
 	runCycles(t, b, 3)
 
 	for _, name := range datasets {
 		assertConverged(t, s, conf, name)
+	}
+
+	// A divergent snapshot is the one thing backupd destroys that no
+	// retention policy asked it to: whatever retention says, it is
+	// gone from the remote, and the journal names it — and nothing
+	// else — as discarded, once, at warning level. This sees a planner
+	// that fails to condemn one even where retention would have
+	// destroyed it anyway and the wedge never shows.
+	for _, name := range datasets {
+		remote := s.Inventory(name).Remote
+		want := map[string]int{}
+		for _, snap := range divergent[name] {
+			if remote.Has(snap) {
+				t.Fatalf("divergent snapshot %s survived on the remote\n%s", snap.ID(), s)
+			}
+			want[snap.Name] = 1
+		}
+		if got := journaledDiscards(t, b, name); !maps.Equal(got, want) {
+			t.Fatalf("%s: journaled discards %v, want the divergent snapshots %v\n%s", name, got, want, s)
+		}
 	}
 
 	// The fixed point is quiescent: one more full cycle performs no
@@ -963,6 +999,55 @@ func checkSimConverges(t testing.TB, s *sim.Sim, conf *config.Config, datasets .
 			t.Fatalf("converged dataset %s reads %s (%s)", ds.Name, ds.Health, ds.Reason)
 		}
 	}
+}
+
+// divergentIn applies the spec's rule (§ Divergence) to an inventory
+// directly, rather than through the model: a remote snapshot local
+// doesn't have, sorting after the newest snapshot both sides hold.
+// With nothing shared there is no dividing line, and nothing is
+// divergent.
+func divergentIn(inv *model.SnapshotInventory) []*model.Snapshot {
+	var base *model.Snapshot
+	for snap := range inv.Remote.All() {
+		if inv.Local.Has(snap) && (base == nil || base.Less(snap)) {
+			base = snap
+		}
+	}
+	if base == nil {
+		return nil
+	}
+	var out []*model.Snapshot
+	for snap := range inv.Remote.All() {
+		if !inv.Local.Has(snap) && base.Less(snap) {
+			out = append(out, snap)
+		}
+	}
+	return out
+}
+
+// journaledDiscards counts, by snapshot name, the divergent discards
+// the journal reports for a dataset, failing on one journaled at any
+// level but warning.
+func journaledDiscards(t testing.TB, b *Daemon, name model.DatasetName) map[string]int {
+	t.Helper()
+	out := map[string]int{}
+	for _, e := range b.history.Events() {
+		names, ok := strings.CutPrefix(e.Message, "discarded remote snapshots ")
+		if !ok {
+			names, ok = strings.CutPrefix(e.Message, "discarded remote snapshot ")
+		}
+		if !ok || e.Dataset == nil || *e.Dataset != name {
+			continue
+		}
+		if e.Level != history.Warning {
+			t.Fatalf("%s: discard journaled at %s, want warning: %q", name, e.Level, e.Message)
+		}
+		names, _, _ = strings.Cut(names, ": ")
+		for snap := range strings.SplitSeq(names, ", ") {
+			out[snap]++
+		}
+	}
+	return out
 }
 
 func genMainPolicy(tc hegel.TestCase) map[string]int {
