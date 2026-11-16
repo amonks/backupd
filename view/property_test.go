@@ -44,6 +44,21 @@ func genSnaps(tc hegel.TestCase, dataset model.DatasetName) []*model.Snapshot {
 	return out
 }
 
+// genSide generates one read side's snapshots. A calm side holds a
+// snapshot taken just now, so no cadence finds it stale and it is
+// never empty. Any other side is empty a quarter of the time — never
+// replicated, or no snapshots at all — and otherwise genSnaps's.
+func genSide(tc hegel.TestCase, dataset model.DatasetName, calm bool) []*model.Snapshot {
+	if calm {
+		newest := &model.Snapshot{Dataset: dataset, Name: "hourly-now", CreatedAt: now.Unix()}
+		return append(genSnaps(tc, dataset), newest)
+	}
+	if hegel.Draw(tc, hegel.WeightedBooleans(0.25)) {
+		return nil
+	}
+	return genSnaps(tc, dataset)
+}
+
 func genPolicy(tc hegel.TestCase) map[string]int {
 	policy := map[string]int{}
 	for _, typ := range snapshotTypes {
@@ -54,54 +69,119 @@ func genPolicy(tc hegel.TestCase) map[string]int {
 	return policy
 }
 
-func genConf(tc hegel.TestCase) *config.Config {
+// genPlan draws a plan's steps, each a transfer or a deletion in any
+// state: work is queued while a step has not completed.
+func genPlan(tc hegel.TestCase, dataset model.DatasetName) *model.Plan {
+	snap := &model.Snapshot{Dataset: dataset, Name: "daily-t00", CreatedAt: now.Unix()}
+	plan := &model.Plan{}
+	for range hegel.Draw(tc, hegel.Integers(1, 3)) {
+		var op model.Operation = &model.SnapshotDeletion{Location: model.Local, Snapshot: snap}
+		if hegel.Draw(tc, hegel.Booleans()) {
+			op = &model.SnapshotRangeTransfer{Start: snap, End: snap}
+		}
+		step := model.NewPlanStep(op)
+		step.Status = hegel.Draw(tc, hegel.SampledFrom([]model.StepStatus{
+			model.StepPending, model.StepInProgress, model.StepCompleted, model.StepFailed,
+		}))
+		plan.Steps = append(plan.Steps, step)
+	}
+	return plan
+}
+
+// pauseRate is how often the operator has paused execution, globally or
+// for one dataset's subtree: a choice, not trouble, so it is drawn on
+// its own, and rarely enough that most cases run.
+const pauseRate = 0.15
+
+// genInput draws the dashboard's inputs, the shape first.
+//
+// The verdict and health branches are conjunctions across datasets
+// and system-level sources: "1 of 3 datasets not read yet" needs
+// several datasets, exactly one with a side unread, and nothing
+// alarming anywhere; all clear needs every side read and every source
+// calm. Drawn as independent coin flips, such a conjunction comes up in
+// a fraction of a percent of cases, and a fault in its branch survives
+// the default run. So a case first draws its trouble: the chance that
+// each source able to raise an issue — a side's snapshots, a dataset's
+// failure record, the backoff phase, the last cycle's outcome, the
+// snitch's last ping — is drawn arbitrarily rather than calm. A third
+// of the cases draw every source arbitrarily (trouble 1), a third have
+// one or two things wrong amid calm (0.2), and a third have nothing
+// alarming (0), leaving which sides were read, queued work, and pauses
+// to vary. Which datasets are unread is likewise one draw rather than
+// a coin per dataset.
+func genInput(tc hegel.TestCase) Input {
+	trouble := hegel.Draw(tc, hegel.SampledFrom([]float64{0, 0.2, 1}))
+	stray := func() bool { return hegel.Draw(tc, hegel.WeightedBooleans(trouble)) }
+
 	conf := &config.Config{}
 	conf.Local.Policy = genPolicy(tc)
 	conf.Remote.Policy = genPolicy(tc)
-	conf.Paused = hegel.Draw(tc, hegel.Booleans())
+	conf.Paused = hegel.Draw(tc, hegel.WeightedBooleans(pauseRate))
 	if hegel.Draw(tc, hegel.Booleans()) {
 		conf.SnitchID = "snitch"
 	}
-	return conf
-}
 
-func genInput(tc hegel.TestCase) Input {
 	names := []model.DatasetName{"/a", "/b", "/c"}
 	// Zero datasets is a model nobody has read yet: a listing always
 	// names the root.
 	count := hegel.Draw(tc, hegel.Integers(0, 3))
+	// Either side may be unread — the minute after a start while the
+	// remote is listed, or a start with it unreachable — but a dataset
+	// is in the model because some side was read. Which datasets have
+	// a side unread is one draw, a set, so that none, exactly one, and
+	// all of them each come up routinely, and so is the side: a
+	// listing reads one side of every dataset at once, though any mix
+	// is possible.
+	unread := hegel.Draw(tc, hegel.Integers(0, 1<<count-1))
+	unreadSide := ""
+	if unread != 0 {
+		unreadSide = hegel.Draw(tc, hegel.SampledFrom([]string{"remote", "local", "either"}))
+	}
 	state := model.New()
 	hist := history.New()
-	for _, name := range names[:count] {
-		// Either side may be unread — the minute after a start while
-		// the remote is listed, or a start with it unreachable — but a
-		// dataset is in the model because some side was read.
-		readLocal := hegel.Draw(tc, hegel.Booleans())
-		readRemote := !readLocal || hegel.Draw(tc, hegel.Booleans())
-		if readLocal {
-			local := genSnaps(tc, name)
-			state = model.AddLocalDataset(name, local, nil)(state)
+	for i, name := range names[:count] {
+		side := "neither"
+		if unread&(1<<i) != 0 {
+			side = unreadSide
+			if side == "either" {
+				side = hegel.Draw(tc, hegel.SampledFrom([]string{"remote", "local"}))
+			}
 		}
-		if readRemote {
-			remote := genSnaps(tc, name)
-			state = model.AddRemoteDataset(name, remote, nil)(state)
+		if side != "local" {
+			state = model.AddLocalDataset(name, genSide(tc, name, !stray()), nil)(state)
+		}
+		if side != "remote" {
+			state = model.AddRemoteDataset(name, genSide(tc, name, !stray()), nil)(state)
+		}
+		if hegel.Draw(tc, hegel.Booleans()) {
+			state = state.Clone()
+			state.SetPlan(name, genPlan(tc, name))
+		}
+		if hegel.Draw(tc, hegel.WeightedBooleans(pauseRate)) {
+			if conf.Overrides == nil {
+				conf.Overrides = map[string]*config.Override{}
+			}
+			conf.Overrides[name.Path()] = &config.Override{Paused: true}
 		}
 
-		// Arbitrary run history: maybe a success, maybe a failure, in
-		// either order.
+		// Run history: maybe a success, maybe a failure, in either
+		// order. A calm dataset has no failure on record.
 		if hegel.Draw(tc, hegel.Booleans()) {
 			at := now.Add(-time.Duration(hegel.Draw(tc, hegel.Integers(0, 300))) * time.Minute)
 			hist.RecordDatasetSuccess(name, at)
 		}
-		if hegel.Draw(tc, hegel.Booleans()) {
+		if stray() && hegel.Draw(tc, hegel.Booleans()) {
 			at := now.Add(-time.Duration(hegel.Draw(tc, hegel.Integers(0, 300))) * time.Minute)
 			hist.RecordDatasetFailure(name, at, "induced failure")
 		}
 	}
 
-	phase := hegel.Draw(tc, hegel.SampledFrom([]status.Phase{
-		status.Starting, status.Refreshing, status.Syncing, status.Idle, status.BackingOff,
-	}))
+	phases := []status.Phase{status.Starting, status.Refreshing, status.Syncing, status.Idle}
+	if stray() {
+		phases = append(phases, status.BackingOff)
+	}
+	phase := hegel.Draw(tc, hegel.SampledFrom(phases))
 	activity := status.Activity{Phase: phase}
 	if phase == status.Syncing && count > 0 {
 		activity.Dataset = hegel.Draw(tc, hegel.SampledFrom(names[:count]))
@@ -114,21 +194,27 @@ func genInput(tc hegel.TestCase) Input {
 		hist.RecordCycle(history.Cycle{
 			StartedAt: now.Add(-time.Hour),
 			StoppedAt: now.Add(-30 * time.Minute),
-			OK:        hegel.Draw(tc, hegel.Booleans()),
+			OK:        !stray() || hegel.Draw(tc, hegel.Booleans()),
 			Error:     "cycle error",
 		})
 	}
+	// A calm snitch pinged, or the daemon booted, within the last sync
+	// interval.
+	maxAge := int(conf.Interval() / time.Minute)
+	if stray() {
+		maxAge = 600
+	}
 	if hegel.Draw(tc, hegel.Booleans()) {
-		hist.RecordSnitch(now.Add(-time.Duration(hegel.Draw(tc, hegel.Integers(0, 600))) * time.Minute))
+		hist.RecordSnitch(now.Add(-time.Duration(hegel.Draw(tc, hegel.Integers(0, maxAge))) * time.Minute))
 	}
 
 	return Input{
 		State:    state,
-		Conf:     genConf(tc),
+		Conf:     conf,
 		History:  hist,
 		Activity: activity,
 		Now:      now,
-		Boot:     now.Add(-time.Duration(hegel.Draw(tc, hegel.Integers(0, 600))) * time.Minute),
+		Boot:     now.Add(-time.Duration(hegel.Draw(tc, hegel.Integers(0, maxAge))) * time.Minute),
 	}
 }
 
