@@ -147,6 +147,18 @@ func subtreePaused(conf *config.Config, name model.DatasetName) bool {
 	return false
 }
 
+// failingIn applies the spec's failing rule (§ Dashboard, dataset
+// health) to the run history: a failure is on record, and no success
+// since. It answers the failure it judged.
+func failingIn(hist *history.History, name model.DatasetName) (history.Failure, bool) {
+	f, failed := hist.LastFailure(name)
+	if !failed {
+		return f, false
+	}
+	success, succeeded := hist.LastSuccess(name)
+	return f, !succeeded || f.At.After(success)
+}
+
 // pauseRate is how often the operator has paused execution, globally or
 // at one override's subtree: a choice, not trouble, so it is drawn on
 // its own, and rarely enough that most cases run.
@@ -248,7 +260,7 @@ func genInput(tc hegel.TestCase) Input {
 		}
 		if stray() && hegel.Draw(tc, hegel.Booleans()) {
 			at := now.Add(-time.Duration(hegel.Draw(tc, hegel.Integers(0, 300))) * time.Minute)
-			hist.RecordDatasetFailure(name, at, "induced failure")
+			hist.RecordDatasetFailure(name, at, "induced failure on "+name.Path())
 		}
 	}
 
@@ -392,6 +404,18 @@ func TestAssuranceFromInventory(t *testing.T) {
 					w.deletions, w.transfers, w.done, w.total)
 			}
 
+			// The run record comes from the history.
+			success, succeeded := in.History.LastSuccess(ds.Name)
+			if !succeeded {
+				success = time.Time{}
+			}
+			if !ds.LastSuccess.Equal(success) {
+				t.Fatalf("%s: last success %v, the history's %v", ds.Name, ds.LastSuccess, success)
+			}
+			if f, failed := in.History.LastFailure(ds.Name); failed != (ds.LastFailure != nil) || failed && *ds.LastFailure != f {
+				t.Fatalf("%s: last failure %+v, the history's %+v (on record %v)", ds.Name, ds.LastFailure, f, failed)
+			}
+
 			// Pause comes from the config.
 			subtree := subtreePaused(in.Conf, ds.Name)
 			if ds.GlobalPaused != in.Conf.Paused || ds.SubtreePaused != subtree || ds.Paused != (in.Conf.Paused || subtree) {
@@ -410,18 +434,31 @@ func TestIssuesIffConditions(t *testing.T) {
 		in := genInput(t)
 		sys := Compute(in)
 
-		count := func(kind IssueKind, dataset model.DatasetName) int {
-			n := 0
+		find := func(kind IssueKind, dataset model.DatasetName) []Issue {
+			var out []Issue
 			for _, issue := range sys.Issues {
 				if issue.Kind == kind && issue.Dataset != nil && *issue.Dataset == dataset {
-					n++
+					out = append(out, issue)
 				}
 			}
-			return n
+			return out
 		}
+		count := func(kind IssueKind, dataset model.DatasetName) int { return len(find(kind, dataset)) }
 
 		for _, ds := range sys.Datasets {
-			failing := ds.LastFailure != nil && (ds.LastSuccess.IsZero() || ds.LastFailure.At.After(ds.LastSuccess))
+			// Failing comes from the history, and says what failed and
+			// since when.
+			failure, failing := failingIn(in.History, ds.Name)
+			if failing {
+				issue := find(IssueFailing, ds.Name)
+				if len(issue) == 1 && (issue[0].Detail != failure.Error || !issue[0].Since.Equal(failure.At)) {
+					t.Fatalf("%s: failing issue says %q since %v; the history's failure is %q at %v",
+						ds.Name, issue[0].Detail, issue[0].Since, failure.Error, failure.At)
+				}
+				if ds.Reason != failure.Error {
+					t.Fatalf("%s: failing for %q; the history's failure is %q", ds.Name, ds.Reason, failure.Error)
+				}
+			}
 			for kind, want := range map[IssueKind]bool{
 				IssueFailing:        failing,
 				IssueUnreplicated:   ds.Unreplicated,
