@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -871,53 +872,37 @@ func TestSimConvergence(t *testing.T) {
 
 		for _, name := range datasets {
 			count := hegel.Draw(t, hegel.Integers(0, 12))
-			var local, remote []*model.Snapshot
-			var newestShared *model.Snapshot
+			local, remote := model.NewSnapshots(), model.NewSnapshots()
 			for range count {
 				typ := hegel.Draw(t, hegel.SampledFrom([]string{"hourly", "daily", "weekly"}))
 				hour := hegel.Draw(t, hegel.Integers(0, 19))
 				snap := simSnap(name, fmt.Sprintf("%s-t%02d", typ, hour), int64(hour)*3600)
-				onLocal := hegel.Draw(t, hegel.Booleans())
-				onRemote := hegel.Draw(t, hegel.Booleans())
-				if onLocal {
-					local = append(local, snap)
+				if hegel.Draw(t, hegel.Booleans()) {
+					local.Add(snap)
 				}
-				// The remote's contents arrived via transfers from
-				// local, so remote-only snapshots newer than the sync
-				// point don't occur; see genInventory in the model
-				// package for the same constraint.
-				if onRemote && onLocal {
-					remote = append(remote, snap)
-					if newestShared == nil || newestShared.Less(snap) {
-						newestShared = snap
-					}
-				} else if onRemote {
-					remote = append(remote, snap)
+				if hegel.Draw(t, hegel.Booleans()) {
+					remote.Add(snap)
 				}
 			}
-			// Enforce the constraints: some shared sync point when the
-			// remote is non-empty, and no remote-only snapshot newer
-			// than it.
-			if newestShared == nil {
-				remote = nil
-			} else {
-				var kept []*model.Snapshot
-				for _, snap := range remote {
-					isLocal := false
-					for _, l := range local {
-						if l.ID() == snap.ID() {
-							isLocal = true
-						}
-					}
-					if isLocal || snap.Less(newestShared) {
-						kept = append(kept, snap)
-					}
+			// The remote's contents arrived by transfer from local, so
+			// a non-empty remote shares a sync point with it. That is
+			// the only constraint, as in genInventory in the model
+			// package: remote-only snapshots land on both sides of the
+			// sync point, because the divergent ones — newer than it —
+			// are a shape the system really produces (a snapshot
+			// destroyed locally after its transfer), and excluding them
+			// once hid a wedge that took a dataset out of service for
+			// two days.
+			if remote.Len() > 0 && local.Intersection(remote).Len() == 0 {
+				if local.Len() > 0 {
+					remote.Add(local.Newest())
+				} else {
+					remote = model.NewSnapshots()
 				}
-				remote = kept
 			}
-			s.SeedLocal(name, local...)
-			if len(remote) > 0 {
-				s.SeedRemote(name, remote...)
+			s.SeedLocal(name, slices.Collect(local.All())...)
+			if remote.Len() > 0 {
+				s.SeedRemote(name, slices.Collect(remote.All())...)
 			}
 		}
 
