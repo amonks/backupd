@@ -2,6 +2,7 @@ package view
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -122,7 +123,8 @@ func workIn(t *hegel.T, m *model.Dataset) work {
 }
 
 // pausedKeys are the override keys whose subtree the config pauses.
-// genInput keys overrides by dataset name, already in normal form.
+// genInput keys overrides by names from datasetPool, already in normal
+// form.
 func pausedKeys(conf *config.Config) map[string]bool {
 	out := map[string]bool{}
 	for key, override := range conf.Overrides {
@@ -146,9 +148,22 @@ func subtreePaused(conf *config.Config, name model.DatasetName) bool {
 }
 
 // pauseRate is how often the operator has paused execution, globally or
-// for one dataset's subtree: a choice, not trouble, so it is drawn on
+// at one override's subtree: a choice, not trouble, so it is drawn on
 // its own, and rarely enough that most cases run.
 const pauseRate = 0.15
+
+// datasetPool is the tree a model's datasets are drawn from: /a three
+// deep with a sibling under it, /b beside it, and /ab, whose name
+// extends /a's without being under it. Pause accumulates down the tree
+// (§ Pause), so its rule is reached only by a dataset under a paused
+// ancestor, and its edge only by a name like /ab.
+var datasetPool = []model.DatasetName{"/a", "/a/b", "/a/b/c", "/a/c", "/ab", "/b"}
+
+// overrideRate is how often a name in the pool carries an override,
+// paused at pauseRate overall. The rest pause nothing, so a dataset's
+// own unpaused override can sit under a paused ancestor's: pause
+// accumulates, where retention's longest prefix picks the dataset's.
+const overrideRate = 0.35
 
 // genInput draws the dashboard's inputs, the shape first.
 //
@@ -165,8 +180,8 @@ const pauseRate = 0.15
 // of the cases draw every source arbitrarily (trouble 1), a third have
 // one or two things wrong amid calm (0.2), and a third have nothing
 // alarming (0), leaving which sides were read, queued work, and pauses
-// to vary. Which datasets are unread is likewise one draw rather than
-// a coin per dataset.
+// to vary. How many datasets are unread is likewise one draw rather
+// than a coin per dataset.
 func genInput(tc hegel.TestCase) Input {
 	trouble := hegel.Draw(tc, hegel.SampledFrom([]float64{0, 0.2, 1}))
 	stray := func() bool { return hegel.Draw(tc, hegel.WeightedBooleans(trouble)) }
@@ -179,27 +194,37 @@ func genInput(tc hegel.TestCase) Input {
 		conf.SnitchID = "snitch"
 	}
 
-	names := []model.DatasetName{"/a", "/b", "/c"}
 	// Zero datasets is a model nobody has read yet: a listing always
-	// names the root.
-	count := hegel.Draw(tc, hegel.Integers(0, 3))
+	// names the root. The rest are drawn from the pool without
+	// replacement, so a dataset can come without its parent: the view
+	// derives each on its own, and an override pauses its subtree
+	// whether or not the key is itself a dataset.
+	count := hegel.Draw(tc, hegel.Integers(0, len(datasetPool)))
+	pool := slices.Clone(datasetPool)
+	names := make([]model.DatasetName, 0, count)
+	for range count {
+		i := hegel.Draw(tc, hegel.Integers(0, len(pool)-1))
+		names = append(names, pool[i])
+		pool = slices.Delete(pool, i, i+1)
+	}
 	// Either side may be unread — the minute after a start while the
 	// remote is listed, or a start with it unreachable — but a dataset
-	// is in the model because some side was read. Which datasets have
-	// a side unread is one draw, a set, so that none, exactly one, and
-	// all of them each come up routinely, and so is the side: a
-	// listing reads one side of every dataset at once, though any mix
-	// is possible.
-	unread := hegel.Draw(tc, hegel.Integers(0, 1<<count-1))
+	// is in the model because some side was read. How many datasets
+	// have a side unread is one draw — the first that many of names,
+	// which came in a drawn order — so that none, exactly one, and all
+	// of them each come up routinely, and so is the side: a listing
+	// reads one side of every dataset at once, though any mix is
+	// possible.
+	unread := hegel.Draw(tc, hegel.Integers(0, count))
 	unreadSide := ""
 	if unread != 0 {
 		unreadSide = hegel.Draw(tc, hegel.SampledFrom([]string{"remote", "local", "either"}))
 	}
 	state := model.New()
 	hist := history.New()
-	for i, name := range names[:count] {
+	for i, name := range names {
 		side := "neither"
-		if unread&(1<<i) != 0 {
+		if i < unread {
 			side = unreadSide
 			if side == "either" {
 				side = hegel.Draw(tc, hegel.SampledFrom([]string{"remote", "local"}))
@@ -215,13 +240,6 @@ func genInput(tc hegel.TestCase) Input {
 			state = state.Clone()
 			state.SetPlan(name, genPlan(tc, name))
 		}
-		if hegel.Draw(tc, hegel.WeightedBooleans(pauseRate)) {
-			if conf.Overrides == nil {
-				conf.Overrides = map[string]*config.Override{}
-			}
-			conf.Overrides[name.Path()] = &config.Override{Paused: true}
-		}
-
 		// Run history: maybe a success, maybe a failure, in either
 		// order. A calm dataset has no failure on record.
 		if hegel.Draw(tc, hegel.Booleans()) {
@@ -234,6 +252,16 @@ func genInput(tc hegel.TestCase) Input {
 		}
 	}
 
+	for _, key := range datasetPool {
+		if hegel.Draw(tc, hegel.WeightedBooleans(overrideRate)) {
+			if conf.Overrides == nil {
+				conf.Overrides = map[string]*config.Override{}
+			}
+			paused := hegel.Draw(tc, hegel.WeightedBooleans(pauseRate/overrideRate))
+			conf.Overrides[key.Path()] = &config.Override{Paused: paused}
+		}
+	}
+
 	phases := []status.Phase{status.Starting, status.Refreshing, status.Syncing, status.Idle}
 	if stray() {
 		phases = append(phases, status.BackingOff)
@@ -241,7 +269,7 @@ func genInput(tc hegel.TestCase) Input {
 	phase := hegel.Draw(tc, hegel.SampledFrom(phases))
 	activity := status.Activity{Phase: phase}
 	if phase == status.Syncing && count > 0 {
-		activity.Dataset = hegel.Draw(tc, hegel.SampledFrom(names[:count]))
+		activity.Dataset = hegel.Draw(tc, hegel.SampledFrom(names))
 	}
 	if phase == status.BackingOff {
 		activity.ConsecutiveFailures = hegel.Draw(tc, hegel.Integers(1, 5))
