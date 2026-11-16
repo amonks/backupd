@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"pgregory.net/rapid"
+	"hegel.dev/go/hegel"
 
 	"monks.co/backupd/config"
 	"monks.co/backupd/env"
@@ -38,7 +38,7 @@ func newSimDaemon(conf *config.Config, s *sim.Sim) *Daemon {
 
 // runCycles runs the sync loop for exactly n cycles by cancelling the
 // context at the nth between-cycle wait.
-func runCycles(t rapid.TB, b *Daemon, n int) {
+func runCycles(t testing.TB, b *Daemon, n int) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -81,7 +81,7 @@ func simSnap(ds model.DatasetName, name string, at int64) *model.Snapshot {
 
 // assertConverged verifies that a dataset's sim state is a fixed point:
 // the planner, given the sim's ground truth, has nothing left to do.
-func assertConverged(t rapid.TB, s *sim.Sim, conf *config.Config, name model.DatasetName) {
+func assertConverged(t testing.TB, s *sim.Sim, conf *config.Config, name model.DatasetName) {
 	t.Helper()
 	inv := s.Inventory(name)
 	lp, rp, kb := conf.PolicyFor(name.Path())
@@ -858,28 +858,27 @@ func TestSimNestedChildWaitsWhenParentPolicyRetainsNothing(t *testing.T) {
 	}
 }
 
-// TestRapidSimConvergence is the end-to-end property: for arbitrary
+// TestSimConvergence is the end-to-end property: for arbitrary
 // pool states and policies, a few real sync cycles land every dataset
 // on the planner's fixed point, after which a further cycle performs no
 // mutations at all.
-func TestRapidSimConvergence(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
+func TestSimConvergence(t *testing.T) {
+	hegel.Test(t, func(t *hegel.T) {
 		s := sim.New()
 		datasets := []model.DatasetName{"/a", "/b"}
-		n := rapid.IntRange(1, 2).Draw(t, "datasets")
+		n := hegel.Draw(t, hegel.Integers(1, 2))
 		datasets = datasets[:n]
 
 		for _, name := range datasets {
-			label := strings.TrimPrefix(name.Path(), "/")
-			count := rapid.IntRange(0, 12).Draw(t, label+"-n")
+			count := hegel.Draw(t, hegel.Integers(0, 12))
 			var local, remote []*model.Snapshot
 			var newestShared *model.Snapshot
-			for i := range count {
-				typ := rapid.SampledFrom([]string{"hourly", "daily", "weekly"}).Draw(t, fmt.Sprintf("%s-type-%d", label, i))
-				hour := rapid.IntRange(0, 19).Draw(t, fmt.Sprintf("%s-hour-%d", label, i))
+			for range count {
+				typ := hegel.Draw(t, hegel.SampledFrom([]string{"hourly", "daily", "weekly"}))
+				hour := hegel.Draw(t, hegel.Integers(0, 19))
 				snap := simSnap(name, fmt.Sprintf("%s-t%02d", typ, hour), int64(hour)*3600)
-				onLocal := rapid.Bool().Draw(t, fmt.Sprintf("%s-local-%d", label, i))
-				onRemote := rapid.Bool().Draw(t, fmt.Sprintf("%s-remote-%d", label, i))
+				onLocal := hegel.Draw(t, hegel.Booleans())
+				onRemote := hegel.Draw(t, hegel.Booleans())
 				if onLocal {
 					local = append(local, snap)
 				}
@@ -922,44 +921,70 @@ func TestRapidSimConvergence(t *testing.T) {
 			}
 		}
 
-		conf := simConf(
-			genMainPolicy(t, "local"),
-			genMainPolicy(t, "remote"),
-			rapid.Bool().Draw(t, "keepBaseline"),
-			datasets...,
-		)
-		b := newSimDaemon(conf, s)
-		runCycles(t, b, 3)
-
-		for _, name := range datasets {
-			assertConverged(t, s, conf, name)
-		}
-
-		// The fixed point is quiescent: one more full cycle performs no
-		// mutations.
-		s.ResetMutations()
-		runCycles(t, b, 1)
-		if muts := s.Mutations(); len(muts) != 0 {
-			t.Fatalf("expected a converged cycle to mutate nothing, got %v\n%s", muts, s)
-		}
-
-		// And the dashboard agrees: a converged fleet has nothing failing
-		// and nothing behind (staleness may legitimately fire — the
-		// generated snapshots have arbitrary ages).
-		sys := computeView(b, time.Unix(20*3600, 0))
-		for _, ds := range sys.Datasets {
-			if ds.Health == view.HealthFailing || ds.Health == view.HealthBehind {
-				t.Fatalf("converged dataset %s reads %s (%s)", ds.Name, ds.Health, ds.Reason)
-			}
-		}
+		localPolicy := genMainPolicy(t)
+		remotePolicy := genMainPolicy(t)
+		keepBaseline := hegel.Draw(t, hegel.Booleans())
+		t.Note(fmt.Sprintf("seeded:\n%slocal policy %v, remote policy %v, keep_baseline %v",
+			s, localPolicy, remotePolicy, keepBaseline))
+		checkSimConverges(t, s, simConf(localPolicy, remotePolicy, keepBaseline, datasets...), datasets...)
 	})
 }
 
-func genMainPolicy(t *rapid.T, label string) map[string]int {
+// A daily and a weekly snapshot taken in the same second, on a dataset
+// whose local policy keeps nothing and whose remote keeps both kinds:
+// the cycles send everything, then prune the local side to the sync
+// point with a range destroy spanning the same-second pair. A pool
+// TestSimConvergence once found left unconverged, checked on every run
+// here because the property's own draws reach it only by chance.
+func TestSimConvergesPruningSameSecondSnapshots(t *testing.T) {
+	s := sim.New()
+	s.SeedLocal("/a",
+		simSnap("/a", "daily-t00", 0),
+		simSnap("/a", "daily-t01", 3600),
+		simSnap("/a", "weekly-t00", 0),
+	)
+	s.SeedLocal("/b")
+	datasets := []model.DatasetName{"/a", "/b"}
+	conf := simConf(map[string]int{}, map[string]int{"daily": 2, "weekly": 1}, false, datasets...)
+	checkSimConverges(t, s, conf, datasets...)
+}
+
+// checkSimConverges runs the real daemon over s for three cycles and
+// asserts every dataset sits on the planner's fixed point, that one
+// more cycle mutates nothing, and that the dashboard agrees.
+func checkSimConverges(t testing.TB, s *sim.Sim, conf *config.Config, datasets ...model.DatasetName) {
+	t.Helper()
+	b := newSimDaemon(conf, s)
+	runCycles(t, b, 3)
+
+	for _, name := range datasets {
+		assertConverged(t, s, conf, name)
+	}
+
+	// The fixed point is quiescent: one more full cycle performs no
+	// mutations.
+	s.ResetMutations()
+	runCycles(t, b, 1)
+	if muts := s.Mutations(); len(muts) != 0 {
+		t.Fatalf("expected a converged cycle to mutate nothing, got %v\n%s", muts, s)
+	}
+
+	// And the dashboard agrees: a converged fleet has nothing failing
+	// and nothing behind (staleness may legitimately fire — the
+	// generated snapshots have arbitrary ages).
+	sys := computeView(b, time.Unix(20*3600, 0))
+	for _, ds := range sys.Datasets {
+		if ds.Health == view.HealthFailing || ds.Health == view.HealthBehind {
+			t.Fatalf("converged dataset %s reads %s (%s)", ds.Name, ds.Health, ds.Reason)
+		}
+	}
+}
+
+func genMainPolicy(tc hegel.TestCase) map[string]int {
 	policy := map[string]int{}
 	for _, typ := range []string{"hourly", "daily", "weekly"} {
-		if rapid.Bool().Draw(t, label+"-has-"+typ) {
-			policy[typ] = rapid.IntRange(0, 4).Draw(t, label+"-n-"+typ)
+		if hegel.Draw(tc, hegel.Booleans()) {
+			policy[typ] = hegel.Draw(tc, hegel.Integers(0, 4))
 		}
 	}
 	return policy

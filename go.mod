@@ -10,15 +10,16 @@ require (
 	github.com/dustin/go-humanize v1.0.1
 	golang.org/x/sync v0.24.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
+	hegel.dev/go/hegel v0.9.36
 	monks.co/pkg/browsertest v0.0.4
 	monks.co/pkg/csp v0.0.1
 	monks.co/pkg/datagrid v0.0.1
 	monks.co/pkg/localtime v0.0.1
-	pgregory.net/rapid v1.2.0
 )
 
 require (
 	github.com/chromedp/sysutil v1.1.0 // indirect
+	github.com/ebitengine/purego v0.12.0-alpha.1.0.20261015130536-d456b1bb95e8 // indirect
 	github.com/go-json-experiment/json v0.0.0-20260820222146-c27c302e5fc3 // indirect
 	github.com/gobwas/httphead v0.1.0 // indirect
 	github.com/gobwas/pool v0.2.1 // indirect

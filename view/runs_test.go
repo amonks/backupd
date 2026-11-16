@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"pgregory.net/rapid"
+	"hegel.dev/go/hegel"
 
 	"monks.co/backupd/history"
 	"monks.co/backupd/model"
@@ -114,21 +114,21 @@ func TestCycleRunsPausedPrecedence(t *testing.T) {
 }
 
 func TestCycleRunsProperties(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
-		n := rapid.IntRange(0, 60).Draw(t, "n")
+	hegel.Test(t, func(t *hegel.T) {
+		n := hegel.Draw(t, hegel.Integers(0, 60))
 		specs := make([]history.Cycle, n)
 		for i := range specs {
-			switch rapid.IntRange(0, 3).Draw(t, "kind") {
+			switch hegel.Draw(t, hegel.Integers(0, 3)) {
 			case 0:
 				specs[i] = history.Cycle{OK: true}
 			case 1:
 				specs[i] = history.Cycle{OK: true, Paused: true}
 			case 2:
-				specs[i] = history.Cycle{OK: false, Error: rapid.SampledFrom([]string{"a", "b"}).Draw(t, "err")}
+				specs[i] = history.Cycle{OK: false, Error: hegel.Draw(t, hegel.SampledFrom([]string{"a", "b"}))}
 			case 3:
 				specs[i] = history.Cycle{OK: false, Failures: []history.DatasetFailure{{
-					Dataset: model.DatasetName(rapid.SampledFrom([]string{"/x", "/y"}).Draw(t, "ds")),
-					Error:   rapid.SampledFrom([]string{"a", "b"}).Draw(t, "dserr"),
+					Dataset: model.DatasetName(hegel.Draw(t, hegel.SampledFrom([]string{"/x", "/y"}))),
+					Error:   hegel.Draw(t, hegel.SampledFrom([]string{"a", "b"})),
 				}}}
 			}
 		}

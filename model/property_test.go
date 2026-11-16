@@ -3,12 +3,14 @@ package model
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 	"testing"
 
-	"pgregory.net/rapid"
+	"hegel.dev/go/hegel"
 )
 
-// The rapid tests treat the model's pure core — the ordered Snapshots
+// The property tests treat the model's pure core — the ordered Snapshots
 // collection, target calculation, and transition planning — as a system
 // whose invariants must hold for *any* inventory, not just the ones we
 // thought of. The generators deliberately produce timestamp collisions
@@ -20,43 +22,56 @@ var snapshotTypes = []string{"hourly", "daily", "weekly", "monthly"}
 
 // genUniverse generates a set of distinct snapshots for one dataset,
 // with creation times drawn from a small range so that same-time
-// different-name duplicates occur regularly.
-func genUniverse(t *rapid.T) []*Snapshot {
-	n := rapid.IntRange(1, 24).Draw(t, "n")
-	byID := map[string]*Snapshot{}
+// different-name duplicates occur regularly. The snapshots come back
+// in the order first drawn: later draws index into the universe, so
+// its order must be a function of the draws for a case to replay.
+func genUniverse(tc hegel.TestCase) []*Snapshot {
+	n := hegel.Draw(tc, hegel.Integers(1, 24))
+	seen := map[string]bool{}
+	var out []*Snapshot
 	for range n {
-		typ := rapid.SampledFrom(snapshotTypes).Draw(t, "type")
-		hour := rapid.IntRange(0, 39).Draw(t, "hour")
+		typ := hegel.Draw(tc, hegel.SampledFrom(snapshotTypes))
+		hour := hegel.Draw(tc, hegel.Integers(0, 39))
 		snap := &Snapshot{
 			Dataset:   "/ds",
 			Name:      fmt.Sprintf("%s-t%02d", typ, hour),
 			CreatedAt: int64(hour) * 3600,
 		}
-		byID[snap.ID()] = snap
-	}
-	var out []*Snapshot
-	for _, snap := range byID {
-		out = append(out, snap)
-	}
-	return out
-}
-
-// genSubset draws an arbitrary subset of the universe.
-func genSubset(t *rapid.T, label string, universe []*Snapshot) []*Snapshot {
-	var out []*Snapshot
-	for i, snap := range universe {
-		if rapid.Bool().Draw(t, fmt.Sprintf("%s-%d", label, i)) {
+		if !seen[snap.ID()] {
+			seen[snap.ID()] = true
 			out = append(out, snap)
 		}
 	}
 	return out
 }
 
-func genPolicy(t *rapid.T, label string) map[string]int {
+// genSubset draws an arbitrary subset of the universe.
+func genSubset(tc hegel.TestCase, universe []*Snapshot) []*Snapshot {
+	var out []*Snapshot
+	for _, snap := range universe {
+		if hegel.Draw(tc, hegel.Booleans()) {
+			out = append(out, snap)
+		}
+	}
+	return out
+}
+
+// genPermutation draws an ordering of xs by a Fisher–Yates shuffle,
+// which shrinks toward the identity.
+func genPermutation[T any](tc hegel.TestCase, xs []T) []T {
+	out := slices.Clone(xs)
+	for i := range len(out) - 1 {
+		j := hegel.Draw(tc, hegel.Integers(i, len(out)-1))
+		out[i], out[j] = out[j], out[i]
+	}
+	return out
+}
+
+func genPolicy(tc hegel.TestCase) map[string]int {
 	policy := map[string]int{}
 	for _, typ := range snapshotTypes {
-		if rapid.Bool().Draw(t, label+"-has-"+typ) {
-			policy[typ] = rapid.IntRange(0, 5).Draw(t, label+"-n-"+typ)
+		if hegel.Draw(tc, hegel.Booleans()) {
+			policy[typ] = hegel.Draw(tc, hegel.Integers(0, 5))
 		}
 	}
 	return policy
@@ -70,13 +85,23 @@ func idsOf(snaps *Snapshots) map[string]bool {
 	return out
 }
 
-// TestRapidSnapshotsOrdering: no matter the insertion order, iteration
+// namesOf lists a collection's snapshot names in order, for failure
+// messages.
+func namesOf(snaps *Snapshots) string {
+	var names []string
+	for snap := range snaps.All() {
+		names = append(names, snap.Name)
+	}
+	return "[" + strings.Join(names, " ") + "]"
+}
+
+// TestSnapshotsOrdering: no matter the insertion order, iteration
 // is strictly ascending by (CreatedAt, Name), and Oldest/Newest agree
 // with it.
-func TestRapidSnapshotsOrdering(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
+func TestSnapshotsOrdering(t *testing.T) {
+	hegel.Test(t, func(t *hegel.T) {
 		universe := genUniverse(t)
-		perm := rapid.Permutation(universe).Draw(t, "perm")
+		perm := genPermutation(t, universe)
 		snaps := NewSnapshots(perm...)
 
 		if snaps.Len() != len(universe) {
@@ -109,24 +134,24 @@ func TestRapidSnapshotsOrdering(t *testing.T) {
 		}
 		for i := range desc {
 			if j := len(desc) - 1 - i; i < j && !desc[j].Less(desc[i]) {
-				t.Fatalf("AllDesc out of order at %d", i)
+				t.Fatalf("AllDesc out of order at %d: %s before %s", i, desc[i].ID(), desc[j].ID())
 			}
 		}
 	})
 }
 
-// TestRapidSnapshotsAddDel: a random interleaving of Add and Del
+// TestSnapshotsAddDel: a random interleaving of Add and Del
 // behaves like a plain set keyed by ID, while keeping order intact.
-func TestRapidSnapshotsAddDel(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
+func TestSnapshotsAddDel(t *testing.T) {
+	hegel.Test(t, func(t *hegel.T) {
 		universe := genUniverse(t)
 		snaps := NewSnapshots()
 		want := map[string]bool{}
 
-		ops := rapid.IntRange(1, 60).Draw(t, "ops")
-		for i := range ops {
-			snap := rapid.SampledFrom(universe).Draw(t, fmt.Sprintf("pick-%d", i))
-			if rapid.Bool().Draw(t, fmt.Sprintf("add-%d", i)) {
+		ops := hegel.Draw(t, hegel.Integers(1, 60))
+		for range ops {
+			snap := hegel.Draw(t, hegel.SampledFrom(universe))
+			if hegel.Draw(t, hegel.Booleans()) {
 				snaps.Add(snap)
 				want[snap.ID()] = true
 			} else {
@@ -137,7 +162,7 @@ func TestRapidSnapshotsAddDel(t *testing.T) {
 
 		got := idsOf(snaps)
 		if len(got) != len(want) {
-			t.Fatalf("expected %d snapshots, got %d", len(want), len(got))
+			t.Fatalf("expected %d snapshots %v, got %d %v", len(want), want, len(got), got)
 		}
 		for id := range want {
 			if !got[id] {
@@ -154,13 +179,13 @@ func TestRapidSnapshotsAddDel(t *testing.T) {
 	})
 }
 
-// TestRapidSnapshotsAlgebra: Union, Intersection, and Difference match
+// TestSnapshotsAlgebra: Union, Intersection, and Difference match
 // their plain-set definitions.
-func TestRapidSnapshotsAlgebra(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
+func TestSnapshotsAlgebra(t *testing.T) {
+	hegel.Test(t, func(t *hegel.T) {
 		universe := genUniverse(t)
-		a := NewSnapshots(genSubset(t, "a", universe)...)
-		b := NewSnapshots(genSubset(t, "b", universe)...)
+		a := NewSnapshots(genSubset(t, universe)...)
+		b := NewSnapshots(genSubset(t, universe)...)
 		aIDs, bIDs := idsOf(a), idsOf(b)
 
 		check := func(name string, got *Snapshots, want func(id string) bool) {
@@ -168,7 +193,8 @@ func TestRapidSnapshotsAlgebra(t *testing.T) {
 			for _, snap := range universe {
 				id := snap.ID()
 				if want(id) != gotIDs[id] {
-					t.Fatalf("%s: membership of %s: want %v, got %v", name, id, want(id), gotIDs[id])
+					t.Fatalf("%s of %s and %s: membership of %s: want %v, got %v",
+						name, namesOf(a), namesOf(b), id, want(id), gotIDs[id])
 				}
 			}
 		}
@@ -178,13 +204,13 @@ func TestRapidSnapshotsAlgebra(t *testing.T) {
 	})
 }
 
-// TestRapidMatchingPolicy: for each periodicity the policy keeps at most
+// TestMatchingPolicy: for each periodicity the policy keeps at most
 // the configured count, choosing the newest snapshots of that type.
-func TestRapidMatchingPolicy(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
+func TestMatchingPolicy(t *testing.T) {
+	hegel.Test(t, func(t *hegel.T) {
 		universe := genUniverse(t)
 		snaps := NewSnapshots(universe...)
-		policy := genPolicy(t, "policy")
+		policy := genPolicy(t)
 
 		matches := snapshotMatchesByType(snaps.MatchingPolicy(policy))
 
@@ -200,7 +226,8 @@ func TestRapidMatchingPolicy(t *testing.T) {
 
 		for _, typ := range snapshotTypes {
 			if len(matches[typ]) != len(want[typ]) {
-				t.Fatalf("type %s: expected %d matches, got %d", typ, len(want[typ]), len(matches[typ]))
+				t.Fatalf("policy %v over %s: type %s: expected %d matches %v, got %d %v",
+					policy, namesOf(snaps), typ, len(want[typ]), want[typ], len(matches[typ]), matches[typ])
 			}
 			wantSet := map[string]bool{}
 			for _, id := range want[typ] {
@@ -208,7 +235,8 @@ func TestRapidMatchingPolicy(t *testing.T) {
 			}
 			for _, id := range matches[typ] {
 				if !wantSet[id] {
-					t.Fatalf("type %s: unexpected match %s", typ, id)
+					t.Fatalf("policy %v over %s: type %s: unexpected match %s, want %v",
+						policy, namesOf(snaps), typ, id, want[typ])
 				}
 			}
 		}
@@ -223,14 +251,14 @@ func snapshotMatchesByType(snaps *Snapshots) map[string][]string {
 	return out
 }
 
-// TestRapidGroupByAdjacency: the groups partition the subset, and every
+// TestGroupByAdjacency: the groups partition the subset, and every
 // multi-snapshot group is contiguous in the parent collection (so it is
 // safe to delete as a `first%last` range).
-func TestRapidGroupByAdjacency(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
+func TestGroupByAdjacency(t *testing.T) {
+	hegel.Test(t, func(t *hegel.T) {
 		universe := genUniverse(t)
 		snaps := NewSnapshots(universe...)
-		subset := NewSnapshots(genSubset(t, "subset", universe)...)
+		subset := NewSnapshots(genSubset(t, universe)...)
 
 		groups := snaps.GroupByAdjacency(subset)
 
@@ -240,7 +268,8 @@ func TestRapidGroupByAdjacency(t *testing.T) {
 		for _, group := range groups {
 			for snap := range group.All() {
 				if !subset.Has(snap) {
-					t.Fatalf("group contains %s, which is not in the subset", snap.ID())
+					t.Fatalf("group %s contains %s, which is not in the subset %s",
+						namesOf(group), snap.ID(), namesOf(subset))
 				}
 				seen[snap.ID()]++
 			}
@@ -263,8 +292,8 @@ func TestRapidGroupByAdjacency(t *testing.T) {
 					inRange = true
 				}
 				if inRange && !group.Has(snap) {
-					t.Fatalf("group %s..%s skips %s in parent order",
-						group.Oldest().ID(), group.Newest().ID(), snap.ID())
+					t.Fatalf("group %s..%s skips %s in parent order %s",
+						group.Oldest().ID(), group.Newest().ID(), snap.ID(), namesOf(snaps))
 				}
 				if snap.ID() == group.Newest().ID() {
 					inRange = false
@@ -283,15 +312,15 @@ func TestRapidGroupByAdjacency(t *testing.T) {
 // the snapshot is destroyed locally before the next cycle — and
 // excluding them here once hid a wedge that took a dataset out of
 // service for two days.
-func genInventory(t *rapid.T, universe []*Snapshot) *SnapshotInventory {
-	local := NewSnapshots(genSubset(t, "local", universe)...)
+func genInventory(tc hegel.TestCase, universe []*Snapshot) *SnapshotInventory {
+	local := NewSnapshots(genSubset(tc, universe)...)
 	remote := NewSnapshots()
-	for i, snap := range universe {
+	for _, snap := range universe {
 		if local.Has(snap) {
-			if rapid.Bool().Draw(t, fmt.Sprintf("shared-%d", i)) {
+			if hegel.Draw(tc, hegel.Booleans()) {
 				remote.Add(snap)
 			}
-		} else if rapid.Bool().Draw(t, fmt.Sprintf("remoteonly-%d", i)) {
+		} else if hegel.Draw(tc, hegel.Booleans()) {
 			remote.Add(snap)
 		}
 	}
@@ -308,18 +337,27 @@ func genInventory(t *rapid.T, universe []*Snapshot) *SnapshotInventory {
 	return &SnapshotInventory{Local: local, Remote: remote}
 }
 
-// TestRapidPlannerReachesTarget is the core soundness property: for any
+// genPlannerCase draws an inventory and the policies applied to it,
+// noting them for the counterexample report.
+func genPlannerCase(tc hegel.TestCase) (current *SnapshotInventory, localPolicy, remotePolicy map[string]int, keepBaseline bool) {
+	universe := genUniverse(tc)
+	current = genInventory(tc, universe)
+	localPolicy = genPolicy(tc)
+	remotePolicy = genPolicy(tc)
+	keepBaseline = hegel.Draw(tc, hegel.Booleans())
+	tc.Note(fmt.Sprintf("local %s, remote %s; local policy %v, remote policy %v, keep_baseline %v",
+		namesOf(current.Local), namesOf(current.Remote), localPolicy, remotePolicy, keepBaseline))
+	return current, localPolicy, remotePolicy, keepBaseline
+}
+
+// TestPlannerReachesTarget is the core soundness property: for any
 // inventory and any policies, the planner produces a valid plan whose
 // simulated execution lands exactly on the calculated target, and the
 // target itself never invents snapshots or drops the incremental
 // transfer base.
-func TestRapidPlannerReachesTarget(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
-		universe := genUniverse(t)
-		current := genInventory(t, universe)
-		localPolicy := genPolicy(t, "local")
-		remotePolicy := genPolicy(t, "remote")
-		keepBaseline := rapid.Bool().Draw(t, "keepBaseline")
+func TestPlannerReachesTarget(t *testing.T) {
+	hegel.Test(t, func(t *hegel.T) {
+		current, localPolicy, remotePolicy, keepBaseline := genPlannerCase(t)
 
 		target := CalculateTargetInventory(current, localPolicy, remotePolicy, keepBaseline)
 
@@ -339,7 +377,8 @@ func TestRapidPlannerReachesTarget(t *testing.T) {
 		// transfers — survives in the target on both sides.
 		if base := current.Local.Intersection(current.Remote).Newest(); base != nil {
 			if !target.Local.Has(base) || !target.Remote.Has(base) {
-				t.Fatalf("target drops the transfer base %s", base.ID())
+				t.Fatalf("target (local %s, remote %s) drops the transfer base %s",
+					namesOf(target.Local), namesOf(target.Remote), base.ID())
 			}
 		}
 
@@ -353,36 +392,54 @@ func TestRapidPlannerReachesTarget(t *testing.T) {
 	})
 }
 
-// TestRapidPlannerConverges: repeatedly planning and (simulated)
+// TestPlannerConverges: repeatedly planning and (simulated)
 // executing reaches a fixed point — an empty plan — within a few
 // cycles. One extra cycle is expected when keep_baseline=false retires
 // an old sync point, but the system must never oscillate.
-func TestRapidPlannerConverges(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
-		universe := genUniverse(t)
-		current := genInventory(t, universe)
-		localPolicy := genPolicy(t, "local")
-		remotePolicy := genPolicy(t, "remote")
-		keepBaseline := rapid.Bool().Draw(t, "keepBaseline")
-
-		for cycle := range 4 {
-			target := CalculateTargetInventory(current, localPolicy, remotePolicy, keepBaseline)
-			plan, err := CalculateTransitionPlan(current, target)
-			if err != nil {
-				t.Fatalf("cycle %d: planning: %v", cycle, err)
-			}
-			if len(plan.Steps) == 0 {
-				return // converged
-			}
-			for _, step := range plan.Steps {
-				next, err := step.Apply(current)
-				if err != nil {
-					t.Fatalf("cycle %d: applying %s: %v", cycle, step, err)
-				}
-				current = next
-			}
-		}
-		t.Fatalf("no convergence after 4 cycles; current %s / %s",
-			current.LocalString(), current.RemoteString())
+func TestPlannerConverges(t *testing.T) {
+	hegel.Test(t, func(t *hegel.T) {
+		current, localPolicy, remotePolicy, keepBaseline := genPlannerCase(t)
+		checkConverges(t, current, localPolicy, remotePolicy, keepBaseline)
 	})
+}
+
+// A recursive snapshot run takes an hourly and a daily snapshot in the
+// same second. Sending both to an empty remote is a full send of one
+// and an incremental of the other from it, a range that runs in the
+// snapshots' (CreatedAt, Name) order since their creation times tie.
+func TestPlannerConvergesSendingSameSecondSnapshots(t *testing.T) {
+	current := &SnapshotInventory{
+		Local: NewSnapshots(
+			&Snapshot{Dataset: "/ds", Name: "hourly-t01", CreatedAt: 3600},
+			&Snapshot{Dataset: "/ds", Name: "daily-t01", CreatedAt: 3600},
+		),
+		Remote: NewSnapshots(),
+	}
+	checkConverges(t, current, map[string]int{}, map[string]int{"hourly": 1, "daily": 1}, false)
+}
+
+// checkConverges plans and applies plans from current until one is
+// empty, failing t if a plan cannot be made or applied, or if four
+// cycles leave work to do.
+func checkConverges(t testing.TB, current *SnapshotInventory, localPolicy, remotePolicy map[string]int, keepBaseline bool) {
+	t.Helper()
+	for cycle := range 4 {
+		target := CalculateTargetInventory(current, localPolicy, remotePolicy, keepBaseline)
+		plan, err := CalculateTransitionPlan(current, target)
+		if err != nil {
+			t.Fatalf("cycle %d: planning: %v", cycle, err)
+		}
+		if len(plan.Steps) == 0 {
+			return // converged
+		}
+		for _, step := range plan.Steps {
+			next, err := step.Apply(current)
+			if err != nil {
+				t.Fatalf("cycle %d: applying %s: %v", cycle, step, err)
+			}
+			current = next
+		}
+	}
+	t.Fatalf("no convergence after 4 cycles; current local %s / remote %s",
+		namesOf(current.Local), namesOf(current.Remote))
 }

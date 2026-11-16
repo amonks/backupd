@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"pgregory.net/rapid"
+	"hegel.dev/go/hegel"
 
 	"monks.co/backupd/config"
 	"monks.co/backupd/history"
@@ -13,23 +13,23 @@ import (
 	"monks.co/backupd/status"
 )
 
-// The rapid tests treat the derivation layer as a specification: for
+// The property tests treat the derivation layer as a specification: for
 // arbitrary inventories, policies, histories, and activities, every
 // claim the dashboard makes must follow from the state it was derived
 // from — ages come from the inventory, issues appear exactly when
 // their condition holds, and the system verdict is a pure function of
 // the issue list.
 
-var rapidTypes = []string{"hourly", "daily", "weekly", "monthly"}
+var snapshotTypes = []string{"hourly", "daily", "weekly", "monthly"}
 
 // genSnaps generates a set of snapshots for one dataset with ages up
 // to ~80 hours before now.
-func genSnaps(t *rapid.T, label string, dataset model.DatasetName) []*model.Snapshot {
-	n := rapid.IntRange(0, 12).Draw(t, label+"-n")
+func genSnaps(tc hegel.TestCase, dataset model.DatasetName) []*model.Snapshot {
+	n := hegel.Draw(tc, hegel.Integers(0, 12))
 	byID := map[string]*model.Snapshot{}
 	for range n {
-		typ := rapid.SampledFrom(rapidTypes).Draw(t, label+"-type")
-		hour := rapid.IntRange(0, 80).Draw(t, label+"-hour")
+		typ := hegel.Draw(tc, hegel.SampledFrom(snapshotTypes))
+		hour := hegel.Draw(tc, hegel.Integers(0, 80))
 		snap := &model.Snapshot{
 			Dataset:   dataset,
 			Name:      fmt.Sprintf("%s-t%02d", typ, hour),
@@ -44,133 +44,137 @@ func genSnaps(t *rapid.T, label string, dataset model.DatasetName) []*model.Snap
 	return out
 }
 
-func genRapidPolicy(t *rapid.T, label string) map[string]int {
+func genPolicy(tc hegel.TestCase) map[string]int {
 	policy := map[string]int{}
-	for _, typ := range rapidTypes {
-		if rapid.Bool().Draw(t, label+"-has-"+typ) {
-			policy[typ] = rapid.IntRange(0, 5).Draw(t, label+"-n-"+typ)
+	for _, typ := range snapshotTypes {
+		if hegel.Draw(tc, hegel.Booleans()) {
+			policy[typ] = hegel.Draw(tc, hegel.Integers(0, 5))
 		}
 	}
 	return policy
 }
 
-func genConf(t *rapid.T) *config.Config {
+func genConf(tc hegel.TestCase) *config.Config {
 	conf := &config.Config{}
-	conf.Local.Policy = genRapidPolicy(t, "local")
-	conf.Remote.Policy = genRapidPolicy(t, "remote")
-	conf.Paused = rapid.Bool().Draw(t, "paused")
-	if rapid.Bool().Draw(t, "snitch") {
+	conf.Local.Policy = genPolicy(tc)
+	conf.Remote.Policy = genPolicy(tc)
+	conf.Paused = hegel.Draw(tc, hegel.Booleans())
+	if hegel.Draw(tc, hegel.Booleans()) {
 		conf.SnitchID = "snitch"
 	}
 	return conf
 }
 
-func genInput(t *rapid.T) Input {
+func genInput(tc hegel.TestCase) Input {
 	names := []model.DatasetName{"/a", "/b", "/c"}
 	// Zero datasets is a model nobody has read yet: a listing always
 	// names the root.
-	count := rapid.IntRange(0, 3).Draw(t, "datasets")
+	count := hegel.Draw(tc, hegel.Integers(0, 3))
 	state := model.New()
 	hist := history.New()
 	for _, name := range names[:count] {
 		// Either side may be unread — the minute after a start while
 		// the remote is listed, or a start with it unreachable — but a
 		// dataset is in the model because some side was read.
-		readLocal := rapid.Bool().Draw(t, "readLocal"+string(name))
-		readRemote := !readLocal || rapid.Bool().Draw(t, "readRemote"+string(name))
+		readLocal := hegel.Draw(tc, hegel.Booleans())
+		readRemote := !readLocal || hegel.Draw(tc, hegel.Booleans())
 		if readLocal {
-			local := genSnaps(t, "local"+string(name), name)
+			local := genSnaps(tc, name)
 			state = model.AddLocalDataset(name, local, nil)(state)
 		}
 		if readRemote {
-			remote := genSnaps(t, "remote"+string(name), name)
+			remote := genSnaps(tc, name)
 			state = model.AddRemoteDataset(name, remote, nil)(state)
 		}
 
 		// Arbitrary run history: maybe a success, maybe a failure, in
 		// either order.
-		if rapid.Bool().Draw(t, "success"+string(name)) {
-			at := now.Add(-time.Duration(rapid.IntRange(0, 300).Draw(t, "sat"+string(name))) * time.Minute)
+		if hegel.Draw(tc, hegel.Booleans()) {
+			at := now.Add(-time.Duration(hegel.Draw(tc, hegel.Integers(0, 300))) * time.Minute)
 			hist.RecordDatasetSuccess(name, at)
 		}
-		if rapid.Bool().Draw(t, "failure"+string(name)) {
-			at := now.Add(-time.Duration(rapid.IntRange(0, 300).Draw(t, "fat"+string(name))) * time.Minute)
+		if hegel.Draw(tc, hegel.Booleans()) {
+			at := now.Add(-time.Duration(hegel.Draw(tc, hegel.Integers(0, 300))) * time.Minute)
 			hist.RecordDatasetFailure(name, at, "induced failure")
 		}
 	}
 
-	phase := rapid.SampledFrom([]status.Phase{
+	phase := hegel.Draw(tc, hegel.SampledFrom([]status.Phase{
 		status.Starting, status.Refreshing, status.Syncing, status.Idle, status.BackingOff,
-	}).Draw(t, "phase")
+	}))
 	activity := status.Activity{Phase: phase}
 	if phase == status.Syncing && count > 0 {
-		activity.Dataset = rapid.SampledFrom(names[:count]).Draw(t, "syncing")
+		activity.Dataset = hegel.Draw(tc, hegel.SampledFrom(names[:count]))
 	}
 	if phase == status.BackingOff {
-		activity.ConsecutiveFailures = rapid.IntRange(1, 5).Draw(t, "consecutive")
+		activity.ConsecutiveFailures = hegel.Draw(tc, hegel.Integers(1, 5))
 	}
 
-	if rapid.Bool().Draw(t, "cycle") {
+	if hegel.Draw(tc, hegel.Booleans()) {
 		hist.RecordCycle(history.Cycle{
 			StartedAt: now.Add(-time.Hour),
 			StoppedAt: now.Add(-30 * time.Minute),
-			OK:        rapid.Bool().Draw(t, "cycleOK"),
+			OK:        hegel.Draw(tc, hegel.Booleans()),
 			Error:     "cycle error",
 		})
 	}
-	if rapid.Bool().Draw(t, "snitched") {
-		hist.RecordSnitch(now.Add(-time.Duration(rapid.IntRange(0, 600).Draw(t, "snitchAge")) * time.Minute))
+	if hegel.Draw(tc, hegel.Booleans()) {
+		hist.RecordSnitch(now.Add(-time.Duration(hegel.Draw(tc, hegel.Integers(0, 600))) * time.Minute))
 	}
 
 	return Input{
 		State:    state,
-		Conf:     genConf(t),
+		Conf:     genConf(tc),
 		History:  hist,
 		Activity: activity,
 		Now:      now,
-		Boot:     now.Add(-time.Duration(rapid.IntRange(0, 600).Draw(t, "bootAge")) * time.Minute),
+		Boot:     now.Add(-time.Duration(hegel.Draw(tc, hegel.Integers(0, 600))) * time.Minute),
 	}
 }
 
-// TestRapidAssuranceFromInventory: every age the dashboard shows is
+// TestAssuranceFromInventory: every age the dashboard shows is
 // exactly the inventory's answer — restart-proof ground truth.
-func TestRapidAssuranceFromInventory(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
+func TestAssuranceFromInventory(t *testing.T) {
+	hegel.Test(t, func(t *hegel.T) {
 		in := genInput(t)
 		sys := Compute(in)
 
 		if len(sys.Datasets) != len(in.State.ListDatasets()) {
-			t.Fatalf("expected every dataset to appear exactly once")
+			t.Fatalf("expected every dataset to appear exactly once: %d datasets in the view, %d in the model",
+				len(sys.Datasets), len(in.State.ListDatasets()))
 		}
 		for _, ds := range sys.Datasets {
 			m := in.State.GetDataset(ds.Name)
 			local, remote := m.Current.Local, m.Current.Remote
 
 			if ds.LocalKnown != m.LocalKnown || ds.RemoteKnown != m.RemoteKnown {
-				t.Fatalf("%s: known flags disagree with the model", ds.Name)
+				t.Fatalf("%s: known flags local %v remote %v, the model's local %v remote %v",
+					ds.Name, ds.LocalKnown, ds.RemoteKnown, m.LocalKnown, m.RemoteKnown)
 			}
 			if ds.HasLocal != (m.LocalKnown && local.Len() > 0) || ds.HasRemote != (m.RemoteKnown && remote.Len() > 0) {
-				t.Fatalf("%s: presence flags disagree with inventory", ds.Name)
+				t.Fatalf("%s: presence flags local %v remote %v disagree with inventory (known %v/%v, %d local, %d remote)",
+					ds.Name, ds.HasLocal, ds.HasRemote, m.LocalKnown, m.RemoteKnown, local.Len(), remote.Len())
 			}
 			if ds.HasLocal && ds.Snapshotted != in.Now.Sub(local.Newest().Time()) {
-				t.Fatalf("%s: snapshotted %s != newest local age", ds.Name, ds.Snapshotted)
+				t.Fatalf("%s: snapshotted %s != newest local age %s", ds.Name, ds.Snapshotted, in.Now.Sub(local.Newest().Time()))
 			}
 			if ds.HasRemote {
 				if ds.BackedUp != in.Now.Sub(remote.Newest().Time()) {
-					t.Fatalf("%s: backed up %s != newest remote age", ds.Name, ds.BackedUp)
+					t.Fatalf("%s: backed up %s != newest remote age %s", ds.Name, ds.BackedUp, in.Now.Sub(remote.Newest().Time()))
 				}
 				if ds.Depth != in.Now.Sub(remote.Oldest().Time()) {
-					t.Fatalf("%s: depth %s != oldest remote age", ds.Name, ds.Depth)
+					t.Fatalf("%s: depth %s != oldest remote age %s", ds.Name, ds.Depth, in.Now.Sub(remote.Oldest().Time()))
 				}
 			}
 			if ds.HasLocal && ds.HasRemote {
 				if ds.Lag != ds.BackedUp-ds.Snapshotted {
-					t.Fatalf("%s: lag %s != backedUp-snapshotted", ds.Name, ds.Lag)
+					t.Fatalf("%s: lag %s != backed up %s - snapshotted %s", ds.Name, ds.Lag, ds.BackedUp, ds.Snapshotted)
 				}
 			}
 			// Absence is asserted only of a side that has been read.
 			if ds.Unreplicated != (ds.HasLocal && ds.RemoteKnown && !ds.HasRemote) {
-				t.Fatalf("%s: unreplicated flag wrong", ds.Name)
+				t.Fatalf("%s: unreplicated %v with local present %v, remote known %v, remote present %v",
+					ds.Name, ds.Unreplicated, ds.HasLocal, ds.RemoteKnown, ds.HasRemote)
 			}
 
 			// Staleness follows the cadence rule exactly: snapshots
@@ -210,11 +214,11 @@ func TestRapidAssuranceFromInventory(t *testing.T) {
 	})
 }
 
-// TestRapidIssuesIffConditions: each issue kind appears exactly when
+// TestIssuesIffConditions: each issue kind appears exactly when
 // its condition holds, and the system verdict is a pure function of
 // the issue list.
-func TestRapidIssuesIffConditions(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
+func TestIssuesIffConditions(t *testing.T) {
+	hegel.Test(t, func(t *hegel.T) {
 		in := genInput(t)
 		sys := Compute(in)
 
@@ -241,7 +245,7 @@ func TestRapidIssuesIffConditions(t *testing.T) {
 					t.Fatalf("%s: expected exactly one %s issue, got %d", ds.Name, kind, got)
 				}
 				if !want && got != 0 {
-					t.Fatalf("%s: unexpected %s issue", ds.Name, kind)
+					t.Fatalf("%s: unexpected %s issue (%d of them)", ds.Name, kind, got)
 				}
 			}
 
@@ -270,7 +274,7 @@ func TestRapidIssuesIffConditions(t *testing.T) {
 		// Issue ordering: severities never increase.
 		for i := 1; i < len(sys.Issues); i++ {
 			if sys.Issues[i].Severity > sys.Issues[i-1].Severity {
-				t.Fatalf("issues out of severity order at %d", i)
+				t.Fatalf("issues out of severity order at %d: %s after %s", i, sys.Issues[i].Severity, sys.Issues[i-1].Severity)
 			}
 		}
 
@@ -315,14 +319,14 @@ func TestRapidIssuesIffConditions(t *testing.T) {
 	})
 }
 
-// TestRapidQueueAccounting: cycle progress is pure arithmetic over the
+// TestQueueAccounting: cycle progress is pure arithmetic over the
 // queue.
-func TestRapidQueueAccounting(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
-		states := rapid.SliceOfN(rapid.SampledFrom([]status.QueueState{
+func TestQueueAccounting(t *testing.T) {
+	hegel.Test(t, func(t *hegel.T) {
+		states := hegel.Draw(t, hegel.Lists(hegel.SampledFrom([]status.QueueState{
 			status.QueueWaiting, status.QueueActive, status.QueueDone,
 			status.QueueFailed, status.QueueSkipped,
-		}), 0, 10).Draw(t, "states")
+		})).MaxSize(10))
 		queue := make([]status.QueueEntry, len(states))
 		active := 0
 		for i, st := range states {
@@ -349,7 +353,7 @@ func TestRapidQueueAccounting(t *testing.T) {
 			}
 		}
 		if c.Done != done || c.Failed != failed || c.Skipped != skipped {
-			t.Fatalf("counts %+v disagree with queue", c)
+			t.Fatalf("counts %+v disagree with queue %v: want done %d, failed %d, skipped %d", c, states, done, failed, skipped)
 		}
 		if c.HasActive != (active > 0) {
 			t.Fatalf("HasActive %v with %d active", c.HasActive, active)
@@ -362,7 +366,8 @@ func TestRapidQueueAccounting(t *testing.T) {
 			t.Fatalf("position %d, want %d", c.Position, wantPos)
 		}
 		if c.Total-done-failed-skipped != waiting+active {
-			t.Fatalf("accounting leak")
+			t.Fatalf("accounting leak: total %d - done %d - failed %d - skipped %d != waiting %d + active %d",
+				c.Total, done, failed, skipped, waiting, active)
 		}
 	})
 }
