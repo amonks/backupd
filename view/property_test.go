@@ -2,6 +2,7 @@ package view
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -69,23 +70,79 @@ func genPolicy(tc hegel.TestCase) map[string]int {
 	return policy
 }
 
-// genPlan draws a plan's steps, each a transfer or a deletion in any
+// genPlan draws a plan's steps, each an operation of any kind in any
 // state: work is queued while a step has not completed.
 func genPlan(tc hegel.TestCase, dataset model.DatasetName) *model.Plan {
 	snap := &model.Snapshot{Dataset: dataset, Name: "daily-t00", CreatedAt: now.Unix()}
+	ops := []model.Operation{
+		&model.SnapshotDeletion{Location: model.Local, Snapshot: snap},
+		&model.SnapshotDeletion{Location: model.Remote, Snapshot: snap},
+		&model.SnapshotRangeDeletion{Location: model.Remote, Start: snap, End: snap},
+		&model.InitialSnapshotTransfer{Snapshot: snap},
+		&model.SnapshotTransfer{Snapshot: snap},
+		&model.SnapshotRangeTransfer{Start: snap, End: snap},
+	}
 	plan := &model.Plan{}
 	for range hegel.Draw(tc, hegel.Integers(1, 3)) {
-		var op model.Operation = &model.SnapshotDeletion{Location: model.Local, Snapshot: snap}
-		if hegel.Draw(tc, hegel.Booleans()) {
-			op = &model.SnapshotRangeTransfer{Start: snap, End: snap}
-		}
-		step := model.NewPlanStep(op)
+		step := model.NewPlanStep(ops[hegel.Draw(tc, hegel.Integers(0, len(ops)-1))])
 		step.Status = hegel.Draw(tc, hegel.SampledFrom([]model.StepStatus{
 			model.StepPending, model.StepInProgress, model.StepCompleted, model.StepFailed,
 		}))
 		plan.Steps = append(plan.Steps, step)
 	}
 	return plan
+}
+
+// work is a dataset's plan as the spec describes it, counted here from
+// the input rather than by the view: every step not yet completed is
+// queued, a transfer or a deletion by its operation.
+type work struct{ deletions, transfers, done, total int }
+
+func workIn(t *hegel.T, m *model.Dataset) work {
+	var w work
+	if m == nil || m.Plan == nil {
+		return w
+	}
+	for _, step := range m.Plan.Steps {
+		w.total++
+		if step.Status == model.StepCompleted {
+			w.done++
+			continue
+		}
+		switch op := step.Operation.(type) {
+		case *model.SnapshotDeletion, *model.SnapshotRangeDeletion:
+			w.deletions++
+		case *model.InitialSnapshotTransfer, *model.SnapshotTransfer, *model.SnapshotRangeTransfer:
+			w.transfers++
+		default:
+			t.Fatalf("generated an operation the oracle doesn't know: %T", op)
+		}
+	}
+	return w
+}
+
+// pausedKeys are the override keys whose subtree the config pauses.
+// genInput keys overrides by dataset name, already in normal form.
+func pausedKeys(conf *config.Config) map[string]bool {
+	out := map[string]bool{}
+	for key, override := range conf.Overrides {
+		if override.Paused {
+			out[key] = true
+		}
+	}
+	return out
+}
+
+// subtreePaused applies the spec's pause rule (§ Pause) from the
+// config: pause is cumulative, so a dataset is paused by its own key
+// or any ancestor's.
+func subtreePaused(conf *config.Config, name model.DatasetName) bool {
+	for key := range pausedKeys(conf) {
+		if name.Path() == key || strings.HasPrefix(name.Path(), key+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // pauseRate is how often the operator has paused execution, globally or
@@ -276,7 +333,8 @@ func TestAssuranceFromInventory(t *testing.T) {
 			if ds.SnapshotsStale != wantSnapStale {
 				t.Fatalf("%s: snapshot staleness %v, want %v", ds.Name, ds.SnapshotsStale, wantSnapStale)
 			}
-			wantBackupStale := backupCadence > 0 && !ds.Paused && ds.HasRemote && ds.BackedUp > StaleFactor*backupCadence
+			paused := in.Conf.Paused || subtreePaused(in.Conf, ds.Name)
+			wantBackupStale := backupCadence > 0 && !paused && ds.HasRemote && ds.BackedUp > StaleFactor*backupCadence
 			if ds.BackupStale != wantBackupStale {
 				t.Fatalf("%s: backup staleness %v, want %v", ds.Name, ds.BackupStale, wantBackupStale)
 			}
@@ -295,6 +353,22 @@ func TestAssuranceFromInventory(t *testing.T) {
 				if row.LocalWant != localPolicy[row.Periodicity] {
 					t.Fatalf("%s %s: local want %d != policy", ds.Name, row.Periodicity, row.LocalWant)
 				}
+			}
+
+			// Work comes from the plan.
+			w := workIn(t, m)
+			if ds.PendingDeletions != w.deletions || ds.PendingTransfers != w.transfers ||
+				ds.StepsDone != w.done || ds.StepsTotal != w.total {
+				t.Fatalf("%s: %d deletions, %d transfers queued, %d of %d steps done; the plan has %d, %d, %d of %d",
+					ds.Name, ds.PendingDeletions, ds.PendingTransfers, ds.StepsDone, ds.StepsTotal,
+					w.deletions, w.transfers, w.done, w.total)
+			}
+
+			// Pause comes from the config.
+			subtree := subtreePaused(in.Conf, ds.Name)
+			if ds.GlobalPaused != in.Conf.Paused || ds.SubtreePaused != subtree || ds.Paused != (in.Conf.Paused || subtree) {
+				t.Fatalf("%s: paused %v (global %v, subtree %v), config says global %v, subtree %v",
+					ds.Name, ds.Paused, ds.GlobalPaused, ds.SubtreePaused, in.Conf.Paused, subtree)
 			}
 		}
 	})
@@ -336,7 +410,9 @@ func TestIssuesIffConditions(t *testing.T) {
 			}
 
 			// Health precedence: the verdict is the highest-priority
-			// triggered condition.
+			// triggered condition, pause read from the config and work
+			// from the plan.
+			w := workIn(t, in.State.GetDataset(ds.Name))
 			var want Health
 			switch {
 			case failing:
@@ -345,9 +421,9 @@ func TestIssuesIffConditions(t *testing.T) {
 				want = HealthAtRisk
 			case !ds.LocalKnown || !ds.RemoteKnown:
 				want = HealthUnknown
-			case ds.Paused:
+			case in.Conf.Paused || subtreePaused(in.Conf, ds.Name):
 				want = HealthPaused
-			case ds.PendingDeletions+ds.PendingTransfers > 0:
+			case w.deletions+w.transfers > 0:
 				want = HealthBehind
 			default:
 				want = HealthOK
@@ -355,6 +431,37 @@ func TestIssuesIffConditions(t *testing.T) {
 			if ds.Health != want {
 				t.Fatalf("%s: health %s, want %s", ds.Name, ds.Health, want)
 			}
+		}
+
+		// Pause reminders come from the config: one for a global pause
+		// and one for each paused subtree, every one at info.
+		unlisted := pausedKeys(in.Conf)
+		global := 0
+		for _, issue := range sys.Issues {
+			if issue.Kind != IssuePaused {
+				continue
+			}
+			if issue.Severity != Info {
+				t.Fatalf("pause reminder %+v at %s, want info", issue, issue.Severity)
+			}
+			if issue.Dataset == nil {
+				global++
+				continue
+			}
+			if !unlisted[issue.Dataset.Path()] {
+				t.Fatalf("pause reminder for %s, which no paused override names or which is listed twice", issue.Dataset)
+			}
+			delete(unlisted, issue.Dataset.Path())
+		}
+		if len(unlisted) > 0 {
+			t.Fatalf("no pause reminder for the paused subtrees %v", unlisted)
+		}
+		wantGlobal := 0
+		if in.Conf.Paused {
+			wantGlobal = 1
+		}
+		if global != wantGlobal {
+			t.Fatalf("%d global pause reminders, want %d", global, wantGlobal)
 		}
 
 		// Issue ordering: severities never increase.
