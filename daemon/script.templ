@@ -198,10 +198,27 @@ templ script() {
 	// does not own and must not throw away. Scroll positions are
 	// restored for both shells — the standalone one scrolls its two
 	// panes, the embedded one scrolls the window.
+	//
+	// The dashboard is aria-busy while the swap is under way — from the
+	// refetch until it lands — but not while it waits on the reader's
+	// open menu or half-typed search, which would leave anyone waiting
+	// for the page to settle waiting on the reader. Assistive technology
+	// reads the mark as ARIA defines it; browser tests wait on it
+	// (specs/pkg-browsertest.md § Settled).
 	async function refreshBody() {
 		for (let i = 0; i < 40 && gridBusy(); i++) {
 			await new Promise(resolve => setTimeout(resolve, 750));
 		}
+		const marked = document.querySelector('.backupd');
+		if (marked) marked.setAttribute('aria-busy', 'true');
+		try {
+			await swapBody();
+		} finally {
+			if (marked) marked.removeAttribute('aria-busy');
+		}
+	}
+
+	async function swapBody() {
 		const res = await fetch(location.href);
 		if (!res.ok) return;
 		const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
