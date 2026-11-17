@@ -22,7 +22,39 @@ import (
 // their condition holds, and the system verdict is a pure function of
 // the issue list.
 
+// snapshotTypes are the periodicities generated snapshots and policies
+// use, shortest first; periodOf is each one's nominal period.
 var snapshotTypes = []string{"hourly", "daily", "weekly", "monthly"}
+
+var periodOf = map[string]time.Duration{
+	"hourly":  time.Hour,
+	"daily":   24 * time.Hour,
+	"weekly":  7 * 24 * time.Hour,
+	"monthly": 30 * 24 * time.Hour,
+}
+
+// cadenceOf applies the spec's cadence rule (§ Dashboard): the smallest
+// periodicity a policy retains, zero for none.
+func cadenceOf(policy map[string]int) time.Duration {
+	for _, typ := range snapshotTypes {
+		if policy[typ] > 0 {
+			return periodOf[typ]
+		}
+	}
+	return 0
+}
+
+// severityOf is the spec's severity for each issue kind (§ Dashboard,
+// issues).
+var severityOf = map[IssueKind]Severity{
+	IssueFailing:        Critical,
+	IssueUnreplicated:   Critical,
+	IssueStaleBackup:    Critical,
+	IssueCycleFailing:   Critical,
+	IssueStaleSnapshots: Warning,
+	IssueSnitchOverdue:  Warning,
+	IssuePaused:         Info,
+}
 
 // genSnaps generates a set of snapshots for one dataset with ages up
 // to ~80 hours before now.
@@ -135,12 +167,18 @@ func pausedKeys(conf *config.Config) map[string]bool {
 	return out
 }
 
+// within reports whether the dataset at path is key's or under it: the
+// datasets an override at key reaches.
+func within(path, key string) bool {
+	return path == key || strings.HasPrefix(path, key+"/")
+}
+
 // subtreePaused applies the spec's pause rule (§ Pause) from the
 // config: pause is cumulative, so a dataset is paused by its own key
 // or any ancestor's.
 func subtreePaused(conf *config.Config, name model.DatasetName) bool {
 	for key := range pausedKeys(conf) {
-		if name.Path() == key || strings.HasPrefix(name.Path(), key+"/") {
+		if within(name.Path(), key) {
 			return true
 		}
 	}
@@ -176,6 +214,11 @@ var datasetPool = []model.DatasetName{"/a", "/a/b", "/a/b/c", "/a/c", "/ab", "/b
 // own unpaused override can sit under a paused ancestor's: pause
 // accumulates, where retention's longest prefix picks the dataset's.
 const overrideRate = 0.35
+
+// nestRate is how often a case draws, outright, the one shape on which
+// those two rules disagree: a paused key, and an unpaused one under it
+// on the way to a dataset in the model (genInput).
+const nestRate = 0.2
 
 // genInput draws the dashboard's inputs, the shape first.
 //
@@ -264,13 +307,35 @@ func genInput(tc hegel.TestCase) Input {
 		}
 	}
 
+	conf.Overrides = map[string]*config.Override{}
 	for _, key := range datasetPool {
 		if hegel.Draw(tc, hegel.WeightedBooleans(overrideRate)) {
-			if conf.Overrides == nil {
-				conf.Overrides = map[string]*config.Override{}
-			}
 			paused := hegel.Draw(tc, hegel.WeightedBooleans(pauseRate/overrideRate))
 			conf.Overrides[key.Path()] = &config.Override{Paused: paused}
+		}
+	}
+	// Drawn key by key, the overrides meet a paused key with an unpaused
+	// one nearer a dataset in about one case in twenty, and unevenly: a
+	// default run of a hundred holds anywhere from none to a score, and
+	// one run in twenty to one in a hundred would pass a pause resolved
+	// by longest prefix, as retention is. So a case also draws that shape
+	// outright, at nestRate, on the way to one of its datasets; a default
+	// run then holds ten to thirty-five.
+	if hegel.Draw(tc, hegel.WeightedBooleans(nestRate)) {
+		var nests [][2]string
+		for _, name := range names {
+			for _, outer := range datasetPool {
+				for _, inner := range datasetPool {
+					if inner != outer && within(inner.Path(), outer.Path()) && within(name.Path(), inner.Path()) {
+						nests = append(nests, [2]string{outer.Path(), inner.Path()})
+					}
+				}
+			}
+		}
+		if len(nests) > 0 {
+			nest := hegel.Draw(tc, hegel.SampledFrom(nests))
+			conf.Overrides[nest[0]] = &config.Override{Paused: true}
+			conf.Overrides[nest[1]] = &config.Override{}
 		}
 	}
 
@@ -364,7 +429,7 @@ func TestAssuranceFromInventory(t *testing.T) {
 			// against the local policy's cadence, the backup against
 			// the remote policy's.
 			localPolicy, remotePolicy, _ := in.Conf.PolicyFor(ds.Name.Path())
-			cadence, backupCadence := Cadence(localPolicy), Cadence(remotePolicy)
+			cadence, backupCadence := cadenceOf(localPolicy), cadenceOf(remotePolicy)
 			if ds.Cadence != cadence || ds.BackupCadence != backupCadence {
 				t.Fatalf("%s: cadences %s/%s != policy cadences %s/%s",
 					ds.Name, ds.Cadence, ds.BackupCadence, cadence, backupCadence)
@@ -498,16 +563,24 @@ func TestIssuesIffConditions(t *testing.T) {
 			}
 		}
 
+		// Each issue is as severe as the spec says its kind is.
+		for _, issue := range sys.Issues {
+			want, ok := severityOf[issue.Kind]
+			if !ok {
+				t.Fatalf("an issue of a kind the oracle doesn't know: %+v", issue)
+			}
+			if issue.Severity != want {
+				t.Fatalf("%s issue %+v at %s, want %s", issue.Kind, issue, issue.Severity, want)
+			}
+		}
+
 		// Pause reminders come from the config: one for a global pause
-		// and one for each paused subtree, every one at info.
+		// and one for each paused subtree.
 		unlisted := pausedKeys(in.Conf)
 		global := 0
 		for _, issue := range sys.Issues {
 			if issue.Kind != IssuePaused {
 				continue
-			}
-			if issue.Severity != Info {
-				t.Fatalf("pause reminder %+v at %s, want info", issue, issue.Severity)
 			}
 			if issue.Dataset == nil {
 				global++
