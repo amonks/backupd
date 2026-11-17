@@ -156,7 +156,7 @@ func TestBrowserPhoneLayout(t *testing.T) {
 			var raw string
 			if err := chromedp.Run(ctx,
 				browsertest.Step("emulate the phone", chromedp.Emulate(phone)),
-				browsertest.Step("navigate to "+path, chromedp.Navigate(server.URL+path)),
+				browsertest.Open(server.URL+path),
 				browsertest.Step("measure the layout", chromedp.Evaluate(fitProbe, &raw)),
 			); err != nil {
 				t.Fatal(err)
@@ -197,8 +197,15 @@ func TestBrowserCountdownTicksInTheServersWords(t *testing.T) {
 	ctx := browsertest.NewBrowser(t)
 	browsertest.CaptureConsole(t, ctx)
 	if err := chromedp.Run(ctx,
-		browsertest.Step("open the overview", chromedp.Navigate(server.URL+"/global")),
+		browsertest.Open(server.URL+"/global"),
 		browsertest.Step("pause the browser clock", chromedp.ActionFunc(func(ctx context.Context) error {
+			// A page on a paused virtual clock never answers under the
+			// CPU throttle browsertest.ThrottleEnv sets, and a clock this
+			// test drives itself has no timing left for the throttle to
+			// shake, so it runs at full speed.
+			if err := emulation.SetCPUThrottlingRate(1).Do(ctx); err != nil {
+				return err
+			}
 			_, err := emulation.SetVirtualTimePolicy(emulation.VirtualTimePolicyPause).Do(ctx)
 			return err
 		})),
@@ -293,7 +300,7 @@ func TestBrowserHoversReadInTheViewersZone(t *testing.T) {
 	var dot, ago string
 	if err := chromedp.Run(ctx,
 		browsertest.Step("pin the viewer's zone", emulation.SetTimezoneOverride("America/Los_Angeles")),
-		browsertest.Step("open the overview", chromedp.Navigate(server.URL+"/global")),
+		browsertest.Open(server.URL+"/global"),
 		browsertest.Step("read a dot's hover", chromedp.Evaluate(`document.querySelector('.qdot[data-at]').title`, &dot)),
 		browsertest.Step("read an ago hover", chromedp.Evaluate(`document.querySelector('time[data-localtime-title]').title`, &ago)),
 	); err != nil {
