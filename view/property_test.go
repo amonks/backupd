@@ -107,20 +107,32 @@ func genPolicy(tc hegel.TestCase) map[string]int {
 	return policy
 }
 
-// genOverride draws an override, paused as asked, naming a policy of
-// its own on each side half the time. A side it names replaces the
-// global policy wholesale — an empty policy included, which expects no
-// cadence at all — and a side it leaves out falls back to the global
-// one (§ Per-Dataset Overrides).
+// genOverride draws an override, paused as asked, with each side's
+// policy drawn by genOverridePolicy.
 func genOverride(tc hegel.TestCase, paused bool) *config.Override {
 	o := &config.Override{Paused: paused}
-	if hegel.Draw(tc, hegel.Booleans()) {
-		o.Local.Policy = genPolicy(tc)
-	}
-	if hegel.Draw(tc, hegel.Booleans()) {
-		o.Remote.Policy = genPolicy(tc)
-	}
+	o.Local.Policy = genOverridePolicy(tc)
+	o.Remote.Policy = genOverridePolicy(tc)
 	return o
+}
+
+// genOverridePolicy draws one side of an override, a third of the time
+// each: left out, so the side falls back to the global policy; an
+// empty policy, which replaces the global one wholesale and expects no
+// cadence at all; or a policy of its own (§ Per-Dataset Overrides).
+// The empty policy is the edge between the other two — named, yet
+// naming nothing — so it is drawn outright: genPolicy comes up empty
+// about one time in sixteen, and a default run then held an empty
+// side over a global policy with a cadence in a case or two at most.
+func genOverridePolicy(tc hegel.TestCase) map[string]int {
+	switch hegel.Draw(tc, hegel.SampledFrom([]string{"global", "empty", "own"})) {
+	case "global":
+		return nil
+	case "empty":
+		return map[string]int{}
+	default:
+		return genPolicy(tc)
+	}
 }
 
 // genPlan draws a plan's steps, each an operation of any kind in any
@@ -390,7 +402,11 @@ func genInput(tc hegel.TestCase) Input {
 	conf.Local.Policy = genPolicy(tc)
 	conf.Remote.Policy = genPolicy(tc)
 	conf.Paused = hegel.Draw(tc, hegel.WeightedBooleans(pauseRate))
-	if hegel.Draw(tc, hegel.Booleans()) {
+	// A snitch is configured half the time, and under every global pause:
+	// a paused daemon withholds its ping (§ Pause), so the snitch is how a
+	// forgotten pause comes to light, and the snitch rule's pause conjunct
+	// is reached only by a paused daemon that has one, late (below).
+	if conf.Paused || hegel.Draw(tc, hegel.Booleans()) {
 		conf.SnitchID = "snitch"
 	}
 
@@ -505,14 +521,24 @@ func genInput(tc hegel.TestCase) Input {
 			Error:     "cycle error",
 		})
 	}
-	// A calm snitch pinged, or the daemon booted, within the last sync
-	// interval.
-	maxAge := int(conf.Interval() / time.Minute)
-	if stray() {
+	// The snitch's last ping, and the daemon's boot (what the rule
+	// measures from when it never pinged), in minutes ago. A calm snitch
+	// pinged, or the daemon booted, within the last sync interval; a
+	// troubled one anywhere in the long range, either side of the grace.
+	// A paused daemon has withheld its ping (§ Pause), so under a pause
+	// both lie past the grace, where the rule's pause conjunct is all
+	// that keeps the issue down: left to the trouble rate, under a pause
+	// drawn rarely, that came up in a case or two of a default run.
+	interval := int(conf.Interval() / time.Minute)
+	minAge, maxAge := 0, interval
+	switch {
+	case conf.Paused:
+		minAge, maxAge = SnitchOverdueFactor*interval+1, 600
+	case stray():
 		maxAge = 600
 	}
 	if hegel.Draw(tc, hegel.Booleans()) {
-		hist.RecordSnitch(now.Add(-time.Duration(hegel.Draw(tc, hegel.Integers(0, maxAge))) * time.Minute))
+		hist.RecordSnitch(now.Add(-time.Duration(hegel.Draw(tc, hegel.Integers(minAge, maxAge))) * time.Minute))
 	}
 
 	return Input{
@@ -521,7 +547,7 @@ func genInput(tc hegel.TestCase) Input {
 		History:  hist,
 		Activity: activity,
 		Now:      now,
-		Boot:     now.Add(-time.Duration(hegel.Draw(tc, hegel.Integers(0, maxAge))) * time.Minute),
+		Boot:     now.Add(-time.Duration(hegel.Draw(tc, hegel.Integers(minAge, maxAge))) * time.Minute),
 	}
 }
 
