@@ -13,8 +13,8 @@ require (
 	hegel.dev/go/hegel v0.9.36
 	monks.co/pkg/browsertest v0.0.4
 	monks.co/pkg/csp v0.0.1
-	monks.co/pkg/datagrid v0.0.1
-	monks.co/pkg/localtime v0.0.1
+	monks.co/pkg/datagrid v0.0.25
+	monks.co/pkg/localtime v0.0.9
 )
 
 require (
