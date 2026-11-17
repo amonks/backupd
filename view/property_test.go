@@ -2,6 +2,7 @@ package view
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -19,8 +20,11 @@ import (
 // arbitrary inventories, policies, histories, and activities, every
 // claim the dashboard makes must follow from the state it was derived
 // from — ages come from the inventory, issues appear exactly when
-// their condition holds, and the system verdict is a pure function of
-// the issue list.
+// their condition holds, and the system verdict follows from which
+// conditions hold. What each claim should be is derived here from the
+// inputs (expect), by this file's own reading of the spec's rules:
+// never from another of the view's fields, nor from the config's own
+// resolution of a dataset's policies and pause.
 
 // snapshotTypes are the periodicities generated snapshots and policies
 // use, shortest first; periodOf is each one's nominal period.
@@ -101,6 +105,22 @@ func genPolicy(tc hegel.TestCase) map[string]int {
 		}
 	}
 	return policy
+}
+
+// genOverride draws an override, paused as asked, naming a policy of
+// its own on each side half the time. A side it names replaces the
+// global policy wholesale — an empty policy included, which expects no
+// cadence at all — and a side it leaves out falls back to the global
+// one (§ Per-Dataset Overrides).
+func genOverride(tc hegel.TestCase, paused bool) *config.Override {
+	o := &config.Override{Paused: paused}
+	if hegel.Draw(tc, hegel.Booleans()) {
+		o.Local.Policy = genPolicy(tc)
+	}
+	if hegel.Draw(tc, hegel.Booleans()) {
+		o.Remote.Policy = genPolicy(tc)
+	}
+	return o
 }
 
 // genPlan draws a plan's steps, each an operation of any kind in any
@@ -197,6 +217,129 @@ func failingIn(hist *history.History, name model.DatasetName) (history.Failure, 
 	return f, !succeeded || f.At.After(success)
 }
 
+// policiesOf applies the spec's retention rule (§ Per-Dataset
+// Overrides) from the config: the override at the longest key over the
+// dataset wins, and gives its policy on each side it names one, the
+// global policy on a side it leaves out. overridden says whether any
+// override reaches the dataset.
+func policiesOf(conf *config.Config, name model.DatasetName) (local, remote map[string]int, overridden bool) {
+	var best string
+	var override *config.Override
+	for key, o := range conf.Overrides {
+		if within(name.Path(), key) && (override == nil || len(key) > len(best)) {
+			best, override = key, o
+		}
+	}
+	local, remote = conf.Local.Policy, conf.Remote.Policy
+	if override == nil {
+		return local, remote, false
+	}
+	if override.Local.Policy != nil {
+		local = override.Local.Policy
+	}
+	if override.Remote.Policy != nil {
+		remote = override.Remote.Policy
+	}
+	return local, remote, true
+}
+
+// expected is what § Dashboard says the view shows of one dataset,
+// derived here from the inputs alone: the model's inventory and plan,
+// the config's policies and pauses, the run history, the clock.
+type expected struct {
+	localKnown, remoteKnown bool
+	// local and remote are the read sides' inventories, nil for a side
+	// not read: nothing is asserted of it.
+	local, remote             *model.Snapshots
+	hasLocal, hasRemote       bool
+	snapshotted, backedUp     time.Duration
+	depth                     time.Duration
+	localPolicy, remotePolicy map[string]int
+	overridden                bool
+	cadence, backupCadence    time.Duration
+	snapshotsStale            bool
+	backupStale, unreplicated bool
+	globalPaused, subtree     bool
+	failure                   history.Failure
+	failing                   bool
+	work                      work
+	health                    Health
+}
+
+func expect(t *hegel.T, in Input, name model.DatasetName) expected {
+	m := in.State.GetDataset(name)
+	e := expected{localKnown: m.LocalKnown, remoteKnown: m.RemoteKnown}
+	if e.localKnown {
+		e.local = m.Current.Local
+		e.hasLocal = e.local.Len() > 0
+	}
+	if e.remoteKnown {
+		e.remote = m.Current.Remote
+		e.hasRemote = e.remote.Len() > 0
+	}
+	if e.hasLocal {
+		e.snapshotted = in.Now.Sub(e.local.Newest().Time())
+	}
+	if e.hasRemote {
+		e.backedUp = in.Now.Sub(e.remote.Newest().Time())
+		e.depth = in.Now.Sub(e.remote.Oldest().Time())
+	}
+
+	// Staleness follows the cadence rule: snapshots against the local
+	// policy's cadence, the backup against the remote policy's, each
+	// the dataset's own.
+	e.localPolicy, e.remotePolicy, e.overridden = policiesOf(in.Conf, name)
+	e.cadence, e.backupCadence = cadenceOf(e.localPolicy), cadenceOf(e.remotePolicy)
+	e.globalPaused, e.subtree = in.Conf.Paused, subtreePaused(in.Conf, name)
+	paused := e.globalPaused || e.subtree
+	e.snapshotsStale = e.cadence > 0 && e.localKnown && (!e.hasLocal || e.snapshotted > StaleFactor*e.cadence)
+	e.backupStale = e.backupCadence > 0 && !paused && e.hasRemote && e.backedUp > StaleFactor*e.backupCadence
+	// Absence is asserted only of a side that has been read.
+	e.unreplicated = e.hasLocal && e.remoteKnown && !e.hasRemote
+
+	e.failure, e.failing = failingIn(in.History, name)
+	e.work = workIn(t, m)
+
+	// Health precedence (§ Dashboard, dataset health).
+	switch {
+	case e.failing:
+		e.health = HealthFailing
+	case e.unreplicated || e.backupStale || e.snapshotsStale:
+		e.health = HealthAtRisk
+	case !e.localKnown || !e.remoteKnown:
+		e.health = HealthUnknown
+	case paused:
+		e.health = HealthPaused
+	case e.work.deletions+e.work.transfers > 0:
+		e.health = HealthBehind
+	default:
+		e.health = HealthOK
+	}
+	return e
+}
+
+// cycleFailingIn applies the spec's cycle rule (§ Dashboard, issues):
+// the daemon is backing off, or the most recent cycle failed.
+func cycleFailingIn(in Input) bool {
+	cycles := in.History.Cycles()
+	return in.Activity.Phase == status.BackingOff || len(cycles) > 0 && !cycles[0].OK
+}
+
+// snitchOverdueIn applies the spec's snitch rule (§ Dashboard,
+// issues): a snitch is configured, execution isn't paused, and no ping
+// has succeeded — since boot, if none ever has — within
+// SnitchOverdueFactor intervals.
+func snitchOverdueIn(in Input) bool {
+	if in.Conf.SnitchID == "" || in.Conf.Paused {
+		return false
+	}
+	ref, pinged := in.History.LastSnitch()
+	if !pinged {
+		ref = in.Boot
+	}
+	return !ref.IsZero() && in.Now.Sub(ref) > SnitchOverdueFactor*in.Conf.Interval()
+}
+
 // pauseRate is how often the operator has paused execution, globally or
 // at one override's subtree: a choice, not trouble, so it is drawn on
 // its own, and rarely enough that most cases run.
@@ -212,7 +355,9 @@ var datasetPool = []model.DatasetName{"/a", "/a/b", "/a/b/c", "/a/c", "/ab", "/b
 // overrideRate is how often a name in the pool carries an override,
 // paused at pauseRate overall. The rest pause nothing, so a dataset's
 // own unpaused override can sit under a paused ancestor's: pause
-// accumulates, where retention's longest prefix picks the dataset's.
+// accumulates, where retention's longest prefix picks the dataset's
+// policies, which an override names of its own half the time a side
+// (genOverride).
 const overrideRate = 0.35
 
 // nestRate is how often a case draws, outright, the one shape on which
@@ -311,7 +456,7 @@ func genInput(tc hegel.TestCase) Input {
 	for _, key := range datasetPool {
 		if hegel.Draw(tc, hegel.WeightedBooleans(overrideRate)) {
 			paused := hegel.Draw(tc, hegel.WeightedBooleans(pauseRate/overrideRate))
-			conf.Overrides[key.Path()] = &config.Override{Paused: paused}
+			conf.Overrides[key.Path()] = genOverride(tc, paused)
 		}
 	}
 	// Drawn key by key, the overrides meet a paused key with an unpaused
@@ -334,8 +479,8 @@ func genInput(tc hegel.TestCase) Input {
 		}
 		if len(nests) > 0 {
 			nest := hegel.Draw(tc, hegel.SampledFrom(nests))
-			conf.Overrides[nest[0]] = &config.Override{Paused: true}
-			conf.Overrides[nest[1]] = &config.Override{}
+			conf.Overrides[nest[0]] = genOverride(tc, true)
+			conf.Overrides[nest[1]] = genOverride(tc, false)
 		}
 	}
 
@@ -381,225 +526,213 @@ func genInput(tc hegel.TestCase) Input {
 }
 
 // TestAssuranceFromInventory: every age the dashboard shows is
-// exactly the inventory's answer — restart-proof ground truth.
+// exactly the inventory's answer — restart-proof ground truth — and
+// every other fact about a dataset is what its inputs say: its
+// cadences its own policies', its work the plan's, its run record the
+// history's, its pause the config's.
 func TestAssuranceFromInventory(t *testing.T) {
 	hegel.Test(t, func(t *hegel.T) {
 		in := genInput(t)
 		sys := Compute(in)
 
-		if len(sys.Datasets) != len(in.State.ListDatasets()) {
+		names := in.State.ListDatasets()
+		if len(sys.Datasets) != len(names) {
 			t.Fatalf("expected every dataset to appear exactly once: %d datasets in the view, %d in the model",
-				len(sys.Datasets), len(in.State.ListDatasets()))
+				len(sys.Datasets), len(names))
 		}
-		for _, ds := range sys.Datasets {
-			m := in.State.GetDataset(ds.Name)
-			local, remote := m.Current.Local, m.Current.Remote
+		for _, name := range names {
+			ds, ok := sys.Get(name)
+			if !ok {
+				t.Fatalf("%s is in the model but not the view", name)
+			}
+			e := expect(t, in, name)
 
-			if ds.LocalKnown != m.LocalKnown || ds.RemoteKnown != m.RemoteKnown {
+			if ds.LocalKnown != e.localKnown || ds.RemoteKnown != e.remoteKnown {
 				t.Fatalf("%s: known flags local %v remote %v, the model's local %v remote %v",
-					ds.Name, ds.LocalKnown, ds.RemoteKnown, m.LocalKnown, m.RemoteKnown)
+					name, ds.LocalKnown, ds.RemoteKnown, e.localKnown, e.remoteKnown)
 			}
-			if ds.HasLocal != (m.LocalKnown && local.Len() > 0) || ds.HasRemote != (m.RemoteKnown && remote.Len() > 0) {
-				t.Fatalf("%s: presence flags local %v remote %v disagree with inventory (known %v/%v, %d local, %d remote)",
-					ds.Name, ds.HasLocal, ds.HasRemote, m.LocalKnown, m.RemoteKnown, local.Len(), remote.Len())
+			if ds.HasLocal != e.hasLocal || ds.HasRemote != e.hasRemote {
+				t.Fatalf("%s: presence flags local %v remote %v, the inventory's %v/%v (known %v/%v)",
+					name, ds.HasLocal, ds.HasRemote, e.hasLocal, e.hasRemote, e.localKnown, e.remoteKnown)
 			}
-			if ds.HasLocal && ds.Snapshotted != in.Now.Sub(local.Newest().Time()) {
-				t.Fatalf("%s: snapshotted %s != newest local age %s", ds.Name, ds.Snapshotted, in.Now.Sub(local.Newest().Time()))
+			if e.hasLocal && ds.Snapshotted != e.snapshotted {
+				t.Fatalf("%s: snapshotted %s != newest local age %s", name, ds.Snapshotted, e.snapshotted)
 			}
-			if ds.HasRemote {
-				if ds.BackedUp != in.Now.Sub(remote.Newest().Time()) {
-					t.Fatalf("%s: backed up %s != newest remote age %s", ds.Name, ds.BackedUp, in.Now.Sub(remote.Newest().Time()))
-				}
-				if ds.Depth != in.Now.Sub(remote.Oldest().Time()) {
-					t.Fatalf("%s: depth %s != oldest remote age %s", ds.Name, ds.Depth, in.Now.Sub(remote.Oldest().Time()))
-				}
+			if e.hasRemote && (ds.BackedUp != e.backedUp || ds.Depth != e.depth) {
+				t.Fatalf("%s: backed up %s, depth %s; newest remote age %s, oldest %s",
+					name, ds.BackedUp, ds.Depth, e.backedUp, e.depth)
 			}
-			if ds.HasLocal && ds.HasRemote {
-				if ds.Lag != ds.BackedUp-ds.Snapshotted {
-					t.Fatalf("%s: lag %s != backed up %s - snapshotted %s", ds.Name, ds.Lag, ds.BackedUp, ds.Snapshotted)
-				}
+			if e.hasLocal && e.hasRemote && ds.Lag != e.backedUp-e.snapshotted {
+				t.Fatalf("%s: lag %s, the newest remote's age less the newest local's is %s", name, ds.Lag, e.backedUp-e.snapshotted)
 			}
-			// Absence is asserted only of a side that has been read.
-			if ds.Unreplicated != (ds.HasLocal && ds.RemoteKnown && !ds.HasRemote) {
-				t.Fatalf("%s: unreplicated %v with local present %v, remote known %v, remote present %v",
-					ds.Name, ds.Unreplicated, ds.HasLocal, ds.RemoteKnown, ds.HasRemote)
+			if ds.Unreplicated != e.unreplicated {
+				t.Fatalf("%s: unreplicated %v, want %v (local present %v, remote known %v, remote present %v)",
+					name, ds.Unreplicated, e.unreplicated, e.hasLocal, e.remoteKnown, e.hasRemote)
 			}
 
-			// Staleness follows the cadence rule exactly: snapshots
-			// against the local policy's cadence, the backup against
-			// the remote policy's.
-			localPolicy, remotePolicy, _ := in.Conf.PolicyFor(ds.Name.Path())
-			cadence, backupCadence := cadenceOf(localPolicy), cadenceOf(remotePolicy)
-			if ds.Cadence != cadence || ds.BackupCadence != backupCadence {
-				t.Fatalf("%s: cadences %s/%s != policy cadences %s/%s",
-					ds.Name, ds.Cadence, ds.BackupCadence, cadence, backupCadence)
+			if ds.Overridden != e.overridden {
+				t.Fatalf("%s: overridden %v, want %v", name, ds.Overridden, e.overridden)
 			}
-			wantSnapStale := cadence > 0 && ds.LocalKnown && (!ds.HasLocal || ds.Snapshotted > StaleFactor*cadence)
-			if ds.SnapshotsStale != wantSnapStale {
-				t.Fatalf("%s: snapshot staleness %v, want %v", ds.Name, ds.SnapshotsStale, wantSnapStale)
+			if ds.Cadence != e.cadence || ds.BackupCadence != e.backupCadence {
+				t.Fatalf("%s: cadences %s/%s != its policies' cadences %s/%s (local %v, remote %v)",
+					name, ds.Cadence, ds.BackupCadence, e.cadence, e.backupCadence, e.localPolicy, e.remotePolicy)
 			}
-			paused := in.Conf.Paused || subtreePaused(in.Conf, ds.Name)
-			wantBackupStale := backupCadence > 0 && !paused && ds.HasRemote && ds.BackedUp > StaleFactor*backupCadence
-			if ds.BackupStale != wantBackupStale {
-				t.Fatalf("%s: backup staleness %v, want %v", ds.Name, ds.BackupStale, wantBackupStale)
+			if ds.SnapshotsStale != e.snapshotsStale {
+				t.Fatalf("%s: snapshot staleness %v, want %v", name, ds.SnapshotsStale, e.snapshotsStale)
+			}
+			if ds.BackupStale != e.backupStale {
+				t.Fatalf("%s: backup staleness %v, want %v", name, ds.BackupStale, e.backupStale)
 			}
 
-			// Fulfillment counts match the inventory.
-			for _, row := range ds.Fulfillment {
-				have := 0
-				for snap := range local.All() {
-					if snap.Type() == row.Periodicity {
-						have++
+			// Fulfillment: a row for each periodicity a policy wants or a
+			// read side holds, its counts the policies' and the
+			// inventory's.
+			have := func(snaps *model.Snapshots) map[string]int {
+				out := map[string]int{}
+				if snaps != nil {
+					for snap := range snaps.All() {
+						out[snap.Type()]++
 					}
 				}
-				if row.LocalHave != have {
-					t.Fatalf("%s %s: local have %d, inventory has %d", ds.Name, row.Periodicity, row.LocalHave, have)
+				return out
+			}
+			localHave, remoteHave := have(e.local), have(e.remote)
+			rows := map[string]Fulfillment{}
+			for _, row := range ds.Fulfillment {
+				rows[row.Periodicity] = row
+			}
+			for _, counts := range []map[string]int{e.localPolicy, e.remotePolicy, localHave, remoteHave} {
+				for typ, n := range counts {
+					if _, ok := rows[typ]; n > 0 && !ok {
+						t.Fatalf("%s: no fulfillment row for %s, which a policy wants or a side holds", name, typ)
+					}
 				}
-				if row.LocalWant != localPolicy[row.Periodicity] {
-					t.Fatalf("%s %s: local want %d != policy", ds.Name, row.Periodicity, row.LocalWant)
+			}
+			for typ, row := range rows {
+				want := Fulfillment{typ, e.localPolicy[typ], localHave[typ], e.remotePolicy[typ], remoteHave[typ]}
+				if row != want {
+					t.Fatalf("%s %s: fulfillment %+v, want %+v", name, typ, row, want)
 				}
 			}
 
 			// Work comes from the plan.
-			w := workIn(t, m)
+			w := e.work
 			if ds.PendingDeletions != w.deletions || ds.PendingTransfers != w.transfers ||
 				ds.StepsDone != w.done || ds.StepsTotal != w.total {
 				t.Fatalf("%s: %d deletions, %d transfers queued, %d of %d steps done; the plan has %d, %d, %d of %d",
-					ds.Name, ds.PendingDeletions, ds.PendingTransfers, ds.StepsDone, ds.StepsTotal,
+					name, ds.PendingDeletions, ds.PendingTransfers, ds.StepsDone, ds.StepsTotal,
 					w.deletions, w.transfers, w.done, w.total)
 			}
 
 			// The run record comes from the history.
-			success, succeeded := in.History.LastSuccess(ds.Name)
+			success, succeeded := in.History.LastSuccess(name)
 			if !succeeded {
 				success = time.Time{}
 			}
 			if !ds.LastSuccess.Equal(success) {
-				t.Fatalf("%s: last success %v, the history's %v", ds.Name, ds.LastSuccess, success)
+				t.Fatalf("%s: last success %v, the history's %v", name, ds.LastSuccess, success)
 			}
-			if f, failed := in.History.LastFailure(ds.Name); failed != (ds.LastFailure != nil) || failed && *ds.LastFailure != f {
-				t.Fatalf("%s: last failure %+v, the history's %+v (on record %v)", ds.Name, ds.LastFailure, f, failed)
+			if f, failed := in.History.LastFailure(name); failed != (ds.LastFailure != nil) || failed && *ds.LastFailure != f {
+				t.Fatalf("%s: last failure %+v, the history's %+v (on record %v)", name, ds.LastFailure, f, failed)
 			}
 
 			// Pause comes from the config.
-			subtree := subtreePaused(in.Conf, ds.Name)
-			if ds.GlobalPaused != in.Conf.Paused || ds.SubtreePaused != subtree || ds.Paused != (in.Conf.Paused || subtree) {
+			if ds.GlobalPaused != e.globalPaused || ds.SubtreePaused != e.subtree || ds.Paused != (e.globalPaused || e.subtree) {
 				t.Fatalf("%s: paused %v (global %v, subtree %v), config says global %v, subtree %v",
-					ds.Name, ds.Paused, ds.GlobalPaused, ds.SubtreePaused, in.Conf.Paused, subtree)
+					name, ds.Paused, ds.GlobalPaused, ds.SubtreePaused, e.globalPaused, e.subtree)
 			}
 		}
 	})
 }
 
-// TestIssuesIffConditions: each issue kind appears exactly when
-// its condition holds, and the system verdict is a pure function of
-// the issue list.
+// TestIssuesIffConditions: each issue kind appears exactly when its
+// condition holds of the inputs, as severe as the spec says, and the
+// system verdict follows from which those are.
 func TestIssuesIffConditions(t *testing.T) {
 	hegel.Test(t, func(t *hegel.T) {
 		in := genInput(t)
 		sys := Compute(in)
 
-		find := func(kind IssueKind, dataset model.DatasetName) []Issue {
-			var out []Issue
-			for _, issue := range sys.Issues {
-				if issue.Kind == kind && issue.Dataset != nil && *issue.Dataset == dataset {
-					out = append(out, issue)
-				}
+		// The issues the inputs call for, by kind and dataset ("" for
+		// the daemon's own), each exactly once.
+		key := func(kind IssueKind, dataset *model.DatasetName) string {
+			if dataset == nil {
+				return string(kind)
 			}
-			return out
+			return string(kind) + " " + dataset.Path()
 		}
-		count := func(kind IssueKind, dataset model.DatasetName) int { return len(find(kind, dataset)) }
-
-		for _, ds := range sys.Datasets {
-			// Failing comes from the history, and says what failed and
-			// since when.
-			failure, failing := failingIn(in.History, ds.Name)
-			if failing {
-				issue := find(IssueFailing, ds.Name)
-				if len(issue) == 1 && (issue[0].Detail != failure.Error || !issue[0].Since.Equal(failure.At)) {
-					t.Fatalf("%s: failing issue says %q since %v; the history's failure is %q at %v",
-						ds.Name, issue[0].Detail, issue[0].Since, failure.Error, failure.At)
-				}
-				if ds.Reason != failure.Error {
-					t.Fatalf("%s: failing for %q; the history's failure is %q", ds.Name, ds.Reason, failure.Error)
-				}
+		want := map[string]IssueKind{}
+		raise := func(kind IssueKind, dataset *model.DatasetName, when bool) {
+			if when {
+				want[key(kind, dataset)] = kind
 			}
-			for kind, want := range map[IssueKind]bool{
-				IssueFailing:        failing,
-				IssueUnreplicated:   ds.Unreplicated,
-				IssueStaleBackup:    ds.BackupStale,
-				IssueStaleSnapshots: ds.SnapshotsStale,
-			} {
-				got := count(kind, ds.Name)
-				if want && got != 1 {
-					t.Fatalf("%s: expected exactly one %s issue, got %d", ds.Name, kind, got)
-				}
-				if !want && got != 0 {
-					t.Fatalf("%s: unexpected %s issue (%d of them)", ds.Name, kind, got)
-				}
+		}
+		unknown := 0
+		for _, name := range in.State.ListDatasets() {
+			e := expect(t, in, name)
+			ds, ok := sys.Get(name)
+			if !ok {
+				t.Fatalf("%s is in the model but not the view", name)
+			}
+			raise(IssueFailing, &name, e.failing)
+			raise(IssueUnreplicated, &name, e.unreplicated)
+			raise(IssueStaleBackup, &name, e.backupStale)
+			raise(IssueStaleSnapshots, &name, e.snapshotsStale)
+			if !e.localKnown || !e.remoteKnown {
+				unknown++
 			}
 
 			// Health precedence: the verdict is the highest-priority
-			// triggered condition, pause read from the config and work
-			// from the plan.
-			w := workIn(t, in.State.GetDataset(ds.Name))
-			var want Health
-			switch {
-			case failing:
-				want = HealthFailing
-			case ds.Unreplicated || ds.BackupStale || ds.SnapshotsStale:
-				want = HealthAtRisk
-			case !ds.LocalKnown || !ds.RemoteKnown:
-				want = HealthUnknown
-			case in.Conf.Paused || subtreePaused(in.Conf, ds.Name):
-				want = HealthPaused
-			case w.deletions+w.transfers > 0:
-				want = HealthBehind
-			default:
-				want = HealthOK
+			// triggered condition.
+			if ds.Health != e.health {
+				t.Fatalf("%s: health %s, want %s", name, ds.Health, e.health)
 			}
-			if ds.Health != want {
-				t.Fatalf("%s: health %s, want %s", ds.Name, ds.Health, want)
+			// Failing says what failed and since when.
+			if e.failing && ds.Reason != e.failure.Error {
+				t.Fatalf("%s: failing for %q; the history's failure is %q", name, ds.Reason, e.failure.Error)
+			}
+			for _, issue := range sys.Issues {
+				if e.failing && issue.Kind == IssueFailing && issue.Dataset != nil && *issue.Dataset == name &&
+					(issue.Detail != e.failure.Error || !issue.Since.Equal(e.failure.At)) {
+					t.Fatalf("%s: failing issue says %q since %v; the history's failure is %q at %v",
+						name, issue.Detail, issue.Since, e.failure.Error, e.failure.At)
+				}
+			}
+		}
+		// The daemon's own: the cycle, the snitch, and a pause reminder
+		// for a global pause and for each paused subtree.
+		raise(IssueCycleFailing, nil, cycleFailingIn(in))
+		raise(IssueSnitchOverdue, nil, snitchOverdueIn(in))
+		raise(IssuePaused, nil, in.Conf.Paused)
+		for path := range pausedKeys(in.Conf) {
+			name := model.DatasetName(path)
+			raise(IssuePaused, &name, true)
+		}
+
+		got := map[string]int{}
+		for _, issue := range sys.Issues {
+			got[key(issue.Kind, issue.Dataset)]++
+		}
+		for k := range want {
+			if got[k] != 1 {
+				t.Fatalf("expected exactly one %s issue, got %d (issues %+v)", k, got[k], sys.Issues)
+			}
+		}
+		for k, n := range got {
+			if _, ok := want[k]; !ok {
+				t.Fatalf("unexpected %s issue (%d of them); the inputs call for %v", k, n, slices.Sorted(maps.Keys(want)))
 			}
 		}
 
 		// Each issue is as severe as the spec says its kind is.
 		for _, issue := range sys.Issues {
-			want, ok := severityOf[issue.Kind]
+			sev, ok := severityOf[issue.Kind]
 			if !ok {
 				t.Fatalf("an issue of a kind the oracle doesn't know: %+v", issue)
 			}
-			if issue.Severity != want {
-				t.Fatalf("%s issue %+v at %s, want %s", issue.Kind, issue, issue.Severity, want)
+			if issue.Severity != sev {
+				t.Fatalf("%s issue %+v at %s, want %s", issue.Kind, issue, issue.Severity, sev)
 			}
-		}
-
-		// Pause reminders come from the config: one for a global pause
-		// and one for each paused subtree.
-		unlisted := pausedKeys(in.Conf)
-		global := 0
-		for _, issue := range sys.Issues {
-			if issue.Kind != IssuePaused {
-				continue
-			}
-			if issue.Dataset == nil {
-				global++
-				continue
-			}
-			if !unlisted[issue.Dataset.Path()] {
-				t.Fatalf("pause reminder for %s, which no paused override names or which is listed twice", issue.Dataset)
-			}
-			delete(unlisted, issue.Dataset.Path())
-		}
-		if len(unlisted) > 0 {
-			t.Fatalf("no pause reminder for the paused subtrees %v", unlisted)
-		}
-		wantGlobal := 0
-		if in.Conf.Paused {
-			wantGlobal = 1
-		}
-		if global != wantGlobal {
-			t.Fatalf("%d global pause reminders, want %d", global, wantGlobal)
 		}
 
 		// Issue ordering: severities never increase.
@@ -609,43 +742,36 @@ func TestIssuesIffConditions(t *testing.T) {
 			}
 		}
 
-		worst := Info
-		for _, issue := range sys.Issues {
-			if issue.Severity > worst {
-				worst = issue.Severity
-			}
-		}
-		unknown := 0
-		for _, ds := range sys.Datasets {
-			if !ds.LocalKnown || !ds.RemoteKnown {
-				unknown++
-			}
-		}
 		if sys.Unknown != unknown {
 			t.Fatalf("unknown count %d, want %d", sys.Unknown, unknown)
 		}
 
-		// The system verdict follows from the issues, and from what has
-		// not been read when nothing alarms: a bad thing that is true
-		// outranks not knowing, and not knowing outranks all clear.
-		var want Verdict
+		// The system verdict follows from the issues the inputs call
+		// for, and from what has not been read when nothing alarms: a
+		// bad thing that is true outranks not knowing, and not knowing
+		// outranks all clear.
+		worst := Info
+		for _, kind := range want {
+			worst = max(worst, severityOf[kind])
+		}
+		var verdict Verdict
 		switch {
 		case in.Conf.Paused:
-			want = SystemPaused
+			verdict = SystemPaused
 		case worst == Critical:
-			want = SystemFailing
+			verdict = SystemFailing
 		case worst == Warning:
-			want = SystemAttention
-		case unknown > 0 || len(sys.Datasets) == 0:
-			want = SystemUnknown
+			verdict = SystemAttention
+		case unknown > 0 || len(in.State.ListDatasets()) == 0:
+			verdict = SystemUnknown
 		default:
-			want = SystemOK
+			verdict = SystemOK
 		}
-		if sys.Verdict != want {
-			t.Fatalf("verdict %s, want %s (issues %+v)", sys.Verdict, want, sys.Issues)
+		if sys.Verdict != verdict {
+			t.Fatalf("verdict %s, want %s (issues %+v)", sys.Verdict, verdict, sys.Issues)
 		}
-		if (sys.Reason == "") != (sys.Verdict == SystemOK) {
-			t.Fatalf("reason %q inconsistent with verdict %s", sys.Reason, sys.Verdict)
+		if (sys.Reason == "") != (verdict == SystemOK) {
+			t.Fatalf("reason %q with verdict %s", sys.Reason, verdict)
 		}
 	})
 }

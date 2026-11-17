@@ -389,7 +389,7 @@ func TestSyncDatasetDiscardsDivergentRemoteTip(t *testing.T) {
 
 	var journaled []string
 	for _, e := range b.history.Events() {
-		if strings.Contains(e.Message, "discarded remote snapshot") {
+		if strings.HasPrefix(e.Message, discardedOne) || strings.HasPrefix(e.Message, discardedMany) {
 			if e.Level != history.Warning {
 				t.Errorf("expected the discard journaled at warning level, got %q", e.Level)
 			}
@@ -399,8 +399,8 @@ func TestSyncDatasetDiscardsDivergentRemoteTip(t *testing.T) {
 	if len(journaled) != 1 {
 		t.Fatalf("expected exactly one discard journaled, got %d: %v", len(journaled), journaled)
 	}
-	if !strings.Contains(journaled[0], snapB.Name) {
-		t.Errorf("expected the journal entry to name %s, got %q", snapB.Name, journaled[0])
+	if journaled[0] != discardedOne+snapB.Name+discardedWhy {
+		t.Errorf("expected the journal entry to name %s alone, got %q", snapB.Name, journaled[0])
 	}
 }
 
@@ -444,14 +444,14 @@ func TestSyncDatasetJournalsEveryDivergentSnapshotByName(t *testing.T) {
 
 	var journaled []string
 	for _, e := range b.history.Events() {
-		if strings.Contains(e.Message, "discarded remote snapshot") {
+		if strings.HasPrefix(e.Message, discardedOne) || strings.HasPrefix(e.Message, discardedMany) {
 			journaled = append(journaled, e.Message)
 		}
 	}
 	if len(journaled) != 1 {
 		t.Fatalf("expected exactly one discard journaled, got %d: %v", len(journaled), journaled)
 	}
-	if !strings.Contains(journaled[0], "discarded remote snapshots ") {
+	if !strings.HasPrefix(journaled[0], discardedMany) {
 		t.Errorf("expected a plural entry, got %q", journaled[0])
 	}
 	for _, snap := range orphans {

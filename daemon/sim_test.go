@@ -1026,15 +1026,16 @@ func divergentIn(inv *model.SnapshotInventory) []*model.Snapshot {
 }
 
 // journaledDiscards counts, by snapshot name, the divergent discards
-// the journal reports for a dataset, failing on one journaled at any
-// level but warning.
+// the journal reports for a dataset (daemon.go's discardedOne,
+// discardedMany, discardedWhy), failing on one journaled at any level
+// but warning, or without its reason.
 func journaledDiscards(t testing.TB, b *Daemon, name model.DatasetName) map[string]int {
 	t.Helper()
 	out := map[string]int{}
 	for _, e := range b.history.Events() {
-		names, ok := strings.CutPrefix(e.Message, "discarded remote snapshots ")
+		names, ok := strings.CutPrefix(e.Message, discardedMany)
 		if !ok {
-			names, ok = strings.CutPrefix(e.Message, "discarded remote snapshot ")
+			names, ok = strings.CutPrefix(e.Message, discardedOne)
 		}
 		if !ok || e.Dataset == nil || *e.Dataset != name {
 			continue
@@ -1042,7 +1043,10 @@ func journaledDiscards(t testing.TB, b *Daemon, name model.DatasetName) map[stri
 		if e.Level != history.Warning {
 			t.Fatalf("%s: discard journaled at %s, want warning: %q", name, e.Level, e.Message)
 		}
-		names, _, _ = strings.Cut(names, ": ")
+		names, ok = strings.CutSuffix(names, discardedWhy)
+		if !ok {
+			t.Fatalf("%s: discard journaled without its reason: %q", name, e.Message)
+		}
 		for snap := range strings.SplitSeq(names, ", ") {
 			out[snap]++
 		}

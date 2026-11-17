@@ -887,17 +887,16 @@ func (b *Daemon) syncDatasetInner(ctx context.Context, dataset model.DatasetName
 
 			if err == nil {
 				if discarded := divergentDiscards(step.Operation, divergent); len(discarded) > 0 {
-					noun := "snapshot"
+					lead := discardedOne
 					if len(discarded) > 1 {
-						noun = "snapshots"
+						lead = discardedMany
 					}
 					name := dataset
 					b.history.RecordEvent(history.Event{
 						At:      time.Now(),
 						Level:   history.Warning,
 						Dataset: &name,
-						Message: fmt.Sprintf("discarded remote %s %s: absent locally and newer than the newest shared snapshot, so the dataset could not transfer at all",
-							noun, strings.Join(discarded, ", ")),
+						Message: lead + strings.Join(discarded, ", ") + discardedWhy,
 					})
 				}
 			}
@@ -915,6 +914,16 @@ func (b *Daemon) syncDatasetInner(ctx context.Context, dataset model.DatasetName
 	}
 	return resumeErr
 }
+
+// A divergent discard's journal entry names the snapshots,
+// comma-separated, after discardedOne or discardedMany, and then says
+// why with discardedWhy. The end-to-end tests read the names back out
+// by the same words.
+const (
+	discardedOne  = "discarded remote snapshot "
+	discardedMany = "discarded remote snapshots "
+	discardedWhy  = ": absent locally and newer than the newest shared snapshot, so the dataset could not transfer at all"
+)
 
 // divergentDiscards names every snapshot a step discarded from the
 // remote because local no longer had it, and nil for every other
