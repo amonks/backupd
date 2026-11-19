@@ -388,7 +388,10 @@ type apiFulfillment struct {
 
 // apiDatasetState is one dataset's view. LocalKnown and RemoteKnown say
 // whether each side's snapshots have been read; the facts about a side
-// that has not are absent or null, never zero.
+// that has not are absent or null, never zero. KeepsLocal and
+// KeepsRemote say whether each side's policy keeps any snapshot: a
+// side whose policy keeps none is empty as configured (a remote that
+// keeps none is excluded from backup, never unreplicated).
 type apiDatasetState struct {
 	Name               string           `json:"name"`
 	Path               string           `json:"path"`
@@ -405,6 +408,8 @@ type apiDatasetState struct {
 	SnapshotsStale     bool             `json:"snapshotsStale,omitzero"`
 	BackupStale        bool             `json:"backupStale,omitzero"`
 	Unreplicated       bool             `json:"unreplicated,omitzero"`
+	KeepsLocal         bool             `json:"keepsLocal"`
+	KeepsRemote        bool             `json:"keepsRemote"`
 	LocalSnapshots     *int             `json:"localSnapshots"`
 	RemoteSnapshots    *int             `json:"remoteSnapshots"`
 	LocalUsedBytes     int64            `json:"localUsedBytes,omitzero"`
@@ -608,6 +613,8 @@ func (b *Daemon) handleState(w http.ResponseWriter, req *http.Request) {
 			SnapshotsStale:     dv.SnapshotsStale,
 			BackupStale:        dv.BackupStale,
 			Unreplicated:       dv.Unreplicated,
+			KeepsLocal:         dv.KeepsLocal,
+			KeepsRemote:        dv.KeepsRemote,
 			LocalSnapshots:     countPtr(dv.LocalKnown, dv.LocalCount),
 			RemoteSnapshots:    countPtr(dv.RemoteKnown, dv.RemoteCount),
 			LocalUsedBytes:     dv.LocalUsed,

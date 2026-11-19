@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -553,6 +554,100 @@ func TestPageShowsStaleAndUnreplicated(t *testing.T) {
 	body = do(t, h, "GET", "/new", "").Body.String()
 	if !strings.Contains(body, "never been replicated") {
 		t.Error("expected the unreplicated recovery sentence")
+	}
+}
+
+// TestPageShowsExcludedAsConfigured: a dataset whose policies keep
+// nothing — a regenerable cache excluded from backup — holds no remote
+// copy because none is wanted. The pages say so in a neutral voice
+// ("excluded") and raise nothing: no "never replicated", no failing
+// verdict, nothing red, on either side.
+func TestPageShowsExcludedAsConfigured(t *testing.T) {
+	local, remote := steadyStateExecutors()
+	b, _ := newAPITestDaemon(t, local, remote)
+	b.conf.Swap(func(c *config.Config) *config.Config {
+		fresh, err := config.Parse(append(slices.Clone(c.Raw), []byte(`
+[overrides."/cache"]
+keep_baseline = false
+[overrides."/cache".local.policy]
+daily = 0
+[overrides."/cache".remote.policy]
+daily = 0
+`)...))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return fresh
+	})
+	// /cache: the night's recursive snapshot, not yet pruned, and
+	// nothing on the remote. /pruned: the same after the prune.
+	taken := testSnap("daily-new", time.Now().Add(-time.Hour).Unix())
+	taken.Dataset = "/cache"
+	b.state.Swap(model.AddLocalDataset("/cache", []*model.Snapshot{taken}, nil))
+	b.state.Swap(model.AddRemoteDataset("/cache", nil, nil))
+	b.state.Swap(model.AddLocalDataset("/cache/pruned", nil, nil))
+	b.state.Swap(model.AddRemoteDataset("/cache/pruned", nil, nil))
+	h := b.Handler()
+
+	page := func(target string) string {
+		return html.UnescapeString(do(t, h, "GET", target, "").Body.String())
+	}
+	body := page("/global")
+	for _, want := range []string{"OK", "All clear", ">excluded<", "Its remote policy keeps no snapshots"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected the overview to contain %q", want)
+		}
+	}
+	for _, unwanted := range []string{"never replicated", "FAILING", ">never<", ">no snapshots<", `class="chip chip-atrisk"`, `class="issue `} {
+		if strings.Contains(body, unwanted) {
+			t.Errorf("the overview says %q of an excluded dataset", unwanted)
+		}
+	}
+
+	body = page("/cache")
+	if !strings.Contains(body, "This dataset is excluded from backup:") {
+		t.Error("expected the excluded recovery sentence")
+	}
+	if strings.Contains(body, "never been replicated") || strings.Contains(body, `class="error-text">never<`) {
+		t.Error("the dataset page says an excluded dataset was never replicated")
+	}
+	body = page("/cache/pruned")
+	if !strings.Contains(body, "excluded: its local policy keeps no snapshots") ||
+		!strings.Contains(body, "excluded: its remote policy keeps no snapshots") {
+		t.Error("expected the pruned dataset's facts to call both sides excluded")
+	}
+	if strings.Contains(body, "no local snapshots") {
+		t.Error("the dataset page calls an excluded local side missing its snapshots")
+	}
+
+	// /api/state says the same, and says it outright: keepsLocal and
+	// keepsRemote are present and false, which is what tells a reader
+	// an empty side is excluded rather than missing.
+	var resp struct {
+		Verdict  string `json:"verdict"`
+		Datasets []struct {
+			Name         string `json:"name"`
+			KeepsLocal   *bool  `json:"keepsLocal"`
+			KeepsRemote  *bool  `json:"keepsRemote"`
+			Unreplicated bool   `json:"unreplicated"`
+		} `json:"datasets"`
+	}
+	w := do(t, h, "GET", "/api/state", "")
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decoding response: %v\n%s", err, w.Body)
+	}
+	if resp.Verdict != "ok" {
+		t.Errorf("expected an ok verdict, got %s", w.Body)
+	}
+	var names []string
+	for _, ds := range resp.Datasets {
+		names = append(names, ds.Name)
+		if ds.KeepsLocal == nil || *ds.KeepsLocal || ds.KeepsRemote == nil || *ds.KeepsRemote || ds.Unreplicated {
+			t.Errorf("%s: want keepsLocal and keepsRemote present and false, unreplicated false; got %s", ds.Name, w.Body)
+		}
+	}
+	if !slices.Equal(names, []string{"/cache", "/cache/pruned"}) {
+		t.Errorf("expected /cache and /cache/pruned, got %v", names)
 	}
 }
 

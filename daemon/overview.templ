@@ -151,11 +151,14 @@ templ lastCycleNote(d pageData) {
 }
 
 // ageCell renders an age with staleness highlighting, the absent label
-// ("never", "no snapshots") for a side read and found empty, or "not
+// ("never", "no snapshots") for a side read and found empty, "excluded"
+// for one empty as its policy configures (side names it), or "not
 // read" for a side nobody has read yet.
-templ ageCell(known, has bool, age time.Duration, stale bool, absent string) {
+templ ageCell(known, has bool, age time.Duration, stale bool, absent string, isExcluded bool, side string) {
 	if !known {
 		@notRead()
+	} else if isExcluded {
+		@excluded(side)
 	} else if !has {
 		<span class="error-text">{ absent }</span>
 	} else if stale {

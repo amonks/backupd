@@ -16,31 +16,13 @@ import (
 // demoConfig is the config the -sim daemon runs under. It is written to
 // a real temp file so the whole config-editing path — pause toggles,
 // preview, save-and-apply, hand-edit reload — works exactly as in
-// production. The short interval keeps the demo lively.
+// production. The short interval keeps the demo lively; the tables are
+// the ones the scenario is written against, sim.DemoConfigTables.
 const demoConfig = `# backupd -sim configuration (temp file; edits apply like production)
 interval = "45s"
 listen = "127.0.0.1:8899"
 
-[local]
-root = "sim/tank"
-[local.policy]
-hourly = 6
-daily = 7
-
-[remote]
-ssh_host = "sim"
-root = "sim/backup"
-[remote.policy]
-daily = 14
-
-[overrides."/tm"]
-paused = true
-keep_baseline = false
-[overrides."/tm".local.policy]
-daily = 1
-[overrides."/tm".remote.policy]
-daily = 1
-`
+` + sim.DemoConfigTables
 
 // runSim boots the complete daemon — sync loop, planner, dashboard —
 // against the sim package's in-memory ZFS pair. No root, ZFS, or

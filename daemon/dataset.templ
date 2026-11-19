@@ -81,6 +81,12 @@ templ recoverySentence(dv view.Dataset) {
 				That is older than expected for its cadence.
 			}
 		</p>
+	} else if dv.RemoteExcluded() {
+		<p class="recovery muted">
+			<b>This dataset is excluded from backup:</b> its remote policy
+			keeps no snapshots, so nothing of it could be restored were the
+			local pool lost.
+		</p>
 	} else if dv.HasLocal {
 		<p class="recovery atrisk">
 			<b>This dataset has never been replicated:</b> nothing could be
@@ -116,6 +122,8 @@ templ factsTable(d pageData, name model.DatasetName, dv view.Dataset) {
 					if dv.Cadence > 0 {
 						<span class="muted">(expected every { fmtCompactDuration(dv.Cadence) })</span>
 					}
+				} else if dv.LocalExcluded() {
+					<span class="muted">excluded: its local policy keeps no snapshots</span>
 				} else {
 					<span class="error-text">no local snapshots</span>
 				}
@@ -138,6 +146,8 @@ templ factsTable(d pageData, name model.DatasetName, dv view.Dataset) {
 					if dv.BackupCadence > 0 {
 						<span class="muted">(expected every { fmtCompactDuration(dv.BackupCadence) })</span>
 					}
+				} else if dv.RemoteExcluded() {
+					<span class="muted">excluded: its remote policy keeps no snapshots</span>
 				} else {
 					<span class="error-text">never</span>
 				}

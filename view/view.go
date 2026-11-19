@@ -32,6 +32,12 @@
 // unknown, and the system says so instead of all clear, unless
 // something that has been read is alarming, since a bad thing that is
 // true is news and not knowing is only the absence of news.
+//
+// An empty side is a fault only where its policy keeps something. A
+// dataset whose remote policy keeps nothing — the override that
+// excludes a regenerable cache from backup — is configured to have no
+// remote copy, so having none is the config honored: it reads
+// excluded, never "never replicated", and raises nothing.
 package view
 
 import (
@@ -72,7 +78,8 @@ const (
 	// HealthPaused: execution intentionally stopped for this dataset.
 	HealthPaused
 	// HealthAtRisk: the data-safety promise is not being kept — never
-	// replicated, backup too old, or snapshots not being taken.
+	// replicated though its remote policy keeps snapshots, backup too
+	// old, or snapshots not being taken.
 	HealthAtRisk
 	// HealthFailing: the most recent sync attempt errored.
 	HealthFailing
@@ -243,9 +250,20 @@ type Dataset struct {
 	// not staleness. Zero means no expectation (no policy).
 	Cadence        time.Duration
 	BackupCadence  time.Duration
+	// KeepsLocal and KeepsRemote report whether each side's policy
+	// keeps any snapshot at all (Keeps). A side whose policy keeps none
+	// is configured to hold nothing, so holding nothing there is
+	// excluded, not missing. Not the same as a zero cadence: a policy
+	// naming only a periodicity outside the known ones keeps snapshots
+	// without setting a cadence.
+	KeepsLocal     bool
+	KeepsRemote    bool
 	SnapshotsStale bool
 	BackupStale    bool
-	Unreplicated   bool
+	// Unreplicated: the remote has been read and holds nothing of a
+	// dataset that has local snapshots and a remote policy that keeps
+	// some.
+	Unreplicated bool
 
 	Fulfillment []Fulfillment
 
@@ -284,6 +302,13 @@ type Dataset struct {
 // dataset's used: what sits beneath it, held by datasets of their own.
 func (d Dataset) LocalBeneath() int64  { return d.LocalUsed - d.LocalOwn }
 func (d Dataset) RemoteBeneath() int64 { return d.RemoteUsed - d.RemoteOwn }
+
+// LocalExcluded and RemoteExcluded report a side read and found empty
+// whose policy keeps nothing: empty as configured. The pages say
+// "excluded" there, where an empty side whose policy keeps something
+// reads as missing its snapshots.
+func (d Dataset) LocalExcluded() bool  { return d.LocalKnown && !d.HasLocal && !d.KeepsLocal }
+func (d Dataset) RemoteExcluded() bool { return d.RemoteKnown && !d.HasRemote && !d.KeepsRemote }
 
 // PendingSummary describes queued work, e.g. "2 deletions · 1 transfer".
 func (d Dataset) PendingSummary() string {
@@ -465,6 +490,20 @@ func Cadence(policy map[string]int) time.Duration {
 	return out
 }
 
+// Keeps reports whether a policy keeps any snapshot: some periodicity
+// with a count above zero. Retention keeps a snapshot only by matching
+// it against a positive count, so under a policy that keeps none the
+// side is meant to be empty — for the remote, the dataset is excluded
+// from backup and nothing is ever transferred.
+func Keeps(policy map[string]int) bool {
+	for _, n := range policy {
+		if n > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // Compute derives the full dashboard state.
 func Compute(in Input) System {
 	sys := System{
@@ -532,6 +571,8 @@ func computeDataset(in Input, name model.DatasetName, m *model.Dataset) Dataset 
 	localPolicy, remotePolicy, _ := conf.PolicyFor(name.Path())
 	ds.Cadence = Cadence(localPolicy)
 	ds.BackupCadence = Cadence(remotePolicy)
+	ds.KeepsLocal = Keeps(localPolicy)
+	ds.KeepsRemote = Keeps(remotePolicy)
 
 	if m == nil {
 		return ds
@@ -605,7 +646,8 @@ func computeDataset(in Input, name model.DatasetName, m *model.Dataset) Dataset 
 	if ds.BackupCadence > 0 {
 		ds.BackupStale = !ds.Paused && ds.HasRemote && ds.BackedUp > StaleFactor*ds.BackupCadence
 	}
-	ds.Unreplicated = ds.HasLocal && ds.RemoteKnown && !ds.HasRemote
+	// A remote whose policy keeps nothing is meant to be empty.
+	ds.Unreplicated = ds.HasLocal && ds.RemoteKnown && !ds.HasRemote && ds.KeepsRemote
 
 	if a := in.Activity; a.Phase == status.Syncing && a.Dataset == name {
 		ds.Syncing = true

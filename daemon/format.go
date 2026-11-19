@@ -35,6 +35,12 @@ func fmtCompactDuration(d time.Duration) string {
 	return view.CompactDuration(d)
 }
 
+// excludedTitle explains an "excluded" side ("local" or "remote"): its
+// policy keeps no snapshots, so it is empty as configured.
+func excludedTitle(side string) string {
+	return "Its " + side + " policy keeps no snapshots"
+}
+
 // plural renders "1 cycle" / "3 cycles".
 func plural(n int, noun string) string {
 	if n == 1 {

@@ -194,13 +194,40 @@ const busyDataset = "/db"
 // and "daily-1" fits any width and so proves nothing about a phone.
 func demoDaemon(t *testing.T) *Daemon {
 	t.Helper()
-	conf := simConf(map[string]int{"hourly": 6, "daily": 7}, map[string]int{"daily": 14}, true)
-	// The demo's paused subtree, which is where the overview's info
-	// issue and the sidebar's paused dots come from.
-	conf.Overrides = map[string]*config.Override{"/tm": {Paused: true}}
+	// Under the config the demo is written against: its paused subtree
+	// is where the overview's info issue and the sidebar's paused dots
+	// come from, and its excluded cache reads "excluded".
+	conf, err := config.Parse([]byte(sim.DemoConfigTables))
+	if err != nil {
+		t.Fatalf("parsing the demo's config: %v", err)
+	}
 	b := newSimDaemon(conf, sim.Demo(time.Now()))
 	primeState(t, b)
 	return b
+}
+
+// TestDemoRunsUnderItsConfig: some of the demo's states exist only
+// under the config it is written against — /cache, seeded with no
+// remote, is excluded under its all-zero override and never
+// replicated under any other — and every entry point runs it under
+// sim.DemoConfigTables so that none of them shows the other. The
+// fixture holds the states that depend on it.
+func TestDemoRunsUnderItsConfig(t *testing.T) {
+	sys := computeView(demoDaemon(t), time.Now())
+	cache, ok := sys.Get("/cache")
+	if !ok {
+		t.Fatal("the demo has no /cache")
+	}
+	if !cache.RemoteExcluded() || cache.Unreplicated || cache.PendingTransfers != 0 {
+		t.Errorf("/cache: remote excluded %v, unreplicated %v, %d transfers queued; want excluded, nothing to send",
+			cache.RemoteExcluded(), cache.Unreplicated, cache.PendingTransfers)
+	}
+	if thor, _ := sys.Get("/home/thor"); !thor.Unreplicated {
+		t.Errorf("/home/thor: unreplicated %v; the demo seeds it awaiting its initial transfer", thor.Unreplicated)
+	}
+	if tm, _ := sys.Get("/tm"); !tm.SubtreePaused {
+		t.Error("/tm is not paused; the demo's config pauses it")
+	}
 }
 
 // tableTagRE finds every table on a page along with its attributes.

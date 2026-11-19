@@ -716,9 +716,10 @@ func lastCycleNote(d pageData) templ.Component {
 }
 
 // ageCell renders an age with staleness highlighting, the absent label
-// ("never", "no snapshots") for a side read and found empty, or "not
+// ("never", "no snapshots") for a side read and found empty, "excluded"
+// for one empty as its policy configures (side names it), or "not
 // read" for a side nobody has read yet.
-func ageCell(known, has bool, age time.Duration, stale bool, absent string) templ.Component {
+func ageCell(known, has bool, age time.Duration, stale bool, absent string, isExcluded bool, side string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -744,6 +745,11 @@ func ageCell(known, has bool, age time.Duration, stale bool, absent string) temp
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
+		} else if isExcluded {
+			templ_7745c5c3_Err = excluded(side).Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
 		} else if !has {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "<span class=\"error-text\">")
 			if templ_7745c5c3_Err != nil {
@@ -752,7 +758,7 @@ func ageCell(known, has bool, age time.Duration, stale bool, absent string) temp
 			var templ_7745c5c3_Var36 string
 			templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.JoinStringErrs(absent)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/overview.templ`, Line: 160, Col: 35}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/overview.templ`, Line: 163, Col: 35}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var36))
 			if templ_7745c5c3_Err != nil {
@@ -770,7 +776,7 @@ func ageCell(known, has bool, age time.Duration, stale bool, absent string) temp
 			var templ_7745c5c3_Var37 string
 			templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.JoinStringErrs(fmtCompactDuration(age))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/overview.templ`, Line: 162, Col: 52}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/overview.templ`, Line: 165, Col: 52}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var37))
 			if templ_7745c5c3_Err != nil {
@@ -784,7 +790,7 @@ func ageCell(known, has bool, age time.Duration, stale bool, absent string) temp
 			var templ_7745c5c3_Var38 string
 			templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(fmtCompactDuration(age))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/overview.templ`, Line: 164, Col: 27}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/overview.templ`, Line: 167, Col: 27}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var38))
 			if templ_7745c5c3_Err != nil {
@@ -967,7 +973,7 @@ func cycleStrip(cycles []history.Cycle) templ.Component {
 			var templ_7745c5c3_Var43 string
 			templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.ResolveAttributeValue(localtime.Attr(c.StartedAt))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/overview.templ`, Line: 245, Col: 88}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/overview.templ`, Line: 248, Col: 88}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var43)
 			if templ_7745c5c3_Err != nil {
@@ -980,7 +986,7 @@ func cycleStrip(cycles []history.Cycle) templ.Component {
 			var templ_7745c5c3_Var44 string
 			templ_7745c5c3_Var44, templ_7745c5c3_Err = templ.ResolveAttributeValue(stripOutcome(c))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/overview.templ`, Line: 245, Col: 121}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/overview.templ`, Line: 248, Col: 121}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var44)
 			if templ_7745c5c3_Err != nil {
@@ -993,7 +999,7 @@ func cycleStrip(cycles []history.Cycle) templ.Component {
 			var templ_7745c5c3_Var45 string
 			templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.ResolveAttributeValue(stripTitle(c))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/overview.templ`, Line: 245, Col: 145}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/overview.templ`, Line: 248, Col: 145}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var45)
 			if templ_7745c5c3_Err != nil {

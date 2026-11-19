@@ -233,6 +233,76 @@ func TestUnreplicated(t *testing.T) {
 	}
 }
 
+// TestExcludedFromBackup: a dataset whose remote policy keeps nothing
+// — the override that excludes a regenerable cache from backup — is
+// configured to have no remote copy, so having none is the config
+// honored: not unreplicated, not at risk, no issue, and the system
+// all clear.
+func TestExcludedFromBackup(t *testing.T) {
+	a := snap("daily-a", now.Add(-time.Hour))
+	for _, policy := range []map[string]int{{"daily": 0}, {}} {
+		conf := testConf()
+		noBaseline := false
+		override := &config.Override{KeepBaseline: &noBaseline}
+		override.Local.Policy = policy
+		override.Remote.Policy = policy
+		conf.Overrides = map[string]*config.Override{"/foo": override}
+
+		// The recursive snapshot taken, not yet pruned: local holds it,
+		// the remote nothing.
+		sys := Compute(testInput(build([]*model.Snapshot{a}, nil), conf))
+		ds := getDS(t, sys, "/foo")
+		if ds.KeepsLocal || ds.KeepsRemote {
+			t.Fatalf("policy %v: keeps local %v, remote %v; it keeps nothing", policy, ds.KeepsLocal, ds.KeepsRemote)
+		}
+		if ds.Unreplicated || !ds.RemoteExcluded() || ds.LocalExcluded() {
+			t.Fatalf("policy %v: unreplicated %v, remote excluded %v, local excluded %v",
+				policy, ds.Unreplicated, ds.RemoteExcluded(), ds.LocalExcluded())
+		}
+		if ds.Health != HealthOK {
+			t.Errorf("policy %v: expected ok, got %s (%s)", policy, ds.Health, ds.Reason)
+		}
+		if len(sys.Issues) != 0 || sys.Verdict != SystemOK {
+			t.Errorf("policy %v: expected all clear, got %s (%s), issues %+v", policy, sys.Verdict, sys.Reason, sys.Issues)
+		}
+
+		// Pruned: both sides empty, both as configured.
+		sys = Compute(testInput(build(nil, nil), conf))
+		ds = getDS(t, sys, "/foo")
+		if !ds.LocalExcluded() || !ds.RemoteExcluded() || ds.SnapshotsStale {
+			t.Fatalf("policy %v, pruned: local excluded %v, remote excluded %v, snapshots stale %v",
+				policy, ds.LocalExcluded(), ds.RemoteExcluded(), ds.SnapshotsStale)
+		}
+		if len(sys.Issues) != 0 || sys.Verdict != SystemOK {
+			t.Errorf("policy %v, pruned: expected all clear, got %s (%s), issues %+v", policy, sys.Verdict, sys.Reason, sys.Issues)
+		}
+	}
+
+	// An unread remote is still unknown, excluded or not: nothing is
+	// asserted of a side nobody has read.
+	conf := testConf()
+	conf.Remote.Policy = map[string]int{"daily": 0}
+	ds := getDS(t, Compute(testInput(buildUnread([]*model.Snapshot{a}), conf)), "/foo")
+	if ds.RemoteExcluded() || ds.Health != HealthUnknown {
+		t.Errorf("unread remote: excluded %v, health %s (%s)", ds.RemoteExcluded(), ds.Health, ds.Reason)
+	}
+
+	// A remote policy that keeps a periodicity the cadence rule doesn't
+	// know keeps snapshots all the same: no cadence, but an empty
+	// remote is still never replicated.
+	conf = testConf()
+	conf.Remote.Policy = map[string]int{"frequent": 4}
+	sys := Compute(testInput(build([]*model.Snapshot{a}, nil), conf))
+	ds = getDS(t, sys, "/foo")
+	if ds.BackupCadence != 0 || !ds.KeepsRemote || !ds.Unreplicated || ds.RemoteExcluded() {
+		t.Fatalf("frequent-only remote: cadence %s, keeps %v, unreplicated %v, excluded %v",
+			ds.BackupCadence, ds.KeepsRemote, ds.Unreplicated, ds.RemoteExcluded())
+	}
+	if issue := hasIssue(sys, IssueUnreplicated); issue == nil || issue.Severity != Critical {
+		t.Errorf("frequent-only remote: expected a critical unreplicated issue, got %+v", issue)
+	}
+}
+
 // TestUnreadRemoteIsUnknown: a remote nobody has read yet is not an
 // empty remote. A dataset whose local side has been read and whose
 // remote side has not is unknown — not "never replicated", not stale —

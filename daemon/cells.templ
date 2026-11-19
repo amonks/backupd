@@ -53,6 +53,13 @@ templ notRead() {
 	<span class="muted" title="Not read yet">not read</span>
 }
 
+// excluded stands in for the age of a side read and found empty whose
+// policy keeps nothing (view.Dataset.LocalExcluded, RemoteExcluded):
+// empty as configured, so it reads neutral rather than as a fault.
+templ excluded(side string) {
+	<span class="muted" title={ excludedTitle(side) }>excluded</span>
+}
+
 templ pendingCell(dv view.Dataset) {
 	{{ s := dv.PendingSummary() }}
 	if s != "" {

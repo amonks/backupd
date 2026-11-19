@@ -48,6 +48,18 @@ func cadenceOf(policy map[string]int) time.Duration {
 	return 0
 }
 
+// keepsAny applies the spec's exclusion rule (§ Dashboard): a policy
+// keeps snapshots when some periodicity's count is above zero, and a
+// side whose policy keeps none is empty as configured.
+func keepsAny(policy map[string]int) bool {
+	for _, n := range policy {
+		if n > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // severityOf is the spec's severity for each issue kind (§ Dashboard,
 // issues).
 var severityOf = map[IssueKind]Severity{
@@ -97,12 +109,21 @@ func genSide(tc hegel.TestCase, dataset model.DatasetName, calm bool) []*model.S
 	return genSnaps(tc, dataset)
 }
 
+// genPolicy draws counts of 0 to 5 for some of the snapshot types, so
+// a policy that names periodicities yet keeps nothing — the shape that
+// excludes a side — comes up often. Now and then it also keeps
+// "frequent", a periodicity no snapshot here has and the cadence rule
+// doesn't know: a policy that keeps snapshots without setting a
+// cadence, which is where keeping and cadence come apart.
 func genPolicy(tc hegel.TestCase) map[string]int {
 	policy := map[string]int{}
 	for _, typ := range snapshotTypes {
 		if hegel.Draw(tc, hegel.Booleans()) {
 			policy[typ] = hegel.Draw(tc, hegel.Integers(0, 5))
 		}
+	}
+	if hegel.Draw(tc, hegel.WeightedBooleans(0.2)) {
+		policy["frequent"] = hegel.Draw(tc, hegel.Integers(0, 5))
 	}
 	return policy
 }
@@ -269,6 +290,7 @@ type expected struct {
 	localPolicy, remotePolicy map[string]int
 	overridden                bool
 	cadence, backupCadence    time.Duration
+	keepsLocal, keepsRemote   bool
 	snapshotsStale            bool
 	backupStale, unreplicated bool
 	globalPaused, subtree     bool
@@ -306,8 +328,10 @@ func expect(t *hegel.T, in Input, name model.DatasetName) expected {
 	paused := e.globalPaused || e.subtree
 	e.snapshotsStale = e.cadence > 0 && e.localKnown && (!e.hasLocal || e.snapshotted > StaleFactor*e.cadence)
 	e.backupStale = e.backupCadence > 0 && !paused && e.hasRemote && e.backedUp > StaleFactor*e.backupCadence
-	// Absence is asserted only of a side that has been read.
-	e.unreplicated = e.hasLocal && e.remoteKnown && !e.hasRemote
+	// Absence is asserted only of a side that has been read, and is a
+	// fault only where the side's policy keeps something.
+	e.keepsLocal, e.keepsRemote = keepsAny(e.localPolicy), keepsAny(e.remotePolicy)
+	e.unreplicated = e.hasLocal && e.remoteKnown && !e.hasRemote && e.keepsRemote
 
 	e.failure, e.failing = failingIn(in.History, name)
 	e.work = workIn(t, m)
@@ -591,9 +615,19 @@ func TestAssuranceFromInventory(t *testing.T) {
 			if e.hasLocal && e.hasRemote && ds.Lag != e.backedUp-e.snapshotted {
 				t.Fatalf("%s: lag %s, the newest remote's age less the newest local's is %s", name, ds.Lag, e.backedUp-e.snapshotted)
 			}
+			if ds.KeepsLocal != e.keepsLocal || ds.KeepsRemote != e.keepsRemote {
+				t.Fatalf("%s: keeps local %v, remote %v; its policies %v/%v keep %v/%v",
+					name, ds.KeepsLocal, ds.KeepsRemote, e.localPolicy, e.remotePolicy, e.keepsLocal, e.keepsRemote)
+			}
 			if ds.Unreplicated != e.unreplicated {
-				t.Fatalf("%s: unreplicated %v, want %v (local present %v, remote known %v, remote present %v)",
-					name, ds.Unreplicated, e.unreplicated, e.hasLocal, e.remoteKnown, e.hasRemote)
+				t.Fatalf("%s: unreplicated %v, want %v (local present %v, remote known %v, remote present %v, remote policy %v)",
+					name, ds.Unreplicated, e.unreplicated, e.hasLocal, e.remoteKnown, e.hasRemote, e.remotePolicy)
+			}
+			if want := e.localKnown && !e.hasLocal && !e.keepsLocal; ds.LocalExcluded() != want {
+				t.Fatalf("%s: local excluded %v, want %v", name, ds.LocalExcluded(), want)
+			}
+			if want := e.remoteKnown && !e.hasRemote && !e.keepsRemote; ds.RemoteExcluded() != want {
+				t.Fatalf("%s: remote excluded %v, want %v", name, ds.RemoteExcluded(), want)
 			}
 
 			if ds.Overridden != e.overridden {

@@ -265,6 +265,8 @@ templ sidebarLink(d pageData, dv view.Dataset) {
 					{ fmtCompactDuration(dv.BackedUp) }
 				}
 			</span>
+		} else if dv.RemoteExcluded() {
+			<span class="dataset-age" title={ excludedTitle("remote") }>excluded</span>
 		} else if dv.HasLocal {
 			<span class="dataset-age error-text" title="Never replicated">never</span>
 		}

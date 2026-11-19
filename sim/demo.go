@@ -7,10 +7,50 @@ import (
 	"monks.co/backupd/model"
 )
 
-// Demo builds the scenario behind `backupd -sim`: a small fleet of
+// DemoConfigTables is the configuration Demo's scenario is written
+// against, as a config file's tables: the retention policies, the
+// paused /tm subtree, and the /cache override that excludes it from
+// backup. Several of Demo's states exist only under it — /cache seeded
+// without a remote reads as never replicated under any other policy —
+// so every entry point that runs Demo runs it under these, and adds
+// only its own top-level settings (interval, listen) ahead of them,
+// since TOML puts keys before tables.
+const DemoConfigTables = `[local]
+root = "sim/tank"
+[local.policy]
+hourly = 6
+daily = 7
+
+[remote]
+ssh_host = "sim"
+root = "sim/backup"
+[remote.policy]
+daily = 14
+
+[overrides."/tm"]
+paused = true
+keep_baseline = false
+[overrides."/tm".local.policy]
+daily = 1
+[overrides."/tm".remote.policy]
+daily = 1
+
+# Excluded from backup: a regenerable cache whose snapshots are pruned
+# as soon as they appear and never transferred.
+[overrides."/cache"]
+keep_baseline = false
+[overrides."/cache".local.policy]
+daily = 0
+[overrides."/cache".remote.policy]
+daily = 0
+`
+
+// Demo builds the scenario behind `backupd -sim`, run under
+// DemoConfigTables: a small fleet of
 // datasets in every interesting state — in sync, backlogged, awaiting
 // an initial transfer, paused with pending work, failing with a stale
-// backup — plus one transfer that will be interrupted mid-stream to
+// backup, excluded from backup by a policy that keeps nothing — plus
+// one transfer that will be interrupted mid-stream to
 // demonstrate resume handling. Transfers are paced so progress bars
 // are visible.
 func Demo(now time.Time) *Sim {
@@ -66,6 +106,12 @@ func Demo(now time.Time) *Sim {
 		snap("/home/thor", "daily", dailyAt(2), 500<<20),
 		snap("/home/thor", "daily", dailyAt(1), 500<<20),
 	)
+
+	// /cache is a regenerable cache whose override keeps nothing on
+	// either side: last night's recursive snapshot is pruned at the
+	// first cycle, nothing is ever transferred, and both sides read
+	// excluded rather than missing.
+	s.SeedLocal("/cache", snap("/cache", "daily", dailyAt(1), 3<<30))
 
 	// The first transfer attempt is cut off at 60%: one failed cycle,
 	// then the next cycle resumes and completes it.

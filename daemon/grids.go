@@ -86,6 +86,9 @@ func fleetGrid(base string, datasets []view.Dataset) templ.Component {
 					if !dv.LocalKnown {
 						return "not read"
 					}
+					if dv.LocalExcluded() {
+						return "excluded"
+					}
 					if !dv.HasLocal {
 						return "no snapshots"
 					}
@@ -94,7 +97,7 @@ func fleetGrid(base string, datasets []view.Dataset) templ.Component {
 				SortKind:  datagrid.SortNumber,
 				SortValue: func(dv view.Dataset) string { return ageSortValue(dv.HasLocal, dv.Snapshotted) },
 				Cell: func(dv view.Dataset) templ.Component {
-					return ageCell(dv.LocalKnown, dv.HasLocal, dv.Snapshotted, dv.SnapshotsStale, "no snapshots")
+					return ageCell(dv.LocalKnown, dv.HasLocal, dv.Snapshotted, dv.SnapshotsStale, "no snapshots", dv.LocalExcluded(), "local")
 				},
 				FilterUI: datagrid.FilterNone,
 				Disabled: datagrid.FeatureSearch,
@@ -106,6 +109,9 @@ func fleetGrid(base string, datasets []view.Dataset) templ.Component {
 					if !dv.RemoteKnown {
 						return "not read"
 					}
+					if dv.RemoteExcluded() {
+						return "excluded"
+					}
 					if !dv.HasRemote {
 						return "never"
 					}
@@ -114,7 +120,7 @@ func fleetGrid(base string, datasets []view.Dataset) templ.Component {
 				SortKind:  datagrid.SortNumber,
 				SortValue: func(dv view.Dataset) string { return ageSortValue(dv.HasRemote, dv.BackedUp) },
 				Cell: func(dv view.Dataset) templ.Component {
-					return ageCell(dv.RemoteKnown, dv.HasRemote, dv.BackedUp, dv.BackupStale, "never")
+					return ageCell(dv.RemoteKnown, dv.HasRemote, dv.BackedUp, dv.BackupStale, "never", dv.RemoteExcluded(), "remote")
 				},
 				FilterUI: datagrid.FilterNone,
 				Disabled: datagrid.FeatureSearch,
