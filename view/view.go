@@ -431,6 +431,40 @@ func (s System) Get(name model.DatasetName) (Dataset, bool) {
 	return Dataset{}, false
 }
 
+// StalestBackup returns the dataset furthest behind among those
+// expected to be backing up — the one whose recovery point (BackedUp)
+// is oldest — and false when none is. It is the system's recovery point
+// as one number: how much would be lost, at worst, if the local pool
+// died now. A dataset counts only when its age is that, and when it
+// makes a promise the age can be held to:
+//
+//   - its remote side has been read and holds a snapshot (RemoteKnown,
+//     HasRemote). An unread remote has no age to report, and an empty
+//     one has no recovery point at all — a dataset never replicated is
+//     the unreplicated issue's business, which says so in words a
+//     number cannot.
+//   - its remote policy has a cadence (BackupCadence > 0). A remote that
+//     keeps no periodicity promises no freshness, and its age is
+//     configured behavior, not lag.
+//   - it is not paused. A paused dataset was stopped on purpose, and its
+//     age climbs for as long as the pause lasts, pinning the line to a
+//     choice and hiding every dataset still meant to be moving.
+//
+// Ties go to the dataset listed first.
+func (s System) StalestBackup() (Dataset, bool) {
+	var stalest Dataset
+	found := false
+	for _, ds := range s.Datasets {
+		if !ds.RemoteKnown || !ds.HasRemote || ds.BackupCadence <= 0 || ds.Paused {
+			continue
+		}
+		if !found || ds.BackedUp > stalest.BackedUp {
+			stalest, found = ds, true
+		}
+	}
+	return stalest, found
+}
+
 // Input is everything Compute derives from. Now and Boot are explicit
 // so the derivations are pure.
 type Input struct {

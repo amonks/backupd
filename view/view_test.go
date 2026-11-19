@@ -767,3 +767,62 @@ func TestInPeriodOrder(t *testing.T) {
 		t.Errorf("InPeriodOrder = %v, want %v", got, want)
 	}
 }
+
+// TestStalestBackup: the system's recovery point is the oldest among
+// the datasets expected to be backing up. A paused dataset, a remote
+// policy with no cadence, an unread remote and an empty one would each
+// read older than any of them, and none is that.
+func TestStalestBackup(t *testing.T) {
+	at := func(ds model.DatasetName, name string, age time.Duration) *model.Snapshot {
+		return &model.Snapshot{Dataset: ds, Name: name, CreatedAt: now.Add(-age).Unix()}
+	}
+	conf := testConf()
+	conf.Overrides = map[string]*config.Override{
+		"/paused":    {Paused: true},
+		"/nocadence": {},
+	}
+	conf.Overrides["/nocadence"].Remote.Policy = map[string]int{}
+
+	state := model.New()
+	for _, d := range []struct {
+		name   model.DatasetName
+		remote time.Duration // 0: the remote holds nothing
+	}{
+		{"/fresh", 2 * time.Hour},
+		{"/behind", 30 * time.Hour},
+		{"/also-behind", 30 * time.Hour},
+		{"/paused", 100 * time.Hour},
+		{"/nocadence", 200 * time.Hour},
+		{"/unreplicated", 0},
+	} {
+		local := []*model.Snapshot{at(d.name, "daily-new", time.Hour)}
+		var remote []*model.Snapshot
+		if d.remote > 0 {
+			old := at(d.name, "daily-old", d.remote)
+			local = append(local, old)
+			remote = []*model.Snapshot{old}
+		}
+		state = model.AddLocalDataset(d.name, local, nil)(state)
+		state = model.AddRemoteDataset(d.name, remote, nil)(state)
+	}
+	// Read on its local side only: its remote has no age to report.
+	state = model.AddLocalDataset("/unread", []*model.Snapshot{at("/unread", "daily-x", 500*time.Hour)}, nil)(state)
+
+	sys := Compute(testInput(state, conf))
+	ds, ok := sys.StalestBackup()
+	if !ok {
+		t.Fatal("no stalest backup among datasets backing up")
+	}
+	// A tie goes to the first in the view's order, shortest name first.
+	if ds.Name != "/behind" || ds.BackedUp != 30*time.Hour {
+		t.Errorf("stalest = %s at %s, want /behind (listed before /also-behind) at 30h", ds.Name, ds.BackedUp)
+	}
+
+	// With every dataset excluded there is no recovery point to report.
+	for _, name := range []string{"/fresh", "/behind", "/also-behind"} {
+		conf.Overrides[name] = &config.Override{Paused: true}
+	}
+	if ds, ok := Compute(testInput(state, conf)).StalestBackup(); ok {
+		t.Errorf("stalest = %s, want none: every dataset is excluded", ds.Name)
+	}
+}

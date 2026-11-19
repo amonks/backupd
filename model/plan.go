@@ -63,29 +63,51 @@ func NewPlanStep(op Operation) *PlanStep {
 	}
 }
 
-// TryExecute runs the provided function, managing the step's status and timing.
-// The updateStep callback is called to atomically update the step's state.
-// This design avoids direct mutation of the PlanStep to prevent race conditions.
-func (ps *PlanStep) TryExecute(updateStep func(func(*PlanStep)), work func() error) error {
-	updateStep(func(s *PlanStep) {
-		now := time.Now()
-		s.StartedAt = &now
+// TryExecute runs work as the step, recording its status and timing on
+// ps and handing each change to publish as well, to apply to the copy
+// of the step that others read. ps is the caller's own: a step that
+// another goroutine may hold is never written, only replaced, so
+// publish applies the change to a clone it then publishes. Each change
+// is computed once, so both copies say the same times.
+func (ps *PlanStep) TryExecute(publish func(func(*PlanStep)), work func() error) error {
+	started := time.Now()
+	start := func(s *PlanStep) {
+		s.StartedAt = &started
 		s.Status = StepInProgress
-	})
+	}
+	start(ps)
+	publish(start)
 
 	err := work()
 
-	updateStep(func(s *PlanStep) {
-		now := time.Now()
-		s.StoppedAt = &now
-		if err != nil {
-			s.Status = StepFailed
-		} else {
-			s.Status = StepCompleted
-		}
-	})
+	stopped := time.Now()
+	status := StepCompleted
+	if err != nil {
+		status = StepFailed
+	}
+	stop := func(s *PlanStep) {
+		s.StoppedAt = &stopped
+		s.Status = status
+	}
+	stop(ps)
+	publish(stop)
 
 	return err
+}
+
+// Clone returns a copy of the plan whose steps can be updated without
+// touching p's. The operations and logs are shared: neither is written
+// through a step.
+func (p *Plan) Clone() *Plan {
+	if p == nil {
+		return nil
+	}
+	steps := make([]*PlanStep, len(p.Steps))
+	for i, step := range p.Steps {
+		clone := *step
+		steps[i] = &clone
+	}
+	return &Plan{Steps: steps}
 }
 
 // PlanFromOperations converts a slice of operations to a Plan

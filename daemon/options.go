@@ -27,10 +27,27 @@ type Options struct {
 	Dryrun bool
 
 	// Logger receives the daemon's structured record of what it does:
-	// cycle outcomes, journal entries, snitch pings. Nil means
-	// slog.Default(). New also routes the in-memory ring buffers here
-	// (see logger.SetLogger), which is process-wide.
+	// journal entries, snitch pings, and, with no Tracer, a record of
+	// each unit of work. Nil means slog.Default(). New also routes the
+	// in-memory ring buffers here (see logger.SetLogger), which is
+	// process-wide.
 	Logger *slog.Logger
+
+	// Tracer records the daemon's units of work — sync cycles,
+	// transfers, snapshot deletions, single-dataset syncs, snapshots —
+	// as spans (see Tracer, and the span names beside CycleSpan). Nil
+	// writes one record per ended span to Logger instead: its name as
+	// the message, its attributes, StatusKey, DurationKey, and on a
+	// failure error.message, unless the daemon Set one, at the
+	// failure's level. A host with a tracing pipeline of its own passes
+	// one, and gets spans in place of those records.
+	//
+	// Its Start is the only reader of the context a sync request hands
+	// over (Daemon.TriggerSync): a requested sync's span starts under
+	// the request's context, values and all — an HTTP host's request
+	// carries its authority and its own event — and the work sees what
+	// Start passes on. A host that wants a narrower parent may wrap.
+	Tracer Tracer
 
 	// Snitch checks a configured Dead Man's Snitch in after a
 	// successful cycle. Nil uses the standalone daemon's HTTP client.

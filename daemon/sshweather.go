@@ -130,32 +130,35 @@ func classifyFailure(msg string) (kind string, expected bool) {
 	return "", false
 }
 
-// cycleFailure decides how a failed cycle is logged: the level, the
-// error.message — the refresh error that aborted the cycle, or each
-// failed dataset's error, one per line — and the error.type, "" when
-// unclassified. The cycle is WARN only when it has failures and every
-// one is expected; the error.type is that of the failure the level was
-// decided on: the first fault, or, when there is none, the first
-// failure.
-func cycleFailure(c history.Cycle) (level slog.Level, message, kind string) {
-	var errs, raw []string
+// cycleFailure decides how a failed cycle is logged: the level; the
+// failure the level was decided on — the first fault, or, when there is
+// none, the first failure — and its error.type, "" when unclassified;
+// and the error.message, all of the failures: the refresh error that
+// aborted the cycle, or each failed dataset's error, one per line. The
+// cycle is WARN only when it has failures and every one is expected.
+//
+// The deciding failure is returned apart from the message so that a
+// host classifying a failure the daemon could not reads the one that
+// decided the level, never the joined text: there, a timeout ahead of
+// a fault would name the cycle for the timeout (Span.End).
+func cycleFailure(c history.Cycle) (level slog.Level, deciding, kind, message string) {
+	var lines, raw []string
 	if c.Error != "" {
-		errs, raw = append(errs, c.Error), append(raw, c.Error)
+		lines, raw = append(lines, c.Error), append(raw, c.Error)
 	}
 	for _, f := range c.Failures {
-		errs = append(errs, fmt.Sprintf("syncing '%s': %s", f.Dataset, f.Error))
+		lines = append(lines, fmt.Sprintf("syncing '%s': %s", f.Dataset, f.Error))
 		raw = append(raw, f.Error)
 	}
-	message = strings.Join(errs, "\n")
+	message = strings.Join(lines, "\n")
 	if len(raw) == 0 {
-		return slog.LevelError, message, ""
+		return slog.LevelError, message, "", message
 	}
-	level = slog.LevelWarn
-	kind, _ = classifyFailure(raw[0])
-	for _, e := range raw {
+	for i, e := range raw {
 		if k, expected := classifyFailure(e); !expected {
-			return slog.LevelError, message, k
+			return slog.LevelError, lines[i], k, message
 		}
 	}
-	return level, message, kind
+	kind, _ = classifyFailure(raw[0])
+	return slog.LevelWarn, lines[0], kind, message
 }

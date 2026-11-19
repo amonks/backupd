@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"hegel.dev/go/hegel"
@@ -293,6 +294,101 @@ func computeView(b *Daemon, at time.Time) view.System {
 		Now:      at,
 		Boot:     at.Add(-time.Minute),
 	})
+}
+
+// TestSimViewDuringSync reads the view — as the dashboard's page loads
+// and a host's View do, and apps/backupd's assurance reading does every
+// five minutes — while the sync loop executes plan steps whose status
+// changes as they run. A reader holds the model it was published, past
+// the lock, so the loop must replace a step it updates, never write the
+// one a reader may hold. Run it under -race, which is what sees it.
+func TestSimViewDuringSync(t *testing.T) {
+	s := sim.New()
+	seedBehind(s, "/a", "/b", "/c", "/d")
+	b := newSimDaemon(simConf(dailyTwo, dailyTwo, true), s)
+
+	stop := make(chan struct{})
+	read := make(chan int)
+	go func() {
+		n := 0
+		defer func() { read <- n }()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			for _, ds := range b.View().Datasets {
+				n += ds.StepsDone
+			}
+		}
+	}()
+	runCycles(t, b, 2)
+	close(stop)
+	<-read
+	for _, name := range []model.DatasetName{"/a", "/b", "/c", "/d"} {
+		assertConverged(t, s, b.conf.Deref(), name)
+	}
+}
+
+// TestSimPublishedStepIsNeverMutated: a model, once published, is a
+// value. A reader that took it while a step ran sees that step in
+// progress however the step ends — here, refused — rather than the
+// update the loop published after it.
+func TestSimPublishedStepIsNeverMutated(t *testing.T) {
+	s := sim.New()
+	seedBehind(s, "/foo")
+	var during *model.Model
+	e := &refusingEnv{Sim: s}
+	b := New(Options{Config: simConf(dailyTwo, dailyTwo, true), Env: e})
+	b.snitch = func(context.Context, string) error { return nil }
+	e.during = func() { during = b.state.Deref() }
+	runCycles(t, b, 1)
+
+	if during == nil {
+		t.Fatal("no step ran")
+	}
+	steps := during.GetDataset("/foo").Plan.Steps
+	if len(steps) != 1 || steps[0].Status != model.StepInProgress || steps[0].StoppedAt != nil {
+		t.Errorf("the model published while the step ran now says it is %v, want it in progress", steps[0].Status)
+	}
+	if now := b.state.Deref().GetDataset("/foo").Plan.Steps[0]; now.Status != model.StepFailed || now.StoppedAt == nil {
+		t.Errorf("the model published after the step says it is %v, want it failed", now.Status)
+	}
+}
+
+// TestSimStepTimingIsRecorded: the operations journal times each step
+// from the loop's own copy of it, which the step's start and stop are
+// recorded on whatever the published model has been replaced by since.
+func TestSimStepTimingIsRecorded(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := sim.New()
+		seedBehind(s, "/foo")
+		b := New(Options{Config: simConf(dailyTwo, dailyTwo, true), Env: finalizingEnv{s}})
+		b.snitch = func(context.Context, string) error { return nil }
+		start := time.Now()
+		runCycles(t, b, 1)
+
+		ops := b.history.Ops()
+		if len(ops) != 1 {
+			t.Fatalf("%d operations journaled, want the transfer", len(ops))
+		}
+		if ops[0].Duration != time.Second || !ops[0].At.Equal(start.Add(time.Second)) {
+			t.Errorf("the transfer journaled at %s taking %s, want at %s taking 1s", ops[0].At, ops[0].Duration, start.Add(time.Second))
+		}
+	})
+}
+
+// refusingEnv is the sim, with every plan step refused after during
+// has run.
+type refusingEnv struct {
+	*sim.Sim
+	during func()
+}
+
+func (e *refusingEnv) Apply(context.Context, *logger.Logger, model.Operation) error {
+	e.during()
+	return errors.New("cannot receive incremental stream: invalid backup stream")
 }
 
 // TestSimDashboardInvariants drives the real daemon over the sim and

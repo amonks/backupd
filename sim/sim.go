@@ -8,10 +8,11 @@
 // "contains partially-complete state", "no longer exists", and "out of
 // space" match the substrings the daemon's recovery paths dispatch on,
 // and a down remote fails in ssh's own words for a refused connection,
-// which the daemon's cycle log reads to tell weather from a fault: that
-// dispatch is exactly what the simulator is for testing.
+// which the daemon reads to tell weather from a fault: that dispatch is
+// exactly what the simulator is for testing.
 // Transfers can be paced (bytes/sec) to exercise progress reporting,
-// or instant for property tests.
+// or instant for property tests; either way they report progress as
+// env's pipe does, the bytes each stream has moved.
 package sim
 
 import (
@@ -333,8 +334,11 @@ func (s *Sim) Resume(ctx context.Context, l *logger.Logger, name model.DatasetNa
 	}
 	s.mu.Unlock()
 
-	total := transferSize(end)
-	if err := s.pace(ctx, l, sent, total); err != nil {
+	// A resumed send is a stream of its own: `zfs send -t` sends only
+	// what the interrupted receive lacks, and env's pipe counts and
+	// sizes that remainder from zero. Progress here does the same, so
+	// what a resume reports moving is what it moved.
+	if err := s.pace(ctx, l, 0, transferSize(end)-sent); err != nil {
 		return err
 	}
 

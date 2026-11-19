@@ -599,6 +599,7 @@ chrome of the site it is part of.
 d := daemon.New(daemon.Options{
 	Config: conf,           // the only required field
 	Logger: slog.Default(), // structured records go here
+	Tracer: myTracer,       // optional: the daemon's work as your spans
 	Snitch: checkIn,        // optional context-aware check-in client
 	Layout: myLayout,       // wrap each page in your own HTML
 	OmitNav: true,          // ...and render its nav yourself
@@ -639,27 +640,53 @@ standard `log` package; pass `Options.Logger` and it is your
 lines arrive labelled with the logger that wrote them
 (`backupd.log=global`).
 
-The records worth alerting on carry named attributes rather than
-message text, so "are backups running" is a query:
+The daemon's work is spans: each sync cycle, each transfer and
+deletion it executes, a single dataset synced on request between
+cycles, and a snapshot taken on request. Pass `Options.Tracer` — a
+`daemon.Tracer`, two small interfaces that import nothing — and they
+are yours: each started as a child of the span its context carries —
+a sync asked for through `POST /api/sync`, as a child of that
+request's — and ended once with a level and an error. Without one, the daemon
+writes one record per span to the logger: the span's name as the
+message, its attributes, `backupd.status` (`ok`, `error`, or
+`cancelled`) and `backupd.duration_ms`, and on a failure
+`error.message`, at the failure's level. Either way "are backups
+running" is a query rather than a substring match:
+
+| Span | What it is | Attributes |
+|------|------------|------------|
+| `backupd.cycle` | One sync cycle, from its start through the snitch check-in | `backupd.cycle.datasets`, `backupd.cycle.paused`, and `backupd.cycle.failures`, the datasets that failed, when any did |
+| `backupd.transfer` | One transfer: a plan step, or the resume of an interrupted transfer | `backupd.dataset`; `backupd.transfer.kind`: `initial` (a dataset's first snapshot, in full), `incremental`, `full` (one snapshot in full into a dataset with none), or `resume`; `backupd.transfer.sent_bytes`; `backupd.transfer.bytes_per_second`, the bytes the pipe moved between its first report of progress and its last over the time between them, when both are nonzero; `backupd.transfer.abandoned` on a resume that could never finish, aborted instead |
+| `backupd.destroy` | One deletion step: a snapshot, or a contiguous range | `backupd.dataset`, `backupd.destroy.location` (`local` or `remote`), `backupd.destroy.snapshots`, how many it destroyed, absent when zfs refused it |
+| `backupd.sync` | One dataset synced on request between cycles | `backupd.dataset` |
+| `backupd.snapshot` | A recursive snapshot taken on request | `backupd.snapshot.periodicity` |
+
+Transfers and deletions nest beneath the cycle or sync that ran them,
+and start only when they execute: a dry run starts none.
+
+The other records carry named attributes too:
 
 | Attribute | Meaning |
 |-----------|---------|
-| `backupd.cycle.ok` | false on a cycle that failed, wholly or for some datasets. |
-| `backupd.cycle.paused`, `backupd.cycle.datasets`, `backupd.cycle.duration_ms`, `backupd.cycle.failures` | The rest of the cycle outcome. |
-| `error.message`, `error.type` | On a failed cycle, OpenTelemetry's pair: the refresh error that aborted it, or each failed dataset's error a line apiece, and the class where ssh's words say it (`timeout`, `connection-refused`, `connection-reset`, `network`, `host-key-mismatch`, `permission`). On a failed snitch ping, the check-in's error, and the class where its error chain says it (`timeout`, `dns`, `connection-refused`, `connection-reset`, `network`, `tls`). |
+| `error.message`, `error.type` | On a failed span or snitch ping, OpenTelemetry's pair: the error — for a cycle, the refresh error that aborted it, or each failed dataset's error a line apiece — and its class where ssh's words say it (`timeout`, `connection-refused`, `connection-reset`, `network`, `host-key-mismatch`, `permission`), or, for a snitch ping, where its error chain does (`timeout`, `dns`, `connection-refused`, `connection-reset`, `network`, `tls`). A span the daemon set these on keeps them: a cycle's error.message is all of its failures, while the error it ends with is the one that decided its level — what a tracer may classify where the daemon set no `error.type`, never the joined message. |
 | `backupd.event` | A journal entry's level: info, warning, error. |
 | `backupd.dataset` | The dataset a record concerns. |
 | `backupd.snitch.ok` | false when a Dead Man's Snitch ping failed. |
 | `backupd.log` | Which ring buffer a buffered line came from. |
 
-A failed cycle's level says whether anyone needs to act, so level-based
+A failure's level says whether anyone needs to act, so level-based
 routing works without this vocabulary. A cycle is WARN when every
 failure in it is ssh failing to reach the remote: ssh exiting 255 and
 saying the connection timed out, was refused, was reset or closed by
 the remote, or had no route. A remote across the internet does that
 now and then, the next retry is minutes away, and one that stays down
 still trips the snitch. Every other failed cycle is ERROR, a changed
-host key and a refused login included.
+host key and a refused login included. A transfer, a deletion, or a
+requested sync is judged the same way by its own failure, and a
+snapshot that fails is ERROR: it is local zfs, with no network in the
+way. Work cut short by `Run`'s context ending — your cancellation, or a
+deadline — ends cancelled, with an error that is `context.Canceled`,
+not failed; so does a snapshot whose request ends partway.
 
 A failed snitch ping is WARN, whatever went wrong: the next one is an
 interval away, and a check-in that keeps not arriving is what Dead

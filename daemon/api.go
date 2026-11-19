@@ -150,12 +150,12 @@ func (b *Daemon) handleSync(w http.ResponseWriter, req *http.Request) {
 			http.Error(w, fmt.Sprintf("no such dataset '%s'", name), http.StatusNotFound)
 			return
 		}
-		if !b.TriggerSync(false, name) {
+		if !b.TriggerSync(req.Context(), false, name) {
 			http.Error(w, "sync queue is full", http.StatusServiceUnavailable)
 			return
 		}
 	} else {
-		if !b.TriggerSync(true, "") {
+		if !b.TriggerSync(req.Context(), true, "") {
 			http.Error(w, "sync queue is full", http.StatusServiceUnavailable)
 			return
 		}
@@ -183,15 +183,26 @@ func (b *Daemon) handleSnapshot(w http.ResponseWriter, req *http.Request) {
 
 	root := conf.Local.Root
 
-	if err := b.env.Snapshot(req.Context(), b.globalLogs, root, periodicity); err != nil {
+	// The work starts here: a refusal above is the caller's mistake,
+	// and takes no span. It ends as the daemon's other work does
+	// (endClassified): cancelled when the request's context ends
+	// partway, which is no outcome, and otherwise a failure is a fault —
+	// it is local zfs, with no network in the way to make it weather.
+	ctx, span := b.startSpan(req.Context(), SnapshotSpan)
+	span.Set(SnapshotPeriodicityKey, periodicity)
+
+	if err := b.env.Snapshot(ctx, b.globalLogs, root, periodicity); err != nil {
+		endClassified(ctx, span, err)
 		http.Error(w, fmt.Sprintf("Error creating snapshot: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	if err := b.RefreshLocalSnapshots(req.Context(), b.globalLogs); err != nil {
+	if err := b.RefreshLocalSnapshots(ctx, b.globalLogs); err != nil {
+		endClassified(ctx, span, err)
 		http.Error(w, fmt.Sprintf("Error refreshing state: %v", err), http.StatusInternalServerError)
 		return
 	}
+	endClassified(ctx, span, nil)
 
 	b.globalLogs.Printf("Created %s snapshot for root %s", periodicity, root)
 	b.history.RecordOp(history.Op{

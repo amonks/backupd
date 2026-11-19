@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -21,7 +22,8 @@ import (
 
 // The daemon's structured record is what a host alerts on: "did the last
 // cycle succeed" should be a query against a named attribute, not a
-// substring match against a log message. These tests pin the attributes
+// substring match against a log message. With no Tracer, every span the
+// daemon starts becomes one such record; these tests pin the attributes
 // that promise holds by.
 
 // capture is a slog.Handler that keeps every record for inspection.
@@ -89,26 +91,34 @@ func runOneCycle(t *testing.T, b *Daemon) {
 	}
 }
 
-// TestCycleOutcomeIsLoggedStructured: every completed cycle emits one
-// record naming its outcome, so "backups are running" is a query rather
-// than an inference.
+// TestCycleOutcomeIsLoggedStructured: with no Tracer, every completed
+// cycle emits one record, named for its span, saying how it went, so
+// "backups are running" is a query rather than an inference.
 func TestCycleOutcomeIsLoggedStructured(t *testing.T) {
 	local, remote := steadyStateExecutors()
 	b, cap := loggingDaemon(t, local, remote)
 	runOneCycle(t, b)
 
-	rec, ok, found := cap.find(CycleOKKey)
-	if !found {
-		t.Fatalf("no record carried %s", CycleOKKey)
-	}
-	if ok.Bool() != true {
-		t.Errorf("%s = false on a healthy cycle", CycleOKKey)
+	rec := cap.cycle(t)
+	if status := attr(rec, StatusKey).String(); status != "ok" {
+		t.Errorf("%s = %q on a healthy cycle, want ok", StatusKey, status)
 	}
 	if rec.Level != slog.LevelInfo {
 		t.Errorf("healthy cycle logged at %s, want INFO", rec.Level)
 	}
-	if _, _, found := cap.find(CycleDurationKey); !found {
-		t.Errorf("no record carried %s", CycleDurationKey)
+	if !has(rec, DurationKey) {
+		t.Errorf("the cycle record carries no %s", DurationKey)
+	}
+	if got := attr(rec, CycleDatasetsKey).Int64(); got != 1 {
+		t.Errorf("%s = %d, want 1", CycleDatasetsKey, got)
+	}
+	if !has(rec, CyclePausedKey) || attr(rec, CyclePausedKey).Bool() {
+		t.Errorf("%s = %v, want false", CyclePausedKey, attr(rec, CyclePausedKey))
+	}
+	for _, key := range []string{CycleFailuresKey, "error.message", "error.type"} {
+		if has(rec, key) {
+			t.Errorf("a healthy cycle carries %s: %v", key, attr(rec, key))
+		}
 	}
 }
 
@@ -124,8 +134,8 @@ func TestFailingCycleLogsAtErrorLevel(t *testing.T) {
 	runOneCycle(t, b)
 
 	rec := cap.cycle(t)
-	if ok := attr(rec, CycleOKKey); ok.Bool() != false {
-		t.Errorf("%s = true on a failed cycle", CycleOKKey)
+	if status := attr(rec, StatusKey).String(); status != "error" {
+		t.Errorf("%s = %q on a failed cycle, want error", StatusKey, status)
 	}
 	if rec.Level != slog.LevelError {
 		t.Errorf("failed cycle logged at %s, want ERROR", rec.Level)
@@ -138,14 +148,174 @@ func TestFailingCycleLogsAtErrorLevel(t *testing.T) {
 	}
 }
 
+// TestCancelledCycleLogsAsCancelled: a cycle the daemon's own stop cuts
+// short did not fail — it is recorded as cancelled, at INFO, with no
+// error, and still recorded: a span is ended on every path.
+func TestCancelledCycleLogsAsCancelled(t *testing.T) {
+	s := sim.New()
+	seedBehind(s, "/foo")
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	cap := &capture{}
+	b := New(Options{Config: simConf(dailyTwo, dailyTwo, true), Env: stoppingEnv{Sim: s, stop: cancel}, Logger: slog.New(cap)})
+	t.Cleanup(func() { logger.SetLogger(nil) })
+	b.state.Reset(model.New())
+	if err := b.Run(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run: %v", err)
+	}
+
+	for _, name := range []string{CycleSpan, TransferSpan} {
+		rec := cap.span(t, name)
+		if status := attr(rec, StatusKey).String(); status != "cancelled" {
+			t.Errorf("%s: %s = %q, want cancelled", name, StatusKey, status)
+		}
+		if rec.Level != slog.LevelInfo {
+			t.Errorf("%s: cancelled at %s, want INFO", name, rec.Level)
+		}
+		if has(rec, "error.message") || has(rec, "error.type") {
+			t.Errorf("%s: a cancellation carries an error: %v / %v", name, attr(rec, "error.message"), attr(rec, "error.type"))
+		}
+	}
+}
+
+// TestHostTracerReplacesTheRecords: a host that supplies a Tracer gets
+// its spans there, and no duplicate record of each through its logger.
+func TestHostTracerReplacesTheRecords(t *testing.T) {
+	local, remote := steadyStateExecutors()
+	b, cap := loggingDaemon(t, local, remote)
+	tracer := newFakeTracer(t)
+	b.tracer = tracer
+	runOneCycle(t, b)
+
+	if len(tracer.named(CycleSpan)) != 1 {
+		t.Errorf("the host's tracer saw %d cycles, want 1", len(tracer.named(CycleSpan)))
+	}
+	if rec, found := cap.message(CycleSpan); found {
+		t.Errorf("a cycle was also logged with a host tracer installed: %v", rec)
+	}
+}
+
+// TestDefaultSpanRecord pins the default tracer's record: the span's
+// attributes in the order first set (a repeated key replacing its value
+// in place), then the outcome and duration, and on a failure the error,
+// at the level the failure was given.
+func TestDefaultSpanRecord(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		err     error
+		level   slog.Level
+		status  string
+		want    slog.Level
+		message string
+	}{
+		{name: "ok", status: "ok", level: slog.LevelError, want: slog.LevelInfo},
+		{name: "expected failure", err: errors.New("the network"), level: slog.LevelWarn, status: "error", want: slog.LevelWarn, message: "the network"},
+		{name: "fault", err: errors.New("a bug"), level: slog.LevelError, status: "error", want: slog.LevelError, message: "a bug"},
+		{name: "cancelled", err: fmt.Errorf("stopping: %w", context.Canceled), level: slog.LevelError, status: "cancelled", want: slog.LevelInfo},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cap := &capture{}
+			_, span := logTracer{log: slog.New(cap)}.Start(t.Context(), "backupd.test")
+			span.Set("a", 1)
+			span.Set("b", "two")
+			span.Set("a", 3)
+			span.End(tc.level, tc.err)
+			span.End(slog.LevelError, errors.New("a second end"))
+
+			if len(cap.records) != 1 {
+				t.Fatalf("%d records, want 1", len(cap.records))
+			}
+			rec := cap.records[0]
+			if rec.Message != "backupd.test" || rec.Level != tc.want {
+				t.Errorf("record %q at %s, want backupd.test at %s", rec.Message, rec.Level, tc.want)
+			}
+			var keys []string
+			rec.Attrs(func(a slog.Attr) bool {
+				keys = append(keys, a.Key)
+				return true
+			})
+			want := []string{"a", "b", StatusKey, DurationKey}
+			if tc.message != "" {
+				want = append(want, "error.message")
+			}
+			if !slices.Equal(keys, want) {
+				t.Errorf("attributes %v, want %v", keys, want)
+			}
+			if got := attr(rec, "a").Int64(); got != 3 {
+				t.Errorf("a = %d, want the later value, 3", got)
+			}
+			if got := attr(rec, StatusKey).String(); got != tc.status {
+				t.Errorf("%s = %q, want %q", StatusKey, got, tc.status)
+			}
+			if got := attr(rec, "error.message").String(); tc.message != "" && got != tc.message {
+				t.Errorf("error.message = %q, want %q", got, tc.message)
+			}
+		})
+	}
+}
+
+// TestDefaultSpanRecordKeepsASetMessage: a span whose failure is
+// several Sets error.message to all of them and ends with the one that
+// decided its level; the record keeps the message the daemon Set.
+func TestDefaultSpanRecordKeepsASetMessage(t *testing.T) {
+	cap := &capture{}
+	_, span := logTracer{log: slog.New(cap)}.Start(t.Context(), CycleSpan)
+	span.Set("error.message", "a timeout\na fault")
+	span.End(slog.LevelError, errors.New("a fault"))
+
+	if len(cap.records) != 1 {
+		t.Fatalf("%d records, want 1", len(cap.records))
+	}
+	rec := cap.records[0]
+	if n := count(rec, "error.message"); n != 1 {
+		t.Errorf("the record carries error.message %d times, want once", n)
+	}
+	if got := attr(rec, "error.message").String(); got != "a timeout\na fault" {
+		t.Errorf("error.message = %q, want the one Set", got)
+	}
+}
+
+// stoppingEnv is the sim, with every plan step stopping the daemon: the
+// step stops it and fails as a killed transfer does, in the words of
+// whichever half of the pipe died first, which do not say cancelled.
+type stoppingEnv struct {
+	*sim.Sim
+	stop func()
+}
+
+func (e stoppingEnv) Apply(ctx context.Context, l *logger.Logger, op model.Operation) error {
+	e.stop()
+	<-ctx.Done()
+	return errors.New("process error: 'to' command error: signal: killed")
+}
+
 // cycle returns the cycle record, failing the test if there is none.
 func (c *capture) cycle(t *testing.T) slog.Record {
 	t.Helper()
-	rec, _, found := c.find(CycleOKKey)
+	return c.span(t, CycleSpan)
+}
+
+// span returns the first record of the named span, failing the test if
+// there is none.
+func (c *capture) span(t *testing.T, name string) slog.Record {
+	t.Helper()
+	rec, found := c.message(name)
 	if !found {
-		t.Fatalf("no record carried %s", CycleOKKey)
+		t.Fatalf("no %s record", name)
 	}
 	return rec
+}
+
+// message returns the first record with the given message.
+func (c *capture) message(msg string) (slog.Record, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, r := range c.records {
+		if r.Message == msg {
+			return r, true
+		}
+	}
+	return slog.Record{}, false
 }
 
 // attr returns a record's named attribute, or the zero Value.
@@ -219,8 +389,8 @@ func TestRemoteDownCycleIsAnExpectedFailure(t *testing.T) {
 	if rec.Level != slog.LevelWarn {
 		t.Errorf("remote-down cycle logged at %s, want WARN", rec.Level)
 	}
-	if ok := attr(rec, CycleOKKey); ok.Bool() != false {
-		t.Errorf("%s = true on a failed cycle", CycleOKKey)
+	if status := attr(rec, StatusKey).String(); status != "error" {
+		t.Errorf("%s = %q on a failed cycle, want error", StatusKey, status)
 	}
 	if msg := attr(rec, "error.message").String(); !strings.Contains(msg, "Connection refused") {
 		t.Errorf("error.message = %q, want ssh's refusal", msg)
@@ -282,7 +452,7 @@ func TestHostKeyChangedCycleIsAFault(t *testing.T) {
 }
 
 // TestRefreshHostKeyChangedIsAFault: the refresh is where a changed key
-// usually bites, through the same logCycle record as a dataset failure.
+// usually bites, through the same cycle record as a dataset failure.
 func TestRefreshHostKeyChangedIsAFault(t *testing.T) {
 	local, _ := steadyStateExecutors()
 	remote := &fakeExecutor{name: "remote", handlers: []fakeHandler{
@@ -320,7 +490,9 @@ func TestPersistentReceiveFailureIsAFault(t *testing.T) {
 
 // TestOneFaultAmongConnectionFailuresIsAFault: weather on one dataset
 // does not excuse a fault on another — the cycle is only expected when
-// every failure in it is.
+// every failure in it is. The record says every failure once, in the
+// error.message the daemon Set, not again from the fault the cycle
+// ended with.
 func TestOneFaultAmongConnectionFailuresIsAFault(t *testing.T) {
 	s := sim.New()
 	seedBehind(s, "/a", "/bad")
@@ -339,6 +511,21 @@ func TestOneFaultAmongConnectionFailuresIsAFault(t *testing.T) {
 	if msg := attr(rec, "error.message").String(); !strings.Contains(msg, "connect to host") || !strings.Contains(msg, "checksum mismatch") {
 		t.Errorf("error.message = %q, want both failures", msg)
 	}
+	if n := count(rec, "error.message"); n != 1 {
+		t.Errorf("the record carries error.message %d times, want once", n)
+	}
+}
+
+// count returns how many of a record's attributes have key.
+func count(r slog.Record, key string) int {
+	n := 0
+	r.Attrs(func(a slog.Attr) bool {
+		if a.Key == key {
+			n++
+		}
+		return true
+	})
+	return n
 }
 
 // TestJournalEntriesAreLoggedWithTheirDataset: the journal is the

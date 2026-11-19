@@ -220,11 +220,11 @@ func TestSyncNowGlobalWakesIdle(t *testing.T) {
 		local, remote := steadyStateExecutors()
 		b := newTestDaemon(testConf(), local, remote)
 
-		if !b.TriggerSync(true, "") {
+		if !b.TriggerSync(t.Context(), true, "") {
 			t.Fatal("TriggerSync returned false")
 		}
 		start := time.Now()
-		if err := b.idle(context.Background(), 10*time.Second, 0); err != nil {
+		if _, err := b.idle(context.Background(), 10*time.Second, 0); err != nil {
 			t.Fatalf("idle: %v", err)
 		}
 		// On the bubble's fake clock an immediate wake takes exactly zero time.
@@ -243,11 +243,11 @@ func TestSyncNowDatasetSyncsDuringIdle(t *testing.T) {
 		b.state.Swap(model.AddLocalDataset("/foo", []*model.Snapshot{snapA}, nil))
 		b.state.Swap(model.AddRemoteDataset("/foo", []*model.Snapshot{snapA}, nil))
 
-		if !b.TriggerSync(false, "/foo") {
+		if !b.TriggerSync(t.Context(), false, "/foo") {
 			t.Fatal("TriggerSync returned false")
 		}
 		start := time.Now()
-		if err := b.idle(context.Background(), 300*time.Millisecond, 0); err != nil {
+		if _, err := b.idle(context.Background(), 300*time.Millisecond, 0); err != nil {
 			t.Fatalf("idle: %v", err)
 		}
 		// The dataset sync consumes no fake time, so idle must wait out

@@ -134,29 +134,12 @@ func (dataset *Dataset) Eq(other *Dataset) bool {
 }
 
 func (dataset *Dataset) Clone() *Dataset {
-	// Copy plan (plan steps need to be cloned)
-	var plan *Plan
-	if dataset.Plan != nil {
-		steps := make([]*PlanStep, len(dataset.Plan.Steps))
-		for i, step := range dataset.Plan.Steps {
-			steps[i] = &PlanStep{
-				Operation: step.Operation,
-				Status:    step.Status,
-				StartedAt: step.StartedAt,
-				StoppedAt: step.StoppedAt,
-				Logs:      step.Logs, // ProcessLogs is a pointer, share the same logs
-			}
-		}
-		plan = &Plan{
-			Steps: steps,
-		}
-	}
 	return &Dataset{
 		Name:        dataset.Name,
 		Current:     dataset.Current.Clone(),
 		Target:      dataset.Target.Clone(),
 		Metrics:     dataset.Metrics, // Value type, no need to clone
-		Plan:        plan,
+		Plan:        dataset.Plan.Clone(),
 		Logs:        dataset.Logs,
 		LocalKnown:  dataset.LocalKnown,
 		RemoteKnown: dataset.RemoteKnown,
