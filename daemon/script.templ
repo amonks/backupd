@@ -55,9 +55,9 @@ templ script() {
 	// the title is composed here through the formatter localtime leaves
 	// on the window; without it the server's marked-UTC title stands.
 	function localizeTitles(root) {
-		if (!window.MonksLocalTime) return;
+		if (!window.localTime) return;
 		root.querySelectorAll('[data-at][data-outcome]').forEach(el => {
-			el.title = MonksLocalTime.format(el.dataset.at, 'second') + ' · ' + el.dataset.outcome;
+			el.title = window.localTime.format(el.dataset.at, 'second') + ' · ' + el.dataset.outcome;
 		});
 	}
 	localizeTitles(ROOT);
@@ -188,9 +188,9 @@ templ script() {
 	// dashboard until the next outside click. The wait is bounded —
 	// a stalled dashboard that looks live is worse than a closed menu.
 	function gridBusy() {
-		if (document.querySelector('monks-datagrid details[open]')) return true;
+		if (document.querySelector('data-grid details[open]')) return true;
 		const a = document.activeElement;
-		return !!(a && a.matches && a.matches('monks-datagrid input, monks-datagrid textarea'));
+		return !!(a && a.matches && a.matches('data-grid input, data-grid textarea'));
 	}
 
 	// The swap replaces the dashboard element, not the document body:

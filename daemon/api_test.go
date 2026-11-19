@@ -475,8 +475,8 @@ func TestPageShowsVerdictsAndActivity(t *testing.T) {
 		"chip-failing",        // fleet health chip
 		"Journal",             // the failure transition was journaled
 		"sync failing: remote out of space",
-		`<monks-datagrid id="fleet"`, // the tables are datagrids
-		`<monks-datagrid id="ops"`,
+		`<data-grid id="fleet"`, // the tables are datagrids
+		`<data-grid id="ops"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected global page to contain %q", want)

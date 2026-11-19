@@ -370,7 +370,7 @@ templ styles() {
 		   would otherwise overflow, and leaves intrinsic min-content
 		   widths alone, so a table's column algorithm sees what it saw
 		   before. */
-		.backupd code:not(monks-datagrid *) { font-size: 0.9em; overflow-wrap: break-word; }
+		.backupd code:not(data-grid *) { font-size: 0.9em; overflow-wrap: break-word; }
 		.backupd a { color: inherit; }
 
 		/* The standalone shell: the daemon owns the document, so the
@@ -542,17 +542,17 @@ templ styles() {
 		.backupd h2 { font-size: 1.05rem; margin: 1.5rem 0 0.5rem; }
 		/* Plain tables (facts, fulfillment, plan). The datagrid tables
 		   bring their own operational-table treatment, so the host rules
-		   stand aside for anything inside a monks-datagrid. */
-		.backupd table:not(monks-datagrid *) { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
-		.backupd th:not(monks-datagrid *), .backupd td:not(monks-datagrid *) { padding: 0.3em 0.9em 0.3em 0; text-align: left; border-bottom: 1px solid var(--border); vertical-align: baseline; }
-		.backupd th:not(monks-datagrid *) { font-weight: 600; font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+		   stand aside for anything inside a data-grid. */
+		.backupd table:not(data-grid *) { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
+		.backupd th:not(data-grid *), .backupd td:not(data-grid *) { padding: 0.3em 0.9em 0.3em 0; text-align: left; border-bottom: 1px solid var(--border); vertical-align: baseline; }
+		.backupd th:not(data-grid *) { font-weight: 600; font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
 		.backupd td.num, .backupd th.num { text-align: right; font-variant-numeric: tabular-nums; }
 		/* A column-shaped table — one whose cells mean nothing stacked —
 		   scrolls inside its own box rather than widening the page. The
 		   table keeps width:100% and no min-width, so it squeezes first
 		   and only scrolls once something in it genuinely cannot fit. */
 		.backupd .table-scroll { overflow-x: auto; margin-bottom: 1rem; }
-		.backupd .table-scroll table:not(monks-datagrid *) { margin-bottom: 0; }
+		.backupd .table-scroll table:not(data-grid *) { margin-bottom: 0; }
 		.backupd .muted { color: var(--muted); }
 		.backupd .error-text { color: var(--failing); }
 		.backupd .stale-text { color: var(--atrisk); font-weight: 500; }

@@ -241,7 +241,7 @@ var tableTagRE = regexp.MustCompile(`<table([^>]*)>`)
 // pans sideways again for the sake of one table.
 //
 // The datagrids are exempt: they bring their own scroller, and this
-// sheet stands aside for anything inside a monks-datagrid.
+// sheet stands aside for anything inside a data-grid.
 func TestEveryPlainTableStacksOrScrolls(t *testing.T) {
 	page := busyDatasetPage(t)
 

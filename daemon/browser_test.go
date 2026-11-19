@@ -119,7 +119,7 @@ const fitProbe = `(() => {
     .filter(el => past(el) > 1 && !clipped(el))
     .filter(el => !el.parentElement || past(el.parentElement) <= 1)
     .map(el => ({what: describe(el), past: Math.round(past(el))}));
-  const sanctioned = el => el.classList.contains("table-scroll") || !!el.closest("monks-datagrid");
+  const sanctioned = el => el.classList.contains("table-scroll") || !!el.closest("data-grid");
   const hiding = all
     .filter(el => el.scrollWidth - el.clientWidth > 1 && !sanctioned(el))
     .map(el => ({what: describe(el), past: Math.round(el.scrollWidth - el.clientWidth)}));

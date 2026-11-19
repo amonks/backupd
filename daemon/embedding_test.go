@@ -40,7 +40,7 @@ func ownStyles(t *testing.T, body string) []string {
 	t.Helper()
 	var out []string
 	for _, block := range styleBlockRE.FindAllStringSubmatch(body, -1) {
-		if strings.Contains(block[1], "monks-datagrid") {
+		if strings.Contains(block[1], "data-grid") {
 			continue
 		}
 		out = append(out, block[2])
@@ -486,7 +486,7 @@ func TestStampsReadInTheViewersZone(t *testing.T) {
 	global := renderPage(t, b, "/global", "")
 	busy := renderPage(t, b, busyDataset, "")
 
-	if !strings.Contains(global, `id="monks-localtime-script"`) {
+	if !strings.Contains(global, `id="local-time-script"`) {
 		t.Errorf("standalone document lacks the localtime script")
 	}
 	stamp := regexp.MustCompile(`<time datetime="\d{4}-\d\d-\d\dT[^"]*Z" data-localtime="(minute|second|day)">[^<]*</time>`)
@@ -543,7 +543,7 @@ func TestStampsReadInTheViewersZone(t *testing.T) {
 	e := embeddedDaemon(t, &page)
 	primeState(t, e)
 	renderPage(t, e, "/global", "")
-	if strings.Contains(string(page.Body), `id="monks-localtime-script"`) {
+	if strings.Contains(string(page.Body), `id="local-time-script"`) {
 		t.Errorf("the embedded body carries the script; that is the host's head to render")
 	}
 	if !titled.MatchString(string(page.Body)) {
