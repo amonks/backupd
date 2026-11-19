@@ -758,6 +758,42 @@ func TestTotalsNested(t *testing.T) {
 	}
 }
 
+// TestRemoteAvailable: the remote's room is the remote root's
+// available, known once the remote listing has named the root with a
+// size — not before, not from a read that carried no size, and not
+// from any dataset beneath the root, whose quota would bound only its
+// own subtree. A full remote is known, and zero.
+func TestRemoteAvailable(t *testing.T) {
+	conf := testConf()
+	a := snap("daily-a", now.Add(-2*time.Hour))
+	available := func(state *model.Model) (int64, bool) {
+		sys := Compute(testInput(state, conf))
+		return sys.RemoteAvailable, sys.RemoteAvailableKnown
+	}
+
+	if _, known := available(model.New()); known {
+		t.Error("nothing read: the remote's room is known")
+	}
+	state := model.AddLocalDataset("", []*model.Snapshot{a}, &model.DatasetSize{Used: 100, Available: 400})(model.New())
+	if _, known := available(state); known {
+		t.Error("the local side read: the remote's room is known, from the local pool")
+	}
+	if _, known := available(model.AddRemoteDataset("", []*model.Snapshot{a}, nil)(state)); known {
+		t.Error("the remote root read without a size: the remote's room is known")
+	}
+
+	state = model.AddRemoteDataset("", []*model.Snapshot{a}, &model.DatasetSize{Used: 50, UsedByChildren: 45, Available: 900})(state)
+	state = model.AddRemoteDataset("/tm", []*model.Snapshot{a}, &model.DatasetSize{Used: 45, Available: 5})(state)
+	if got, known := available(state); !known || got != 900 {
+		t.Errorf("the remote root listed: available = %d (known %v), want the root's 900", got, known)
+	}
+
+	full := model.AddRemoteDataset("", []*model.Snapshot{a}, &model.DatasetSize{Used: 50, Available: 0})(state)
+	if got, known := available(full); !known || got != 0 {
+		t.Errorf("a full remote: available = %d (known %v), want a known 0", got, known)
+	}
+}
+
 // The dashboard lists periodicities by period, shortest first, with any
 // it has no period for after them, alphabetically, and each once.
 func TestInPeriodOrder(t *testing.T) {

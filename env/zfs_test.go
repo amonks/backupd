@@ -12,12 +12,13 @@ import (
 
 // TestGetDatasetsReadsChildrenShare: the dataset listing asks zfs for
 // usedbychildren alongside used, so a caller can tell what a dataset
-// holds on its own from what its descendants hold beneath it.
+// holds on its own from what its descendants hold beneath it, and for
+// available, the room left beneath each.
 func TestGetDatasetsReadsChildrenShare(t *testing.T) {
 	r := &recorder{rows: []string{
-		"data/tank\t100\t10\t90",
-		"data/tank/tm\t90\t20\t60",
-		"data/tank/tm/brigid\t60\t60\t0",
+		"data/tank\t100\t10\t90\t900",
+		"data/tank/tm\t90\t20\t60\t900",
+		"data/tank/tm/brigid\t60\t60\t0\t900",
 	}}
 	zfs := NewZFS("data", r)
 	got, err := zfs.GetDatasets(logger.New("test"))
@@ -27,7 +28,7 @@ func TestGetDatasetsReadsChildrenShare(t *testing.T) {
 	if len(r.calls) != 1 {
 		t.Fatalf("expected one zfs call, got %v", r.calls)
 	}
-	want := []string{"zfs", "list", "-H", "-p", "-t", "filesystem", "-o", "name,used,logicalreferenced,usedbychildren", "-d", "1000", "data"}
+	want := []string{"zfs", "list", "-H", "-p", "-t", "filesystem", "-o", "name,used,logicalreferenced,usedbychildren,available", "-d", "1000", "data"}
 	if !slices.Equal(r.calls[0], want) {
 		t.Errorf("zfs call = %v, want %v", r.calls[0], want)
 	}
@@ -38,7 +39,7 @@ func TestGetDatasetsReadsChildrenShare(t *testing.T) {
 	if tm.Name != "/tank/tm" {
 		t.Errorf("name = %q", tm.Name)
 	}
-	if tm.Size.Used != 90 || tm.Size.LogicalReferenced != 20 || tm.Size.UsedByChildren != 60 {
+	if tm.Size.Used != 90 || tm.Size.LogicalReferenced != 20 || tm.Size.UsedByChildren != 60 || tm.Size.Available != 900 {
 		t.Errorf("size = %+v", *tm.Size)
 	}
 	if tm.Size.Own() != 30 {

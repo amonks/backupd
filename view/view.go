@@ -411,6 +411,17 @@ type System struct {
 	// own share, since zfs's used already carries the descendants.
 	LocalUsed  int64
 	RemoteUsed int64
+	// RemoteAvailable is zfs's available on the remote root (the
+	// tracked tree's root, <root>): the room left for backups, which
+	// once it runs out fails every receive. RemoteAvailableKnown says
+	// whether it has been read — the remote listed, the root among what
+	// it named, with a size. Without quotas every remote dataset
+	// reports this same number, the pool's room; the root's is the one
+	// that is the account's room, since a quota on the root bounds
+	// everything backupd writes there and one beneath it only a
+	// subtree. Unknown is not zero: zero is a full remote.
+	RemoteAvailable      int64
+	RemoteAvailableKnown bool
 
 	LastCycle *history.Cycle
 	// Runs is the cycle history collapsed into consecutive
@@ -557,6 +568,12 @@ func Compute(in Input) System {
 			issues = append(issues, datasetIssues(ds)...)
 			sys.LocalUsed += ds.LocalOwn
 			sys.RemoteUsed += ds.RemoteOwn
+		}
+		// The remote root is the model's dataset "": its path beneath
+		// the configured root is empty.
+		if root := in.State.GetDataset(""); root != nil && root.RemoteKnown && root.Metrics.HasRemote {
+			sys.RemoteAvailable = root.Metrics.RemoteSize.Available
+			sys.RemoteAvailableKnown = true
 		}
 	}
 	sys.DatasetCount = len(sys.Datasets)

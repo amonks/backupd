@@ -20,6 +20,12 @@ func fmtBytes(n int64) string {
 	return humanize.Bytes(uint64(n))
 }
 
+// fmtRoom renders space left ("10 TB"). Unlike fmtBytes it renders
+// zero as "0 B": no room left is news, not an absence.
+func fmtRoom(n int64) string {
+	return humanize.Bytes(uint64(max(n, 0)))
+}
+
 // fmtAgo renders a past time relative to now ("3 hours ago"), or "never"
 // for the zero time.
 func fmtAgo(t time.Time) string {

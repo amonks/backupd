@@ -587,9 +587,9 @@ func statusStrip(d pageData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var25 string
-			templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(usedFact("remote", d.Sys.RemoteUsed, d.Sys.RemoteUnknown))
+			templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(remoteFact(d.Sys))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 176, Col: 150}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 176, Col: 110}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
 			if templ_7745c5c3_Err != nil {
@@ -616,6 +616,17 @@ func usedFact(side string, used int64, unknown int) string {
 		return side + " not read"
 	}
 	return fmtBytes(used) + " " + side
+}
+
+// remoteFact is the remote's usedFact and, once the remote root has
+// been read, the room left there: when it runs out, every receive
+// fails. Until then it says nothing of free space.
+func remoteFact(sys view.System) string {
+	fact := usedFact("remote", sys.RemoteUsed, sys.RemoteUnknown)
+	if sys.RemoteAvailableKnown {
+		fact += ", " + fmtRoom(sys.RemoteAvailable) + " free"
+	}
+	return fact
 }
 
 // phaseClass maps an activity phase to a verdict-ish color class for
@@ -688,7 +699,7 @@ func sidebar(d pageData) templ.Component {
 				var templ_7745c5c3_Var28 templ.SafeURL
 				templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(Link(d.Base, link.Path)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 224, Col: 53}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 235, Col: 53}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
 				if templ_7745c5c3_Err != nil {
@@ -714,7 +725,7 @@ func sidebar(d pageData) templ.Component {
 				var templ_7745c5c3_Var30 string
 				templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinStringErrs(link.Label)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 224, Col: 128}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 235, Col: 128}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var30))
 				if templ_7745c5c3_Err != nil {
@@ -757,7 +768,7 @@ func sidebar(d pageData) templ.Component {
 			var templ_7745c5c3_Var31 string
 			templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.ResolveAttributeValue(periodicity)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 238, Col: 33}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 249, Col: 33}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var31)
 			if templ_7745c5c3_Err != nil {
@@ -770,7 +781,7 @@ func sidebar(d pageData) templ.Component {
 			var templ_7745c5c3_Var32 string
 			templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.JoinStringErrs(periodicity)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 238, Col: 49}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 249, Col: 49}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var32))
 			if templ_7745c5c3_Err != nil {
@@ -835,7 +846,7 @@ func sidebarLink(d pageData, dv view.Dataset) templ.Component {
 		var templ_7745c5c3_Var35 templ.SafeURL
 		templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(datasetHref(d.Base, dv.Name)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 257, Col: 54}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 268, Col: 54}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var35))
 		if templ_7745c5c3_Err != nil {
@@ -883,7 +894,7 @@ func sidebarLink(d pageData, dv view.Dataset) templ.Component {
 		var templ_7745c5c3_Var39 string
 		templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.ResolveAttributeValue(dv.Health.String() + reasonSuffix(dv.Reason))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 258, Col: 137}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 269, Col: 137}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var39)
 		if templ_7745c5c3_Err != nil {
@@ -896,7 +907,7 @@ func sidebarLink(d pageData, dv view.Dataset) templ.Component {
 		var templ_7745c5c3_Var40 string
 		templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.JoinStringErrs(dv.Name.String())
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 259, Col: 47}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 270, Col: 47}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var40))
 		if templ_7745c5c3_Err != nil {
@@ -949,7 +960,7 @@ func sidebarLink(d pageData, dv view.Dataset) templ.Component {
 				var templ_7745c5c3_Var44 string
 				templ_7745c5c3_Var44, templ_7745c5c3_Err = templ.JoinStringErrs(fmtCompactDuration(dv.BackedUp))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 265, Col: 38}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 276, Col: 38}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var44))
 				if templ_7745c5c3_Err != nil {
@@ -973,7 +984,7 @@ func sidebarLink(d pageData, dv view.Dataset) templ.Component {
 			var templ_7745c5c3_Var45 string
 			templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.ResolveAttributeValue(excludedTitle("remote"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 269, Col: 60}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 280, Col: 60}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var45)
 			if templ_7745c5c3_Err != nil {
@@ -1068,7 +1079,7 @@ func healthChip(dv view.Dataset) templ.Component {
 		var templ_7745c5c3_Var49 string
 		templ_7745c5c3_Var49, templ_7745c5c3_Err = templ.JoinStringErrs(dv.Health.String())
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 302, Col: 73}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 313, Col: 73}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var49))
 		if templ_7745c5c3_Err != nil {
@@ -1086,7 +1097,7 @@ func healthChip(dv view.Dataset) templ.Component {
 			var templ_7745c5c3_Var50 string
 			templ_7745c5c3_Var50, templ_7745c5c3_Err = templ.ResolveAttributeValue(syncingTitle(dv))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 304, Col: 48}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 315, Col: 48}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var50)
 			if templ_7745c5c3_Err != nil {
@@ -1105,7 +1116,7 @@ func healthChip(dv view.Dataset) templ.Component {
 			var templ_7745c5c3_Var51 string
 			templ_7745c5c3_Var51, templ_7745c5c3_Err = templ.ResolveAttributeValue(dv.Reason)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 307, Col: 45}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 318, Col: 45}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var51)
 			if templ_7745c5c3_Err != nil {
@@ -1118,7 +1129,7 @@ func healthChip(dv view.Dataset) templ.Component {
 			var templ_7745c5c3_Var52 string
 			templ_7745c5c3_Var52, templ_7745c5c3_Err = templ.JoinStringErrs(dv.Reason)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 307, Col: 59}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `daemon/layout.templ`, Line: 318, Col: 59}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var52))
 			if templ_7745c5c3_Err != nil {

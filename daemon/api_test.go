@@ -786,6 +786,55 @@ func TestAPIState(t *testing.T) {
 	}
 }
 
+// TestRemoteRoomLeft: once the remote root has been read, the status
+// strip says how much room the remote has left and /api/state carries
+// it as remoteAvailableBytes; before, neither says anything of free
+// space. A full remote is news in both: "0 B free", and a zero.
+func TestRemoteRoomLeft(t *testing.T) {
+	local, remote := steadyStateExecutors()
+	b, _ := newAPITestDaemon(t, local, remote)
+	h := b.Handler()
+	room := func() (page string, available *int64) {
+		t.Helper()
+		page = html.UnescapeString(do(t, h, "GET", "/global", "").Body.String())
+		var resp struct {
+			RemoteAvailableBytes *int64 `json:"remoteAvailableBytes"`
+		}
+		w := do(t, h, "GET", "/api/state", "")
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decoding response: %v\n%s", err, w.Body)
+		}
+		return page, resp.RemoteAvailableBytes
+	}
+
+	b.state.Reset(model.Listed(model.Local)(model.AddLocalDataset("", []*model.Snapshot{snapA}, &model.DatasetSize{Used: 2e12, Available: 1e12})(model.New())))
+	page, available := room()
+	if !strings.Contains(page, "2.0 TB local · remote not read<") || strings.Contains(page, "B free") {
+		t.Errorf("the remote unread: the strip should say the remote is not read and nothing of free space")
+	}
+	if available != nil {
+		t.Errorf("the remote unread: remoteAvailableBytes = %d, want absent", *available)
+	}
+
+	b.state.Swap(model.ReplaceRemote(model.AddRemoteDataset("", []*model.Snapshot{snapA}, &model.DatasetSize{Used: 36.8e12, Available: 10.3e12})(model.New())))
+	page, available = room()
+	if !strings.Contains(page, "2.0 TB local · 37 TB remote, 10 TB free<") {
+		t.Errorf("the remote read: the strip should say the room left on it")
+	}
+	if available == nil || *available != 10.3e12 {
+		t.Errorf("the remote read: remoteAvailableBytes = %v, want 10.3e12", available)
+	}
+
+	b.state.Swap(model.ReplaceRemote(model.AddRemoteDataset("", []*model.Snapshot{snapA}, &model.DatasetSize{Used: 36.8e12, Available: 0})(model.New())))
+	page, available = room()
+	if !strings.Contains(page, "37 TB remote, 0 B free<") {
+		t.Errorf("a full remote: the strip should say 0 B free")
+	}
+	if available == nil || *available != 0 {
+		t.Errorf("a full remote: remoteAvailableBytes = %v, want a present 0", available)
+	}
+}
+
 // TestAPIStateCyclesCarryEachFailure: a script reading /api/state's raw
 // cycles gets each failed dataset with its error, the wire shape the
 // spec documents, not only the names.

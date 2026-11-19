@@ -581,16 +581,20 @@ func (b *Daemon) handleState(w http.ResponseWriter, req *http.Request) {
 	}
 
 	resp := struct {
-		Verdict  string            `json:"verdict"`
-		Reason   string            `json:"reason,omitempty"`
-		Paused   bool              `json:"paused"`
-		Dryrun   bool              `json:"dryrun"`
-		Issues   []apiIssue        `json:"issues"`
-		Activity apiActivity       `json:"activity"`
-		Datasets []apiDatasetState `json:"datasets"`
-		Cycles   []history.Cycle   `json:"cycles"`
-		Runs     []apiCycleRun     `json:"cycleRuns"`
-		Events   []apiEvent        `json:"events"`
+		Verdict string `json:"verdict"`
+		Reason  string `json:"reason,omitempty"`
+		Paused  bool   `json:"paused"`
+		Dryrun  bool   `json:"dryrun"`
+		// RemoteAvailableBytes is the remote root's available, the room
+		// left for backups; absent until it has been read, since zero
+		// is a full remote.
+		RemoteAvailableBytes *int64            `json:"remoteAvailableBytes,omitzero"`
+		Issues               []apiIssue        `json:"issues"`
+		Activity             apiActivity       `json:"activity"`
+		Datasets             []apiDatasetState `json:"datasets"`
+		Cycles               []history.Cycle   `json:"cycles"`
+		Runs                 []apiCycleRun     `json:"cycleRuns"`
+		Events               []apiEvent        `json:"events"`
 	}{
 		Verdict:  sys.Verdict.String(),
 		Reason:   sys.Reason,
@@ -602,6 +606,10 @@ func (b *Daemon) handleState(w http.ResponseWriter, req *http.Request) {
 		Cycles:   cycles,
 		Runs:     runs,
 		Events:   events,
+	}
+	if sys.RemoteAvailableKnown {
+		available := sys.RemoteAvailable
+		resp.RemoteAvailableBytes = &available
 	}
 	if resp.Cycles == nil {
 		resp.Cycles = []history.Cycle{}

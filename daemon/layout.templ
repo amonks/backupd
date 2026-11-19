@@ -173,7 +173,7 @@ templ statusStrip(d pageData) {
 			}
 			if d.Sys.DatasetCount > 0 {
 				<span class="strip-fact">{ fmt.Sprint(d.Sys.DatasetCount) } datasets</span>
-				<span class="strip-fact">{ usedFact("local", d.Sys.LocalUsed, d.Sys.LocalUnknown) } · { usedFact("remote", d.Sys.RemoteUsed, d.Sys.RemoteUnknown) }</span>
+				<span class="strip-fact">{ usedFact("local", d.Sys.LocalUsed, d.Sys.LocalUnknown) } · { remoteFact(d.Sys) }</span>
 			}
 		</div>
 	</header>
@@ -187,6 +187,17 @@ func usedFact(side string, used int64, unknown int) string {
 		return side + " not read"
 	}
 	return fmtBytes(used) + " " + side
+}
+
+// remoteFact is the remote's usedFact and, once the remote root has
+// been read, the room left there: when it runs out, every receive
+// fails. Until then it says nothing of free space.
+func remoteFact(sys view.System) string {
+	fact := usedFact("remote", sys.RemoteUsed, sys.RemoteUnknown)
+	if sys.RemoteAvailableKnown {
+		fact += ", " + fmtRoom(sys.RemoteAvailable) + " free"
+	}
+	return fact
 }
 
 // phaseClass maps an activity phase to a verdict-ish color class for

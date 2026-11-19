@@ -46,6 +46,13 @@ type Sim struct {
 	// in-flight transfer, mirroring env.Env.OnProgress.
 	OnProgress func(sent, total int64)
 
+	// LocalCapacity and RemoteCapacity are each pool's size. A listing
+	// reports what is left of it as every dataset's available, the way
+	// zfs does for datasets without a quota; a full remote
+	// (SetRemoteFull) has nothing left.
+	LocalCapacity  int64
+	RemoteCapacity int64
+
 	// Fault injection.
 	remoteDown    bool
 	remoteFull    bool
@@ -74,6 +81,9 @@ func New() *Sim {
 		remote:       map[model.DatasetName]*dataset{},
 		failDatasets: map[model.DatasetName]string{},
 		Now:          time.Now,
+		// Room to spare on both sides, the remote the larger.
+		LocalCapacity:  4e12,
+		RemoteCapacity: 8e12,
 	}
 }
 
@@ -129,7 +139,8 @@ func (s *Sim) SetRemoteDown(down bool) {
 }
 
 // SetRemoteFull makes receives fail with an out-of-space error while
-// leaving deletions working, simulating a full backup pool.
+// leaving deletions working, simulating a full backup pool, and the
+// remote's listing report no room left.
 func (s *Sim) SetRemoteFull(full bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -193,7 +204,9 @@ func (s *Sim) Inventory(name model.DatasetName) *model.SnapshotInventory {
 	return inv
 }
 
-func (s *Sim) listDatasets(pool map[model.DatasetName]*dataset) []env.DatasetInfo {
+// listDatasets lists a pool of the given capacity; a full pool has no
+// room left, whatever its datasets hold.
+func (s *Sim) listDatasets(pool map[model.DatasetName]*dataset, capacity int64, full bool) []env.DatasetInfo {
 	names := make([]model.DatasetName, 0, len(pool))
 	for name := range pool {
 		names = append(names, name)
@@ -201,12 +214,19 @@ func (s *Sim) listDatasets(pool map[model.DatasetName]*dataset) []env.DatasetInf
 	slices.Sort(names)
 	// A dataset's own bytes are its snapshots' sizes; as on zfs, its
 	// used then carries every descendant's too, and usedbychildren
-	// says how much of it is theirs.
+	// says how much of it is theirs. Every dataset's available is the
+	// pool's room, as on zfs without quotas: the capacity less what
+	// every dataset holds.
 	own := make(map[model.DatasetName]int64, len(names))
+	available := capacity
 	for _, name := range names {
 		for snap := range pool[name].snaps.All() {
 			own[name] += snap.LogicalReferenced
 		}
+		available -= own[name]
+	}
+	if full || available < 0 {
+		available = 0
 	}
 	out := make([]env.DatasetInfo, len(names))
 	for i, name := range names {
@@ -222,7 +242,7 @@ func (s *Sim) listDatasets(pool map[model.DatasetName]*dataset) []env.DatasetInf
 		}
 		out[i] = env.DatasetInfo{
 			Name: name,
-			Size: &model.DatasetSize{Used: own[name] + children, LogicalReferenced: logical, UsedByChildren: children},
+			Size: &model.DatasetSize{Used: own[name] + children, LogicalReferenced: logical, UsedByChildren: children, Available: available},
 		}
 	}
 	return out
@@ -231,7 +251,7 @@ func (s *Sim) listDatasets(pool map[model.DatasetName]*dataset) []env.DatasetInf
 func (s *Sim) LocalDatasets(l *logger.Logger) ([]env.DatasetInfo, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.listDatasets(s.local), nil
+	return s.listDatasets(s.local, s.LocalCapacity, false), nil
 }
 
 func (s *Sim) RemoteDatasets(l *logger.Logger) ([]env.DatasetInfo, error) {
@@ -240,7 +260,7 @@ func (s *Sim) RemoteDatasets(l *logger.Logger) ([]env.DatasetInfo, error) {
 	if s.remoteDown {
 		return nil, errRemoteDown
 	}
-	return s.listDatasets(s.remote), nil
+	return s.listDatasets(s.remote, s.RemoteCapacity, s.remoteFull), nil
 }
 
 func (s *Sim) snapshots(pool map[model.DatasetName]*dataset, name model.DatasetName) ([]*model.Snapshot, error) {

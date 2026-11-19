@@ -82,3 +82,25 @@ func TestActivityLabel(t *testing.T) {
 		t.Errorf("unexpected backoff label %q", got)
 	}
 }
+
+// The strip's remote fact says the room left once the remote root has
+// been read, and nothing of it before; no room is "0 B", not fmtBytes's
+// "-", which would read as nothing known.
+func TestRemoteFact(t *testing.T) {
+	for _, c := range []struct {
+		sys  view.System
+		want string
+	}{
+		{view.System{RemoteUsed: 36.8e12}, "37 TB remote"},
+		{view.System{RemoteUsed: 36.8e12, RemoteAvailable: 10.3e12, RemoteAvailableKnown: true}, "37 TB remote, 10 TB free"},
+		{view.System{RemoteUsed: 36.8e12, RemoteAvailableKnown: true}, "37 TB remote, 0 B free"},
+		{view.System{RemoteUnknown: 1}, "remote not read"},
+		// A dataset new since the remote was last listed leaves the
+		// total short a term; the root's room, as last read, stands.
+		{view.System{RemoteUnknown: 1, RemoteAvailable: 10.3e12, RemoteAvailableKnown: true}, "remote not read, 10 TB free"},
+	} {
+		if got := remoteFact(c.sys); got != c.want {
+			t.Errorf("remoteFact(%+v) = %q, want %q", c.sys, got, c.want)
+		}
+	}
+}

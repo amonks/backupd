@@ -9,6 +9,10 @@ type DatasetSize struct {
 	Used              int64 // Total on-disk space with children, including all snapshots
 	LogicalReferenced int64 // Logical size of most recent snapshot (w/o children)
 	UsedByChildren    int64 // The share of Used held by descendant datasets
+	// Available is the room left to write beneath the dataset: the
+	// pool's free space, or less under a quota. Absent quotas every
+	// dataset in a pool reports the same number.
+	Available int64
 }
 
 // Own is what the dataset holds by itself, its snapshots included

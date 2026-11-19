@@ -105,9 +105,11 @@ type DatasetInfo struct {
 func (zfs *ZFS) GetDatasets(logger *logger.Logger) ([]DatasetInfo, error) {
 	// used is the total on-disk size with children including all
 	// snapshots, logicalreferenced the logical size of the most recent
-	// snapshot (w/o children), and usedbychildren the descendants' share
-	// of used — what separates a dataset's own size from its subtree's.
-	rows, err := zfs.x.Execf(logger, "zfs list -H -p -t filesystem -o name,used,logicalreferenced,usedbychildren -d 1000 %s", zfs.prefix)
+	// snapshot (w/o children), usedbychildren the descendants' share
+	// of used — what separates a dataset's own size from its subtree's —
+	// and available the room left beneath the dataset: on the remote,
+	// once it runs out, every receive fails.
+	rows, err := zfs.x.Execf(logger, "zfs list -H -p -t filesystem -o name,used,logicalreferenced,usedbychildren,available -d 1000 %s", zfs.prefix)
 	if err != nil {
 		return nil, fmt.Errorf("zfs list: %w", err)
 	}
@@ -115,8 +117,8 @@ func (zfs *ZFS) GetDatasets(logger *logger.Logger) ([]DatasetInfo, error) {
 	out := make([]DatasetInfo, len(rows))
 	for i, row := range rows {
 		cols := strings.Split(row, "\t")
-		if len(cols) != 4 {
-			return nil, fmt.Errorf("expected 4 columns, got %d in row: %s", len(cols), row)
+		if len(cols) != 5 {
+			return nil, fmt.Errorf("expected 5 columns, got %d in row: %s", len(cols), row)
 		}
 
 		used, err := strconv.ParseInt(cols[1], 10, 64)
@@ -134,12 +136,18 @@ func (zfs *ZFS) GetDatasets(logger *logger.Logger) ([]DatasetInfo, error) {
 			return nil, fmt.Errorf("parsing usedbychildren '%s': %w", cols[3], err)
 		}
 
+		available, err := strconv.ParseInt(cols[4], 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("parsing available '%s': %w", cols[4], err)
+		}
+
 		out[i] = DatasetInfo{
 			Name: zfs.WithoutPrefix(cols[0]),
 			Size: &model.DatasetSize{
 				Used:              used,
 				LogicalReferenced: logicalReferenced,
 				UsedByChildren:    usedByChildren,
+				Available:         available,
 			},
 		}
 	}
